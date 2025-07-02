@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Auto Subtitle Translator</title>
+    <style>
+        body {
+            width: 320px;
+            min-height: 400px;
+            margin: 0;
+            padding: 16px;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f8f9fa;
+        }
+        
+        .header {
+            text-align: center;
+            margin-bottom: 20px;
+        }
+        
+        .logo {
+            width: 48px;
+            height: 48px;
+            margin: 0 auto 8px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 20px;
+        }
+        
+        h1 {
+            margin: 0;
+            font-size: 18px;
+            color: #333;
+        }
+        
+        .toggle-section {
+            margin-bottom: 24px;
+            text-align: center;
+        }
+        
+        .toggle-button {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: all 0.2s;
+            min-width: 120px;
+        }
+        
+        .toggle-button:hover {
+            background: #5a67d8;
+            transform: translateY(-1px);
+        }
+        
+        .toggle-button.active {
+            background: #48bb78;
+        }
+        
+        .toggle-button.active:hover {
+            background: #38a169;
+        }
+        
+        .settings-section {
+            margin-bottom: 20px;
+        }
+        
+        .setting-group {
+            margin-bottom: 16px;
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 4px;
+            font-weight: 500;
+            color: #4a5568;
+            font-size: 14px;
+        }
+        
+        select, input {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid #e2e8f0;
+            border-radius: 6px;
+            font-size: 14px;
+            background: white;
+            box-sizing: border-box;
+        }
+        
+        select:focus, input:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+        
+        .status {
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            text-align: center;
+            margin-bottom: 16px;
+        }
+        
+        .status.success {
+            background: #f0fff4;
+            color: #38a169;
+            border: 1px solid #9ae6b4;
+        }
+        
+        .status.error {
+            background: #fed7d7;
+            color: #e53e3e;
+            border: 1px solid #feb2b2;
+        }
+        
+        .status.warning {
+            background: #fefcbf;
+            color: #d69e2e;
+            border: 1px solid #faf089;
+        }
+        
+        .footer {
+            text-align: center;
+            font-size: 12px;
+            color: #718096;
+            border-top: 1px solid #e2e8f0;
+            padding-top: 12px;
+            margin-top: 20px;
+        }
+        
+        .api-key-section {
+            background: #fff;
+            padding: 12px;
+            border-radius: 8px;
+            border: 1px solid #e2e8f0;
+            margin-bottom: 16px;
+        }
+        
+        .api-key-section h3 {
+            margin: 0 0 8px 0;
+            font-size: 14px;
+            color: #4a5568;
+        }
+        
+        .hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="logo">🎬</div>
+        <h1>Auto Subtitle Translator</h1>
+    </div>
+    
+    <div id="status" class="status hidden"></div>
+    
+    <div class="toggle-section">
+        <button id="toggleButton" class="toggle-button">Start Subtitles</button>
+    </div>
+    
+    <div class="settings-section">
+        <div class="api-key-section">
+            <h3>API Configuration</h3>
+            <div class="setting-group">
+                <label for="apiKey">API Key:</label>
+                <input type="password" id="apiKey" placeholder="Enter your API key">
+            </div>
+        </div>
+        
+        <div class="setting-group">
+            <label for="sourceLanguage">Source Language:</label>
+            <select id="sourceLanguage">
+                <option value="auto">Auto-detect</option>
+                <option value="en">English</option>
+                <option value="es">Spanish</option>
+                <option value="fr">French</option>
+                <option value="de">German</option>
+                <option value="it">Italian</option>
+                <option value="pt">Portuguese</option>
+                <option value="ja">Japanese</option>
+                <option value="ko">Korean</option>
+                <option value="zh">Chinese</option>
+                <option value="ar">Arabic</option>
+                <option value="hi">Hindi</option>
+                <option value="ru">Russian</option>
+            </select>
+        </div>
+        
+        <div class="setting-group">
+            <label for="targetLanguage">Target Language:</label>
+            <select id="targetLanguage">
+                <option value="en">English</option>
+                <option value="es">Spanish</option>
+                <option value="fr">French</option>
+                <option value="de">German</option>
+                <option value="it">Italian</option>
+                <option value="pt">Portuguese</option>
+                <option value="ja">Japanese</option>
+                <option value="ko">Korean</option>
+                <option value="zh">Chinese</option>
+                <option value="ar">Arabic</option>
+                <option value="hi">Hindi</option>
+                <option value="ru">Russian</option>
+            </select>
+        </div>
+        
+        <div class="setting-group">
+            <label for="subtitleStyle">Subtitle Position:</label>
+            <select id="subtitleStyle">
+                <option value="bottom">Bottom</option>
+                <option value="top">Top</option>
+                <option value="center">Center</option>
+            </select>
+        </div>
+        
+        <div class="setting-group">
+            <label for="fontSize">Font Size:</label>
+            <select id="fontSize">
+                <option value="small">Small</option>
+                <option value="medium">Medium</option>
+                <option value="large">Large</option>
+                <option value="x-large">Extra Large</option>
+            </select>
+        </div>
+    </div>
+    
+    <div class="footer">
+        Auto Subtitle Translator v1.0.0
+    </div>
+    
+    <script src="popup.js"></script>
+</body>
+</html>

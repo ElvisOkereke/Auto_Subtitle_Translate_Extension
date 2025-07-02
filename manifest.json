@@ -1,0 +1,51 @@
+{
+  "manifest_version": 3,
+  "name": "Auto Subtitle Translator",
+  "version": "1.0.0",
+  "description": "Auto-generate and translate subtitles for any audio content",
+  
+  "permissions": [
+    "activeTab",
+    "tabCapture",
+    "storage",
+    "scripting"
+  ],
+  
+  "host_permissions": [
+    "https://*/*",
+    "http://*/*"
+  ],
+
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "css": ["subtitle-overlay.css"],
+      "run_at": "document_end"
+    }
+  ],
+
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Auto Subtitle Translator"
+  },
+
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+
+  "web_accessible_resources": [
+    {
+      "resources": ["subtitle-overlay.css", "injected-script.js"],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}
