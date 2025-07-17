@@ -62,8 +62,9 @@ class SubtitleOverlay {
       mutations.forEach((mutation) => {
         mutation.addedNodes.forEach((node) => {
           if (node.nodeType === Node.ELEMENT_NODE) {
-            const videos = node.tagName === 'VIDEO' ? [node] : node.querySelectorAll('video');
-            videos.forEach(video => this.setupVideoListener(video));
+            const element = node as Element;
+            const videos = element.tagName === 'VIDEO' ? [element] : element.querySelectorAll('video');
+            videos.forEach(video => this.setupVideoListener(video as HTMLVideoElement));
           }
         });
       });
@@ -80,7 +81,7 @@ class SubtitleOverlay {
     });
   }
 
-  setupVideoListener(video) {
+  setupVideoListener(video: HTMLVideoElement) {
     // Add event listeners to detect when video starts playing
     video.addEventListener('play', () => {
       if (this.isActive) {
@@ -169,7 +170,7 @@ class SubtitleOverlay {
     // Implementation depends on specific requirements
   }
 
-  onCaptureStarted(streamId) {
+  onCaptureStarted(streamId: string) {
     console.log('Audio capture started with stream ID:', streamId);
     this.setupAudioProcessing();
     this.showStatus('Listening for audio...');
@@ -184,8 +185,12 @@ class SubtitleOverlay {
   setupAudioProcessing() {
     // This is a simplified version - in practice, you'd need to handle
     // the audio stream from the background script differently
+
+    // Add type declaration for webkitAudioContext if it exists
+    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+
     try {
-      this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      this.audioContext = new AudioCtx();
       
       // Note: In Manifest V3, direct access to the captured stream in content script
       // is limited. You'd typically process audio in the background script
@@ -203,7 +208,7 @@ class SubtitleOverlay {
     }
   }
 
-  displaySubtitle(text, language) {
+  displaySubtitle(text: string, language: string) {
     if (!this.overlay || !text) return;
 
     // Clear existing subtitle
@@ -218,7 +223,7 @@ class SubtitleOverlay {
     this.handleTranslation(subtitleElement, text, language);
   }
 
-  async handleTranslation(element, text, sourceLang) {
+  async handleTranslation(element: HTMLElement, text: string, sourceLang: string) {
     try {
       const settings = await chrome.runtime.sendMessage({
         type: 'GET_SETTINGS'
@@ -243,7 +248,9 @@ class SubtitleOverlay {
         }
       }
 
-      this.overlay.appendChild(element);
+      if (this.overlay) {
+        this.overlay.appendChild(element);
+      }
       
       // Auto-hide subtitle after delay
       setTimeout(() => {
@@ -255,18 +262,20 @@ class SubtitleOverlay {
     } catch (error) {
       console.error('Translation error:', error);
       element.textContent = text; // Fall back to original text
-      this.overlay.appendChild(element);
+      if (this.overlay) {
+        this.overlay.appendChild(element);
+      }
     }
   }
 
-  updateSubtitleStyle(style) {
+  updateSubtitleStyle(style: Partial<CSSStyleDeclaration>) {
     if (!this.overlay) return;
 
     // Apply style updates based on user preferences
     Object.assign(this.overlay.style, style);
   }
 
-  showError(message) {
+  showError(message: string) {
     if (!this.overlay) this.createOverlay();
     
     const errorElement = document.createElement('div');
@@ -274,7 +283,9 @@ class SubtitleOverlay {
     errorElement.textContent = `Error: ${message}`;
     errorElement.style.color = '#ff4444';
     
-    this.overlay.appendChild(errorElement);
+    if (this.overlay) {
+      this.overlay.appendChild(errorElement);
+    }
     
     setTimeout(() => {
       if (errorElement.parentNode) {
@@ -283,7 +294,7 @@ class SubtitleOverlay {
     }, 3000);
   }
 
-  showStatus(message) {
+  showStatus(message: string) {
     if (!this.overlay) this.createOverlay();
     
     const statusElement = document.createElement('div');
@@ -291,7 +302,9 @@ class SubtitleOverlay {
     statusElement.textContent = message;
     statusElement.style.opacity = '0.7';
     
-    this.overlay.appendChild(statusElement);
+    if (this.overlay) {
+      this.overlay.appendChild(statusElement);
+    }
     
     setTimeout(() => {
       if (statusElement.parentNode) {

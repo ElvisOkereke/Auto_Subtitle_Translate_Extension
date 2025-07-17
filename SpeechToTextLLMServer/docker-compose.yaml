@@ -1,0 +1,57 @@
+# docker-compose.yml
+version: '3.8'
+
+services:
+  # Whisper Service (handles both transcription and translation)
+  whisper-service:
+    build: ./whisper-service
+    ports:
+      - "8001:8000"
+    volumes:
+      - ./models:/root/.cache/whisper  # Whisper model cache
+      - ./audio-cache:/tmp/audio
+    environment:
+      - MODEL_SIZE=large-v3
+      - DEVICE=cuda
+      - WORKERS=4
+      - MAX_AUDIO_LENGTH=600
+      - COMPUTE_TYPE=float16  # Faster inference
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Redis for caching
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    command: redis-server --appendonly yes --maxmemory 1gb --maxmemory-policy allkeys-lru
+    restart: unless-stopped
+
+  # Load balancer for multiple Whisper instances
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf
+      - ./ssl:/etc/nginx/ssl
+    depends_on:
+      - whisper-service
+    restart: unless-stopped
+
+volumes:
+  redis-data:

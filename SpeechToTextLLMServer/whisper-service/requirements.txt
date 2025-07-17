@@ -1,0 +1,10 @@
+# whisper-service/requirements.txt
+fastapi==0.104.1
+uvicorn==0.24.0
+openai-whisper==20231117
+torch==2.1.0
+torchaudio==2.1.0
+redis==5.0.1
+python-multipart==0.0.6
+pydantic==2.5.0
+googletrans==4.0.0rc1

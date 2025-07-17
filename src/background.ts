@@ -130,7 +130,7 @@ class SubtitleService {
     }
   }
 
-  async stopAudioCapture(tabId) {
+  async stopAudioCapture(tabId: number) {
     const stream = this.activeStreams.get(tabId);
     if (stream) {
       stream.getTracks().forEach(track => track.stop());
@@ -144,7 +144,7 @@ class SubtitleService {
     return { success: true };
   }
 
-  async processAudioChunk(audioData, tabId) {
+  async processAudioChunk(audioData: any, tabId: number) {
     try {
       const settings = await chrome.storage.sync.get(['apiKey', 'sourceLanguage']);
       
@@ -169,11 +169,12 @@ class SubtitleService {
       return { success: true, transcript: null };
     } catch (error) {
       console.error('Error processing audio:', error);
-      return { success: false, error: error.message };
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      return { success: false, error: errorMessage };
     }
   }
 
-  async speechToText(audioData, settings) {
+  async speechToText(audioData: any, settings: any) {
     // Placeholder for speech recognition API call
     // In production, this would call Google Speech-to-Text or similar
     try {
@@ -197,7 +198,7 @@ class SubtitleService {
     }
   }
 
-  async translateText(text, targetLang) {
+  async translateText(text: string, targetLang: string) {
     try {
       const settings = await chrome.storage.sync.get(['apiKey']);
       
@@ -222,18 +223,19 @@ class SubtitleService {
       return { success: true, translatedText: result.translation };
     } catch (error) {
       console.error('Translation failed:', error);
-      return { success: false, error: error.message };
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      return { success: false, error: errorMessage };
     }
   }
 
-  handleTabUpdate(tabId, changeInfo, tab) {
+  handleTabUpdate(tabId: number, changeInfo: chrome.tabs.TabChangeInfo, tab: chrome.tabs.Tab) {
     // Clean up if tab is navigating away
     if (changeInfo.status === 'loading' && this.activeStreams.has(tabId)) {
       this.stopAudioCapture(tabId);
     }
   }
 
-  handleTabRemoved(tabId) {
+  handleTabRemoved(tabId: number) {
     // Clean up stream when tab is closed
     if (this.activeStreams.has(tabId)) {
       this.stopAudioCapture(tabId);

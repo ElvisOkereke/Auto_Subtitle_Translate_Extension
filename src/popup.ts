@@ -29,14 +29,34 @@ class PopupController {
   }
 
   initializeElements() {
+    const toggleButton = document.getElementById('toggleButton') as HTMLButtonElement | null;
+    const status = document.getElementById('status') as HTMLDivElement | null;
+    const apiKey = document.getElementById('apiKey') as HTMLInputElement | null;
+    const sourceLanguage = document.getElementById('sourceLanguage') as HTMLSelectElement | null;
+    const targetLanguage = document.getElementById('targetLanguage') as HTMLSelectElement | null;
+    const subtitleStyle = document.getElementById('subtitleStyle') as HTMLSelectElement | null;
+    const fontSize = document.getElementById('fontSize') as HTMLSelectElement | null;
+
+    if (
+      !toggleButton ||
+      !status ||
+      !apiKey ||
+      !sourceLanguage ||
+      !targetLanguage ||
+      !subtitleStyle ||
+      !fontSize
+    ) {
+      throw new Error('One or more popup elements not found in the DOM.');
+    }
+
     this.elements = {
-      toggleButton: document.getElementById('toggleButton'),
-      status: document.getElementById('status'),
-      apiKey: document.getElementById('apiKey'),
-      sourceLanguage: document.getElementById('sourceLanguage'),
-      targetLanguage: document.getElementById('targetLanguage'),
-      subtitleStyle: document.getElementById('subtitleStyle'),
-      fontSize: document.getElementById('fontSize')
+      toggleButton,
+      status,
+      apiKey,
+      sourceLanguage,
+      targetLanguage,
+      subtitleStyle,
+      fontSize
     };
   }
 
@@ -49,14 +69,14 @@ class PopupController {
     // Settings change handlers
     Object.keys(this.elements).forEach(key => {
       if (key !== 'toggleButton' && key !== 'status') {
-        this.elements[key].addEventListener('change', () => {
+        (this.elements[key as keyof PopupElements] as HTMLElement).addEventListener('change', () => {
           this.saveSettings();
         });
       }
     });
 
     // API key input handler with debounce
-    let apiKeyTimeout;
+    let apiKeyTimeout: ReturnType<typeof setTimeout>;
     this.elements.apiKey.addEventListener('input', () => {
       clearTimeout(apiKeyTimeout);
       apiKeyTimeout = setTimeout(() => {
@@ -154,9 +174,13 @@ class PopupController {
       }
 
       // Send message to content script
-      await chrome.tabs.sendMessage(tab.id, {
-        type: 'TOGGLE_SUBTITLES'
-      });
+      if (typeof tab.id === 'number') {
+        chrome.tabs.sendMessage(tab.id, {
+          type: 'TOGGLE_SUBTITLES'
+        });
+      } else {
+        throw new Error('Active tab does not have a valid id');
+      }
 
       // Save the new state
       await this.saveSettings();
@@ -168,7 +192,10 @@ class PopupController {
 
     } catch (error) {
       console.error('Failed to toggle subtitles:', error);
-      this.showStatus('Failed to toggle subtitles: ' + error.message, 'error');
+      const errorMsg = (error && typeof error === 'object' && 'message' in error)
+        ? (error as Error).message
+        : String(error);
+      this.showStatus('Failed to toggle subtitles: ' + errorMsg, 'error');
       // Revert state on error
       this.isActive = !this.isActive;
       this.updateToggleButton();
@@ -187,7 +214,7 @@ class PopupController {
     }
   }
 
-  showStatus(message, type = 'success') {
+  showStatus(message: string, type = 'success') {
     const statusElement = this.elements.status;
     
     statusElement.textContent = message;
