@@ -195,9 +195,9 @@ class SubtitleOverlay {
       // Note: In Manifest V3, direct access to the captured stream in content script
       // is limited. You'd typically process audio in the background script
       // and send processed chunks here for display.
-      
+      //here
     } catch (error) {
-      console.error('Failed to setup audio processing:', error);
+      console.error('Failed to setup audio processing:', error); 
     }
   }
 

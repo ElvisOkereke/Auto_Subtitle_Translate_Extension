@@ -9,11 +9,11 @@ import {
 interface PopupElements {
   toggleButton: HTMLButtonElement;
   status: HTMLDivElement;
-  apiKey: HTMLInputElement;
   sourceLanguage: HTMLSelectElement;
   targetLanguage: HTMLSelectElement;
   subtitleStyle: HTMLSelectElement;
   fontSize: HTMLSelectElement;
+  whisperServiceUrl: HTMLInputElement;
 }
 
 class PopupController {
@@ -31,20 +31,20 @@ class PopupController {
   initializeElements() {
     const toggleButton = document.getElementById('toggleButton') as HTMLButtonElement | null;
     const status = document.getElementById('status') as HTMLDivElement | null;
-    const apiKey = document.getElementById('apiKey') as HTMLInputElement | null;
     const sourceLanguage = document.getElementById('sourceLanguage') as HTMLSelectElement | null;
     const targetLanguage = document.getElementById('targetLanguage') as HTMLSelectElement | null;
     const subtitleStyle = document.getElementById('subtitleStyle') as HTMLSelectElement | null;
     const fontSize = document.getElementById('fontSize') as HTMLSelectElement | null;
+    const whisperServiceUrl = document.getElementById('whisperServiceUrl') as HTMLInputElement | null;
 
     if (
       !toggleButton ||
       !status ||
-      !apiKey ||
       !sourceLanguage ||
       !targetLanguage ||
       !subtitleStyle ||
-      !fontSize
+      !fontSize ||
+      !whisperServiceUrl
     ) {
       throw new Error('One or more popup elements not found in the DOM.');
     }
@@ -52,11 +52,11 @@ class PopupController {
     this.elements = {
       toggleButton,
       status,
-      apiKey,
       sourceLanguage,
       targetLanguage,
       subtitleStyle,
-      fontSize
+      fontSize,
+      whisperServiceUrl
     };
   }
 
@@ -74,54 +74,62 @@ class PopupController {
         });
       }
     });
-
-    // API key input handler with debounce
-    let apiKeyTimeout: ReturnType<typeof setTimeout>;
-    this.elements.apiKey.addEventListener('input', () => {
-      clearTimeout(apiKeyTimeout);
-      apiKeyTimeout = setTimeout(() => {
-        this.saveSettings();
-        this.validateApiKey();
-      }, 500);
-    });
   }
 
   async loadSettings() {
     try {
-      const settings = await chrome.runtime.sendMessage({
-        type: 'GET_SETTINGS'
-      });
+      // Get settings directly from storage with defaults
+      const defaultSettings = {
+        sourceLanguage: 'auto',
+        targetLanguage: 'en',
+        subtitleStyle: 'bottom',
+        fontSize: 'medium',
+        whisperServiceUrl: 'http://localhost:8001',
+        enabled: false
+      };
+      
+      const settings = await chrome.storage.sync.get(defaultSettings);
 
       // Populate form fields
-      this.elements.apiKey.value = settings.apiKey || '';
-      this.elements.sourceLanguage.value = settings.sourceLanguage || 'auto';
-      this.elements.targetLanguage.value = settings.targetLanguage || 'en';
-      this.elements.subtitleStyle.value = settings.subtitleStyle || 'bottom';
-      this.elements.fontSize.value = settings.fontSize || 'medium';
+      this.elements.sourceLanguage.value = settings.sourceLanguage;
+      this.elements.targetLanguage.value = settings.targetLanguage;
+      this.elements.subtitleStyle.value = settings.subtitleStyle;
+      this.elements.fontSize.value = settings.fontSize;
+      this.elements.whisperServiceUrl.value = settings.whisperServiceUrl;
       
-      this.isActive = settings.enabled || false;
+      this.isActive = settings.enabled;
       this.updateToggleButton();
       
-      // Validate API key if present
-      if (settings.apiKey) {
-        this.validateApiKey();
-      } else {
-        this.showStatus('Please configure your API key', 'warning');
-      }
+      // Validate connection on load
+      this.validateConnection();
+      
+      this.showStatus('Ready to start subtitles', 'success');
     } catch (error) {
       console.error('Failed to load settings:', error);
       this.showStatus('Failed to load settings', 'error');
+      // Set default values on error
+      this.setDefaultValues();
     }
+  }
+
+  private setDefaultValues() {
+    this.elements.sourceLanguage.value = 'auto';
+    this.elements.targetLanguage.value = 'en';
+    this.elements.subtitleStyle.value = 'bottom';
+    this.elements.fontSize.value = 'medium';
+    this.elements.whisperServiceUrl.value = 'http://localhost:8001';
+    this.isActive = false;
+    this.updateToggleButton();
   }
 
   async saveSettings() {
     try {
       const settings = {
-        apiKey: this.elements.apiKey.value.trim(),
         sourceLanguage: this.elements.sourceLanguage.value,
         targetLanguage: this.elements.targetLanguage.value,
         subtitleStyle: this.elements.subtitleStyle.value,
         fontSize: this.elements.fontSize.value,
+        whisperServiceUrl: this.elements.whisperServiceUrl.value,
         enabled: this.isActive
       };
 
@@ -137,29 +145,31 @@ class PopupController {
     }
   }
 
-  async validateApiKey() {
-    const apiKey = this.elements.apiKey.value.trim();
-    
-    if (!apiKey) {
-      this.showStatus('API key is required', 'warning');
+  async validateConnection() {
+    // Check if the whisper-service is running
+    try {
+      const settings = await chrome.storage.sync.get(['whisperServiceUrl']);
+      const serviceUrl = settings.whisperServiceUrl || 'http://localhost:8001';
+      
+      const response = await fetch(`${serviceUrl}/health`);
+      if (response.ok) {
+        const healthData = await response.json();
+        this.showStatus(`Whisper service connected (${healthData.model})`, 'success');
+        return true;
+      } else {
+        this.showStatus('Whisper service not responding', 'warning');
+        return false;
+      }
+    } catch (error) {
+      this.showStatus('Cannot connect to whisper service', 'warning');
       return false;
     }
-
-    if (apiKey.length < 10) {
-      this.showStatus('API key appears to be invalid', 'warning');
-      return false;
-    }
-
-    // In a real implementation, you might want to test the API key
-    // with a simple API call to validate it
-    this.showStatus('API key configured', 'success');
-    return true;
   }
 
   async toggleSubtitles() {
     try {
-      // Validate API key before starting
-      if (!this.isActive && !await this.validateApiKey()) {
+      // Validate connection before starting
+      if (!this.isActive && !await this.validateConnection()) {
         return;
       }
 

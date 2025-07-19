@@ -73,7 +73,6 @@ export interface UpdateStyleMessage extends ExtensionMessage {
 export interface ExtensionSettings {
   sourceLanguage: string;
   targetLanguage: string;
-  apiKey: string;
   subtitleStyle: SubtitlePosition;
   fontSize: FontSize;
   enabled: boolean;

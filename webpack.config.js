@@ -1,5 +1,7 @@
 const path = require('path');
 const CopyWebpackPlugin = require('copy-webpack-plugin');
+const webpack = require('webpack');
+require('dotenv').config({ path: '.env.development' });
 
 module.exports = (env, argv) => {
   const isProduction = argv.mode === 'production';
@@ -50,6 +52,9 @@ module.exports = (env, argv) => {
             noErrorOnMissing: true
           }
         ]
+      }),
+      new webpack.DefinePlugin({
+        'WHISPER_SERVICE_URL': JSON.stringify(process.env.WHISPER_SERVICE_URL)
       })
     ],
     
