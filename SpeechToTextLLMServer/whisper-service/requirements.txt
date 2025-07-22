@@ -1,4 +1,6 @@
 # whisper-service/requirements.txt
+# Pin NumPy to 1.x to avoid compatibility issues with compiled modules
+numpy>=1.21.0,<2.0.0
 fastapi==0.104.1
 uvicorn==0.24.0
 openai-whisper==20231117

@@ -1,0 +1,63 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: whisper-service
+  namespace: whisper-service
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: whisper-service
+  template:
+    metadata:
+      labels:
+        app: whisper-service
+    spec:
+      containers:
+      - name: whisper-service
+        image: gcr.io/clouddockercontainers/whisper-service:latest
+        ports:
+        - containerPort: 8000
+        env:
+        - name: MODEL_SIZE
+          value: "base"
+        - name: WORKERS
+          value: "4"
+        - name: COMPUTE_TYPE
+          value: "float16"
+        - name: DEVICE
+          value: "cpu"
+        - name: MAX_AUDIO_LENGTH
+          value: "600"
+        - name: PORT
+          value: "8000"
+        - name: REDIS_HOST
+          value: "redis"
+        - name: REDIS_PORT
+          value: "6379"
+        resources:
+          requests:
+            memory: "2Gi"
+            cpu: "1000m"
+          limits:
+            memory: "4Gi"
+            cpu: "2000m"
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 60
+          periodSeconds: 10
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 120
+          periodSeconds: 30
+        volumeMounts:
+        - name: whisper-cache
+          mountPath: /root/.cache/whisper
+      volumes:
+      - name: whisper-cache
+        emptyDir:
+          sizeLimit: 5Gi

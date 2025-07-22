@@ -27,7 +27,7 @@ app.add_middleware(
 )
 
 # Configuration
-MODEL_SIZE = os.getenv("MODEL_SIZE", "large-v3")
+MODEL_SIZE = os.getenv("MODEL_SIZE", "base")
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 COMPUTE_TYPE = os.getenv("COMPUTE_TYPE", "float16")
 MAX_WORKERS = int(os.getenv("WORKERS", "4"))
