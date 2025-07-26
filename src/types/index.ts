@@ -15,7 +15,12 @@ export type MessageType =
   | 'CAPTURE_STARTED'
   | 'CAPTURE_STOPPED'
   | 'DISPLAY_SUBTITLE'
-  | 'UPDATE_STYLE';
+  | 'UPDATE_STYLE'
+  | 'TOGGLE_SCREEN_TRANSLATION'
+  | 'START_ROI_SELECTION'
+  | 'END_ROI_SELECTION'
+  | 'TRANSLATE_SELECTED_TEXT'
+  | 'SHOW_TRANSLATION_OVERLAY';
 
 export interface StartCaptureMessage extends ExtensionMessage {
   type: 'START_CAPTURE';
@@ -67,6 +72,33 @@ export interface DisplaySubtitleMessage extends ExtensionMessage {
 export interface UpdateStyleMessage extends ExtensionMessage {
   type: 'UPDATE_STYLE';
   style: SubtitleStyle;
+}
+
+// Screen translation message types
+export interface ToggleScreenTranslationMessage extends ExtensionMessage {
+  type: 'TOGGLE_SCREEN_TRANSLATION';
+}
+
+export interface StartROISelectionMessage extends ExtensionMessage {
+  type: 'START_ROI_SELECTION';
+}
+
+export interface EndROISelectionMessage extends ExtensionMessage {
+  type: 'END_ROI_SELECTION';
+  roi: ROIData;
+}
+
+export interface TranslateSelectedTextMessage extends ExtensionMessage {
+  type: 'TRANSLATE_SELECTED_TEXT';
+  text: string;
+  rect: DOMRect;
+}
+
+export interface ShowTranslationOverlayMessage extends ExtensionMessage {
+  type: 'SHOW_TRANSLATION_OVERLAY';
+  originalText: string;
+  translatedText: string;
+  position: { x: number; y: number };
 }
 
 // Settings types
@@ -201,4 +233,20 @@ export interface LanguageOption {
   code: LanguageCode;
   name: string;
   nativeName?: string;
+}
+
+// Screen translation types
+export interface ROIData {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  element?: Element;
+}
+
+export interface ScreenTranslationSettings {
+  enabled: boolean;
+  autoDetect: boolean;
+  overlayStyle: 'tooltip' | 'inline' | 'sidebar';
+  triggerMethod: 'hover' | 'click' | 'selection';
 }

@@ -8,6 +8,7 @@ import {
 
 interface PopupElements {
   toggleButton: HTMLButtonElement;
+  screenTranslateButton: HTMLButtonElement;
   status: HTMLDivElement;
   sourceLanguage: HTMLSelectElement;
   targetLanguage: HTMLSelectElement;
@@ -18,10 +19,12 @@ interface PopupElements {
 
 class PopupController {
   private isActive: boolean;
+  private isScreenTranslating: boolean;
   private elements: PopupElements;
 
   constructor() {
     this.isActive = false;
+    this.isScreenTranslating = false;
     this.elements = {} as PopupElements;
     this.initializeElements();
     this.loadSettings();
@@ -30,6 +33,7 @@ class PopupController {
 
   initializeElements() {
     const toggleButton = document.getElementById('toggleButton') as HTMLButtonElement | null;
+    const screenTranslateButton = document.getElementById('screenTranslateButton') as HTMLButtonElement | null;
     const status = document.getElementById('status') as HTMLDivElement | null;
     const sourceLanguage = document.getElementById('sourceLanguage') as HTMLSelectElement | null;
     const targetLanguage = document.getElementById('targetLanguage') as HTMLSelectElement | null;
@@ -39,6 +43,7 @@ class PopupController {
 
     if (
       !toggleButton ||
+      !screenTranslateButton ||
       !status ||
       !sourceLanguage ||
       !targetLanguage ||
@@ -51,6 +56,7 @@ class PopupController {
 
     this.elements = {
       toggleButton,
+      screenTranslateButton,
       status,
       sourceLanguage,
       targetLanguage,
@@ -66,9 +72,14 @@ class PopupController {
       this.toggleSubtitles();
     });
 
+    // Screen translate button
+    this.elements.screenTranslateButton.addEventListener('click', () => {
+      this.toggleScreenTranslation();
+    });
+
     // Settings change handlers
     Object.keys(this.elements).forEach(key => {
-      if (key !== 'toggleButton' && key !== 'status') {
+      if (key !== 'toggleButton' && key !== 'screenTranslateButton' && key !== 'status') {
         (this.elements[key as keyof PopupElements] as HTMLElement).addEventListener('change', () => {
           this.saveSettings();
         });
@@ -212,6 +223,44 @@ class PopupController {
     }
   }
 
+  async toggleScreenTranslation() {
+    try {
+      this.isScreenTranslating = !this.isScreenTranslating;
+      this.updateScreenTranslateButton();
+      
+      // Get current active tab
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      
+      if (!tab) {
+        throw new Error('No active tab found');
+      }
+
+      // Send message to content script
+      if (typeof tab.id === 'number') {
+        chrome.tabs.sendMessage(tab.id, {
+          type: 'TOGGLE_SCREEN_TRANSLATION'
+        });
+      } else {
+        throw new Error('Active tab does not have a valid id');
+      }
+
+      this.showStatus(
+        this.isScreenTranslating ? 'Screen translation activated' : 'Screen translation deactivated',
+        'success'
+      );
+
+    } catch (error) {
+      console.error('Failed to toggle screen translation:', error);
+      const errorMsg = (error && typeof error === 'object' && 'message' in error)
+        ? (error as Error).message
+        : String(error);
+      this.showStatus('Failed to toggle screen translation: ' + errorMsg, 'error');
+      // Revert state on error
+      this.isScreenTranslating = !this.isScreenTranslating;
+      this.updateScreenTranslateButton();
+    }
+  }
+
   updateToggleButton() {
     const button = this.elements.toggleButton;
     
@@ -221,6 +270,20 @@ class PopupController {
     } else {
       button.textContent = 'Start Subtitles';
       button.classList.remove('active');
+    }
+  }
+
+  updateScreenTranslateButton() {
+    const button = this.elements.screenTranslateButton;
+    
+    if (this.isScreenTranslating) {
+      button.textContent = 'Stop Translation';
+      button.classList.add('active');
+      button.style.background = '#e53e3e';
+    } else {
+      button.textContent = 'Screen Translate';
+      button.classList.remove('active');
+      button.style.background = '#38a169';
     }
   }
 

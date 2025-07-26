@@ -35,6 +35,11 @@ class SubtitleOverlay {
             this.toggleSubtitles();
             break;
           
+          case 'TOGGLE_SCREEN_TRANSLATION':
+            // Forward the message to RealTimeTranslator if it exists
+            // This is handled by the realTimeTranslate.js script
+            break;
+          
           case 'CAPTURE_STARTED':
             this.onCaptureStarted((message as CaptureStartedMessage).streamId);
             break;

@@ -3,7 +3,7 @@ set -e
 
 PROJECT_ID="clouddockercontainers"  
 CLUSTER_NAME="whisper-cluster"
-REGION="us-central1"
+REGION="northamerica-northeast1"
 
 echo "Login......."
 gcloud auth login

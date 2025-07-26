@@ -1,5 +1,5 @@
 #!/bin/bash
-PROJECT_ID="your-gcp-project-id"
+PROJECT_ID="clouddockercontainers"
 TAG=${1:-"latest"}
 
 echo "🔄 Updating whisper-service with tag: $TAG"

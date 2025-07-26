@@ -4,7 +4,7 @@ Comprehensive test script for Whisper Service API
 Tests all endpoints with various scenarios
 """
 
-import requests
+
 import json
 import time
 import os
@@ -12,9 +12,11 @@ from typing import Optional
 import tempfile
 import wave
 import numpy as np
+import requests
+
 
 # Configuration
-BASE_URL = "http://34.130.207.198"  # Replace with your actual URL
+BASE_URL = "http://34.152.9.212"  # Replace with your actual URL
 TEST_AUDIO_FILE = "test_audio.wav"
 
 class Colors:
@@ -110,7 +112,7 @@ def test_transcribe_audio():
         with open(TEST_AUDIO_FILE, 'rb') as f:
             files = {'audio_file': ('test.wav', f, 'audio/wav')}
             data = {
-                'source_language': 'en',
+                'source_language': 'ko',
                 'return_segments': 'false',
                 'return_language': 'true'
             }
@@ -335,11 +337,6 @@ def main():
         print(f"\n{Colors.GREEN}🎉 All tests passed! Your API is working perfectly.{Colors.END}")
     else:
         print(f"\n{Colors.YELLOW}⚠️  Some tests failed. Check the details above.{Colors.END}")
-    
-    # Cleanup
-    if os.path.exists(TEST_AUDIO_FILE):
-        os.remove(TEST_AUDIO_FILE)
-        print(f"\n{Colors.BLUE}🧹 Cleaned up test files{Colors.END}")
 
 if __name__ == "__main__":
     main()

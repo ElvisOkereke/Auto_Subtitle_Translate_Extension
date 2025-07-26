@@ -10,7 +10,8 @@ module.exports = (env, argv) => {
     entry: {
       background: './src/background.ts',
       content: './src/content.ts',
-      popup: './src/popup.ts'
+      popup: './src/popup.ts',
+      realTimeTranslate: './src/realTimeTranslate.ts'
     },
     
     output: {

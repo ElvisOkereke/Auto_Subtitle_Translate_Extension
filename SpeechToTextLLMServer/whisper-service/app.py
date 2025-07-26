@@ -268,7 +268,7 @@ async def translate_text(request: TextTranslationRequest):
         
     except Exception as e:
         logging.error(f"Text translation error: {str(e)}")
-        raise HTTPException(status_code=500, detail="Text translation failed")
+        raise HTTPException(status_code=500, detail=f"Text translation failed: {str(e)}")
 
 @app.post("/detect_language")
 async def detect_language(audio_file: UploadFile):
@@ -293,8 +293,7 @@ async def detect_language(audio_file: UploadFile):
         
         return {
             "detected_language": result["language"],
-            "confidence": "high",  # Whisper doesn't provide confidence scores
-            "text_preview": result["text"][:100] + "..." if len(result["text"]) > 100 else result["text"]
+            "text_preview": result["text"][:150] + "..." if len(result["text"]) > 100 else result["text"]
         }
         
     finally:
@@ -386,7 +385,7 @@ async def translate_audio_to_any_language(
         
     except Exception as e:
         logging.error(f"Audio translation error: {str(e)}")
-        raise HTTPException(status_code=500, detail="Audio translation failed")
+        raise HTTPException(status_code=500, detail=f"Audio translation failed: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn

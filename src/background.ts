@@ -109,6 +109,10 @@ class SubtitleService {
         case 'TRANSLATE_TEXT':
           return await this.translateText(message.text, message.targetLang);
         
+        case 'TOGGLE_SCREEN_TRANSLATION':
+          // Screen translation is handled entirely in content script
+          return { success: true };
+        
         default:
           console.warn('Unknown message type:', message.type);
           return { success: false, error: 'Unknown message type' };
