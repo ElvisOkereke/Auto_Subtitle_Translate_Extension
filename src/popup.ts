@@ -1,10 +1,6 @@
 // popup.ts - Popup interface logic
 
-import {
-  ExtensionSettings,
-  SubtitlePosition,
-  FontSize
-} from './types';
+import { ExtensionSettings } from './types';
 
 interface PopupElements {
   toggleButton: HTMLButtonElement;
@@ -14,7 +10,7 @@ interface PopupElements {
   targetLanguage: HTMLSelectElement;
   subtitleStyle: HTMLSelectElement;
   fontSize: HTMLSelectElement;
-  whisperServiceUrl: HTMLInputElement;
+  googleTranslateApiKey: HTMLInputElement;
 }
 
 class PopupController {
@@ -39,7 +35,7 @@ class PopupController {
     const targetLanguage = document.getElementById('targetLanguage') as HTMLSelectElement | null;
     const subtitleStyle = document.getElementById('subtitleStyle') as HTMLSelectElement | null;
     const fontSize = document.getElementById('fontSize') as HTMLSelectElement | null;
-    const whisperServiceUrl = document.getElementById('whisperServiceUrl') as HTMLInputElement | null;
+    const googleTranslateApiKey = document.getElementById('googleTranslateApiKey') as HTMLInputElement | null;
 
     if (
       !toggleButton ||
@@ -49,7 +45,7 @@ class PopupController {
       !targetLanguage ||
       !subtitleStyle ||
       !fontSize ||
-      !whisperServiceUrl
+      !googleTranslateApiKey
     ) {
       throw new Error('One or more popup elements not found in the DOM.');
     }
@@ -62,22 +58,19 @@ class PopupController {
       targetLanguage,
       subtitleStyle,
       fontSize,
-      whisperServiceUrl
+      googleTranslateApiKey
     };
   }
 
   setupEventListeners() {
-    // Toggle button
     this.elements.toggleButton.addEventListener('click', () => {
       this.toggleSubtitles();
     });
 
-    // Screen translate button
     this.elements.screenTranslateButton.addEventListener('click', () => {
       this.toggleScreenTranslation();
     });
 
-    // Settings change handlers
     Object.keys(this.elements).forEach(key => {
       if (key !== 'toggleButton' && key !== 'screenTranslateButton' && key !== 'status') {
         (this.elements[key as keyof PopupElements] as HTMLElement).addEventListener('change', () => {
@@ -89,36 +82,30 @@ class PopupController {
 
   async loadSettings() {
     try {
-      // Get settings directly from storage with defaults
-      const defaultSettings = {
+      const defaultSettings: ExtensionSettings = {
         sourceLanguage: 'auto',
         targetLanguage: 'en',
         subtitleStyle: 'bottom',
         fontSize: 'medium',
-        whisperServiceUrl: 'http://localhost:8001',
+        googleTranslateApiKey: '',
         enabled: false
       };
-      
+
       const settings = await chrome.storage.sync.get(defaultSettings);
 
-      // Populate form fields
       this.elements.sourceLanguage.value = settings.sourceLanguage;
       this.elements.targetLanguage.value = settings.targetLanguage;
       this.elements.subtitleStyle.value = settings.subtitleStyle;
       this.elements.fontSize.value = settings.fontSize;
-      this.elements.whisperServiceUrl.value = settings.whisperServiceUrl;
-      
+      this.elements.googleTranslateApiKey.value = settings.googleTranslateApiKey;
+
       this.isActive = settings.enabled;
       this.updateToggleButton();
-      
-      // Validate connection on load
-      this.validateConnection();
-      
+
       this.showStatus('Ready to start subtitles', 'success');
     } catch (error) {
       console.error('Failed to load settings:', error);
       this.showStatus('Failed to load settings', 'error');
-      // Set default values on error
       this.setDefaultValues();
     }
   }
@@ -128,7 +115,7 @@ class PopupController {
     this.elements.targetLanguage.value = 'en';
     this.elements.subtitleStyle.value = 'bottom';
     this.elements.fontSize.value = 'medium';
-    this.elements.whisperServiceUrl.value = 'http://localhost:8001';
+    this.elements.googleTranslateApiKey.value = '';
     this.isActive = false;
     this.updateToggleButton();
   }
@@ -140,7 +127,7 @@ class PopupController {
         targetLanguage: this.elements.targetLanguage.value,
         subtitleStyle: this.elements.subtitleStyle.value,
         fontSize: this.elements.fontSize.value,
-        whisperServiceUrl: this.elements.whisperServiceUrl.value,
+        googleTranslateApiKey: this.elements.googleTranslateApiKey.value,
         enabled: this.isActive
       };
 
@@ -156,45 +143,17 @@ class PopupController {
     }
   }
 
-  async validateConnection() {
-    // Check if the whisper-service is running
-    try {
-      const settings = await chrome.storage.sync.get(['whisperServiceUrl']);
-      const serviceUrl = settings.whisperServiceUrl || 'http://localhost:8001';
-      
-      const response = await fetch(`${serviceUrl}/health`);
-      if (response.ok) {
-        const healthData = await response.json();
-        this.showStatus(`Whisper service connected (${healthData.model})`, 'success');
-        return true;
-      } else {
-        this.showStatus('Whisper service not responding', 'warning');
-        return false;
-      }
-    } catch (error) {
-      this.showStatus('Cannot connect to whisper service', 'warning');
-      return false;
-    }
-  }
-
   async toggleSubtitles() {
     try {
-      // Validate connection before starting
-      if (!this.isActive && !await this.validateConnection()) {
-        return;
-      }
-
       this.isActive = !this.isActive;
       this.updateToggleButton();
-      
-      // Get current active tab
+
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-      
+
       if (!tab) {
         throw new Error('No active tab found');
       }
 
-      // Send message to content script
       if (typeof tab.id === 'number') {
         chrome.tabs.sendMessage(tab.id, {
           type: 'TOGGLE_SUBTITLES'
@@ -203,7 +162,6 @@ class PopupController {
         throw new Error('Active tab does not have a valid id');
       }
 
-      // Save the new state
       await this.saveSettings();
 
       this.showStatus(
@@ -217,7 +175,6 @@ class PopupController {
         ? (error as Error).message
         : String(error);
       this.showStatus('Failed to toggle subtitles: ' + errorMsg, 'error');
-      // Revert state on error
       this.isActive = !this.isActive;
       this.updateToggleButton();
     }
@@ -227,15 +184,13 @@ class PopupController {
     try {
       this.isScreenTranslating = !this.isScreenTranslating;
       this.updateScreenTranslateButton();
-      
-      // Get current active tab
+
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-      
+
       if (!tab) {
         throw new Error('No active tab found');
       }
 
-      // Send message to content script
       if (typeof tab.id === 'number') {
         chrome.tabs.sendMessage(tab.id, {
           type: 'TOGGLE_SCREEN_TRANSLATION'
@@ -255,7 +210,6 @@ class PopupController {
         ? (error as Error).message
         : String(error);
       this.showStatus('Failed to toggle screen translation: ' + errorMsg, 'error');
-      // Revert state on error
       this.isScreenTranslating = !this.isScreenTranslating;
       this.updateScreenTranslateButton();
     }
@@ -263,7 +217,7 @@ class PopupController {
 
   updateToggleButton() {
     const button = this.elements.toggleButton;
-    
+
     if (this.isActive) {
       button.textContent = 'Stop Subtitles';
       button.classList.add('active');
@@ -275,7 +229,7 @@ class PopupController {
 
   updateScreenTranslateButton() {
     const button = this.elements.screenTranslateButton;
-    
+
     if (this.isScreenTranslating) {
       button.textContent = 'Stop Translation';
       button.classList.add('active');
@@ -289,12 +243,11 @@ class PopupController {
 
   showStatus(message: string, type = 'success') {
     const statusElement = this.elements.status;
-    
+
     statusElement.textContent = message;
     statusElement.className = `status ${type}`;
     statusElement.classList.remove('hidden');
-    
-    // Auto-hide status after 3 seconds
+
     setTimeout(() => {
       statusElement.classList.add('hidden');
     }, 3000);
@@ -306,12 +259,12 @@ class PopupController {
         permissions: ['tabCapture'],
         origins: ['<all_urls>']
       });
-      
+
       if (!hasPermissions) {
         this.showStatus('Missing required permissions', 'warning');
         return false;
       }
-      
+
       return true;
     } catch (error) {
       console.error('Permission check failed:', error);
@@ -320,7 +273,6 @@ class PopupController {
   }
 }
 
-// Initialize popup when DOM is loaded
 document.addEventListener('DOMContentLoaded', () => {
   new PopupController();
 });

@@ -108,6 +108,7 @@ export interface ExtensionSettings {
   subtitleStyle: SubtitlePosition;
   fontSize: FontSize;
   enabled: boolean;
+  googleTranslateApiKey: string;
 }
 
 export type SubtitlePosition = 'top' | 'center' | 'bottom';
