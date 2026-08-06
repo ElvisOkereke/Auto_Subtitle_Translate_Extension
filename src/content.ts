@@ -1,28 +1,22 @@
-// content.ts - Content script for subtitle overlay and audio processing
+// content.ts - Content script for subtitle overlay
 
 import {
   ExtensionMessage,
   CaptureStartedMessage,
   CaptureStoppedMessage,
   DisplaySubtitleMessage,
-  UpdateStyleMessage
+  UpdateStyleMessage,
+  CaptionErrorMessage,
+  CaptionStatusMessage
 } from './types';
 
 class SubtitleOverlay {
   private isActive: boolean;
   private overlay: HTMLDivElement | null;
-  private subtitleQueue: string[];
-  private currentSubtitle: string | null;
-  private audioContext: AudioContext | null;
-  private mediaRecorder: MediaRecorder | null;
 
   constructor() {
     this.isActive = false;
     this.overlay = null;
-    this.subtitleQueue = [];
-    this.currentSubtitle = null;
-    this.audioContext = null;
-    this.mediaRecorder = null;
     this.setupMessageListener();
     this.detectVideoElements();
   }
@@ -34,25 +28,33 @@ class SubtitleOverlay {
           case 'TOGGLE_SUBTITLES':
             this.toggleSubtitles();
             break;
-          
+
           case 'TOGGLE_SCREEN_TRANSLATION':
-            // Forward the message to RealTimeTranslator if it exists
-            // This is handled by the realTimeTranslate.js script
+            // Forwarded to RealTimeTranslator, handled by realTimeTranslate.js
             break;
-          
+
           case 'CAPTURE_STARTED':
             this.onCaptureStarted((message as CaptureStartedMessage).streamId);
             break;
-          
+
           case 'CAPTURE_STOPPED':
             this.onCaptureStopped();
             break;
-          
-          case 'DISPLAY_SUBTITLE':
+
+          case 'DISPLAY_SUBTITLE': {
             const displayMsg = message as DisplaySubtitleMessage;
             this.displaySubtitle(displayMsg.text, displayMsg.language);
             break;
-          
+          }
+
+          case 'CAPTION_ERROR':
+            this.showError((message as CaptionErrorMessage).message);
+            break;
+
+          case 'CAPTION_STATUS':
+            this.showStatus((message as CaptionStatusMessage).message);
+            break;
+
           case 'UPDATE_STYLE':
             this.updateSubtitleStyle((message as UpdateStyleMessage).style);
             break;
@@ -62,7 +64,6 @@ class SubtitleOverlay {
   }
 
   detectVideoElements() {
-    // Monitor for video elements being added to the page
     const observer = new MutationObserver((mutations) => {
       mutations.forEach((mutation) => {
         mutation.addedNodes.forEach((node) => {
@@ -80,22 +81,16 @@ class SubtitleOverlay {
       subtree: true
     });
 
-    // Handle existing videos
     document.querySelectorAll('video').forEach(video => {
       this.setupVideoListener(video);
     });
   }
 
   setupVideoListener(video: HTMLVideoElement) {
-    // Add event listeners to detect when video starts playing
     video.addEventListener('play', () => {
       if (this.isActive) {
         this.startAudioCapture();
       }
-    });
-
-    video.addEventListener('pause', () => {
-      this.pauseAudioCapture();
     });
 
     video.addEventListener('ended', () => {
@@ -105,7 +100,7 @@ class SubtitleOverlay {
 
   async toggleSubtitles() {
     this.isActive = !this.isActive;
-    
+
     if (this.isActive) {
       this.createOverlay();
       await this.startAudioCapture();
@@ -121,8 +116,7 @@ class SubtitleOverlay {
     this.overlay = document.createElement('div');
     this.overlay.id = 'subtitle-overlay-extension';
     this.overlay.className = 'subtitle-overlay';
-    
-    // Position overlay
+
     this.overlay.style.cssText = `
       position: fixed;
       bottom: 10%;
@@ -170,128 +164,48 @@ class SubtitleOverlay {
     }
   }
 
-  pauseAudioCapture() {
-    // Temporarily pause processing but keep stream active
-    // Implementation depends on specific requirements
-  }
-
-  onCaptureStarted(streamId: string) {
-    console.log('Audio capture started with stream ID:', streamId);
-    this.setupAudioProcessing();
+  onCaptureStarted(streamId: string): void {
     this.showStatus('Listening for audio...');
   }
 
-  onCaptureStopped() {
-    console.log('Audio capture stopped');
-    this.cleanupAudioProcessing();
+  onCaptureStopped(): void {
     this.showStatus('Audio capture stopped');
   }
 
-  setupAudioProcessing() {
-    // This is a simplified version - in practice, you'd need to handle
-    // the audio stream from the background script differently
-
-    // Add type declaration for webkitAudioContext if it exists
-    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-
-    try {
-      this.audioContext = new AudioCtx();
-      
-      // Note: In Manifest V3, direct access to the captured stream in content script
-      // is limited. You'd typically process audio in the background script
-      // and send processed chunks here for display.
-      //here
-    } catch (error) {
-      console.error('Failed to setup audio processing:', error); 
-    }
-  }
-
-  cleanupAudioProcessing() {
-    if (this.audioContext) {
-      this.audioContext.close();
-      this.audioContext = null;
-    }
-  }
-
-  displaySubtitle(text: string, language: string) {
+  displaySubtitle(text: string, language: string): void {
     if (!this.overlay || !text) return;
 
-    // Clear existing subtitle
     this.overlay.innerHTML = '';
 
-    // Create subtitle element
     const subtitleElement = document.createElement('div');
     subtitleElement.className = 'subtitle-text';
     subtitleElement.textContent = text;
+    this.overlay.appendChild(subtitleElement);
 
-    // Check if translation is needed
-    this.handleTranslation(subtitleElement, text, language);
-  }
-
-  async handleTranslation(element: HTMLElement, text: string, sourceLang: string) {
-    try {
-      const settings = await chrome.runtime.sendMessage({
-        type: 'GET_SETTINGS'
-      });
-
-      const targetLang = settings.targetLanguage || 'en';
-      
-      // Only translate if source and target languages are different
-      if (sourceLang !== targetLang && sourceLang !== 'auto') {
-        const translation = await chrome.runtime.sendMessage({
-          type: 'TRANSLATE_TEXT',
-          text: text,
-          targetLang: targetLang
-        });
-
-        if (translation.success) {
-          // Show both original and translated text
-          element.innerHTML = `
-            <div class="original-text">${text}</div>
-            <div class="translated-text">${translation.translatedText}</div>
-          `;
-        }
+    setTimeout(() => {
+      if (subtitleElement.parentNode) {
+        subtitleElement.remove();
       }
-
-      if (this.overlay) {
-        this.overlay.appendChild(element);
-      }
-      
-      // Auto-hide subtitle after delay
-      setTimeout(() => {
-        if (element.parentNode) {
-          element.remove();
-        }
-      }, 5000);
-
-    } catch (error) {
-      console.error('Translation error:', error);
-      element.textContent = text; // Fall back to original text
-      if (this.overlay) {
-        this.overlay.appendChild(element);
-      }
-    }
+    }, 5000);
   }
 
   updateSubtitleStyle(style: Partial<CSSStyleDeclaration>) {
     if (!this.overlay) return;
-
-    // Apply style updates based on user preferences
     Object.assign(this.overlay.style, style);
   }
 
   showError(message: string) {
     if (!this.overlay) this.createOverlay();
-    
+
     const errorElement = document.createElement('div');
     errorElement.className = 'subtitle-error';
     errorElement.textContent = `Error: ${message}`;
     errorElement.style.color = '#ff4444';
-    
+
     if (this.overlay) {
       this.overlay.appendChild(errorElement);
     }
-    
+
     setTimeout(() => {
       if (errorElement.parentNode) {
         errorElement.remove();
@@ -301,16 +215,16 @@ class SubtitleOverlay {
 
   showStatus(message: string) {
     if (!this.overlay) this.createOverlay();
-    
+
     const statusElement = document.createElement('div');
     statusElement.className = 'subtitle-status';
     statusElement.textContent = message;
     statusElement.style.opacity = '0.7';
-    
+
     if (this.overlay) {
       this.overlay.appendChild(statusElement);
     }
-    
+
     setTimeout(() => {
       if (statusElement.parentNode) {
         statusElement.remove();
