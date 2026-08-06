@@ -1,78 +1,50 @@
-// background.ts - Service Worker for managing extension lifecycle
+// background.ts - Service Worker: orchestrates the offscreen capture pipeline and translation
 
 import {
   ExtensionMessage,
   ExtensionSettings,
   CaptureResponse,
-  SpeechToTextResponse,
-  TranslationResponse,
   APIResponse,
-  AudioCaptureError,
   APIError
 } from './types';
-import { apiService, WhisperResponse } from './services/apiService';
-import { AudioProcessor, AudioChunkBuffer } from './utils/audioProcessor';
-import { AUDIO_CONFIG } from './config';
-
-interface ActiveSession {
-  stream: MediaStream;
-  audioProcessor: AudioProcessor;
-  audioBuffer: AudioChunkBuffer;
-  isProcessing: boolean;
-  lastProcessedTime: number;
-}
+import { apiService } from './services/apiService';
 
 class SubtitleService {
-  private activeSessions: Map<number, ActiveSession>;
-  private processingQueue: Map<number, Promise<void>>;
+  private activeTabId: number | null = null;
+  private warnedMissingKeyTabs: Set<number> = new Set();
 
   constructor() {
-    this.activeSessions = new Map();
-    this.processingQueue = new Map();
     this.setupEventListeners();
     this.initializeSettings();
   }
 
   private setupEventListeners(): void {
-    // Handle extension installation
     chrome.runtime.onInstalled.addListener(this.handleInstalled.bind(this));
-    
-    // Handle messages from content scripts and popup
     chrome.runtime.onMessage.addListener(this.handleMessage.bind(this));
-    
-    // Handle tab updates
     chrome.tabs.onUpdated.addListener(this.handleTabUpdate.bind(this));
-    
-    // Handle tab removal
     chrome.tabs.onRemoved.addListener(this.handleTabRemoved.bind(this));
   }
 
   private async initializeSettings(): Promise<void> {
-    const defaultSettings = {
+    const defaultSettings: ExtensionSettings = {
       sourceLanguage: 'auto',
       targetLanguage: 'en',
       subtitleStyle: 'bottom',
       fontSize: 'medium',
-      whisperServiceUrl: 'http://localhost:8001',
+      googleTranslateApiKey: '',
       enabled: false
     };
-    
-    // Check if settings exist, if not, set defaults
+
     const existingSettings = await chrome.storage.sync.get(Object.keys(defaultSettings));
-    const settingsToSet = { ...defaultSettings, ...existingSettings };
-    
-    // Only set if there are missing keys
     const missingKeys = Object.keys(defaultSettings).filter(key => !(key in existingSettings));
     if (missingKeys.length > 0) {
-      await chrome.storage.sync.set(settingsToSet);
+      await chrome.storage.sync.set({ ...defaultSettings, ...existingSettings });
     }
   }
 
   private handleInstalled(details: chrome.runtime.InstalledDetails): void {
     if (details.reason === 'install') {
-      chrome.tabs.create({
-        url: chrome.runtime.getURL('welcome.html')
-      });
+      chrome.tabs.create({ url: chrome.runtime.getURL('welcome.html') });
     }
   }
 
@@ -85,34 +57,48 @@ class SubtitleService {
       switch (message.type) {
         case 'START_CAPTURE':
           return await this.startAudioCapture(sender.tab?.id!);
-        
+
         case 'STOP_CAPTURE':
           return await this.stopAudioCapture(sender.tab?.id!);
-        
-        case 'PROCESS_AUDIO':
-          return await this.processAudioChunk(message.audioData, sender.tab?.id!);
-        
-        case 'GET_SETTINGS':
-          const defaultSettings = {
+
+        case 'GET_SETTINGS': {
+          const defaultSettings: ExtensionSettings = {
             sourceLanguage: 'auto',
             targetLanguage: 'en',
             subtitleStyle: 'bottom',
             fontSize: 'medium',
-            whisperServiceUrl: 'http://localhost:8001',
+            googleTranslateApiKey: '',
             enabled: false
           };
           return await chrome.storage.sync.get(defaultSettings);
-        
+        }
+
         case 'UPDATE_SETTINGS':
           return await chrome.storage.sync.set(message.settings);
-        
+
         case 'TRANSLATE_TEXT':
           return await this.translateText(message.text, message.targetLang);
-        
+
         case 'TOGGLE_SCREEN_TRANSLATION':
-          // Screen translation is handled entirely in content script
           return { success: true };
-        
+
+        case 'TRANSCRIPTION_RESULT':
+          await this.handleTranscriptionResult(message.text);
+          return { success: true };
+
+        case 'TRANSCRIPTION_ERROR':
+          if (this.activeTabId !== null) {
+            await this.safeSendMessage(this.activeTabId, {
+              type: 'CAPTION_ERROR',
+              message: `Transcription error: ${message.message}`
+            });
+          }
+          return { success: true };
+
+        case 'MODEL_LOADING_PROGRESS':
+          await this.handleModelLoadingProgress(message.status);
+          return { success: true };
+
         default:
           console.warn('Unknown message type:', message.type);
           return { success: false, error: 'Unknown message type' };
@@ -123,60 +109,54 @@ class SubtitleService {
     }
   }
 
+  private async ensureOffscreenDocument(): Promise<void> {
+    if (await chrome.offscreen.hasDocument()) {
+      return;
+    }
+    await chrome.offscreen.createDocument({
+      url: 'offscreen.html',
+      reasons: [chrome.offscreen.Reason.USER_MEDIA],
+      justification: 'Capture and transcribe tab audio to generate live captions'
+    });
+  }
+
+  private async closeOffscreenDocument(): Promise<void> {
+    if (await chrome.offscreen.hasDocument()) {
+      await chrome.offscreen.closeDocument();
+    }
+  }
+
   private async startAudioCapture(tabId: number): Promise<CaptureResponse> {
     try {
-      // Check if already capturing for this tab
-      if (this.activeSessions.has(tabId)) {
-        return { success: false, error: 'Already capturing audio for this tab' };
+      if (this.activeTabId !== null && this.activeTabId !== tabId) {
+        await this.stopAudioCapture(this.activeTabId);
       }
 
-      // Verify whisper-service is available
-      try {
-        await apiService.healthCheck();
-      } catch (error) {
-        return { success: false, error: 'Cannot connect to whisper-service. Please ensure it is running.' };
-      }
+      const settings = await chrome.storage.sync.get(['sourceLanguage']);
+      const sourceLanguage = settings.sourceLanguage || 'auto';
 
-      // Request tab capture
-      const stream = await new Promise<MediaStream>((resolve, reject) => {
-        chrome.tabCapture.capture({
-          audio: true,
-          video: false
-        }, (stream: MediaStream | null) => {
+      const streamId = await new Promise<string>((resolve, reject) => {
+        chrome.tabCapture.getMediaStreamId({ targetTabId: tabId }, (id) => {
           if (chrome.runtime.lastError) {
-            reject(new AudioCaptureError(chrome.runtime.lastError.message!));
-          } else if (stream) {
-            resolve(stream);
+            reject(new Error(chrome.runtime.lastError.message));
           } else {
-            reject(new AudioCaptureError('No stream received'));
+            resolve(id);
           }
         });
       });
 
-      // Create audio processing session
-      const audioProcessor = new AudioProcessor();
-      const audioBuffer = new AudioChunkBuffer(5); // Keep last 5 chunks
-      
-      const session: ActiveSession = {
-        stream,
-        audioProcessor,
-        audioBuffer,
-        isProcessing: false,
-        lastProcessedTime: Date.now()
-      };
-
-      this.activeSessions.set(tabId, session);
-      
-      // Start real-time audio processing
-      await this.startRealTimeProcessing(tabId, session);
-      
-      // Notify content script that capture started
-      await chrome.tabs.sendMessage(tabId, {
-        type: 'CAPTURE_STARTED',
-        streamId: stream.id
+      await this.ensureOffscreenDocument();
+      await chrome.runtime.sendMessage({
+        type: 'START_OFFSCREEN_CAPTURE',
+        streamId,
+        sourceLanguage
       });
 
-      return { success: true, streamId: stream.id };
+      this.activeTabId = tabId;
+
+      await chrome.tabs.sendMessage(tabId, { type: 'CAPTURE_STARTED', streamId });
+
+      return { success: true, streamId };
     } catch (error) {
       console.error('Failed to start audio capture:', error);
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -184,155 +164,72 @@ class SubtitleService {
     }
   }
 
-  private async startRealTimeProcessing(tabId: number, session: ActiveSession): Promise<void> {
-    try {
-      await session.audioProcessor.startProcessing(session.stream, async (audioChunk: Blob) => {
-        await this.handleAudioChunk(audioChunk, tabId, session);
-      });
-    } catch (error) {
-      console.error('Failed to start real-time processing:', error);
-      this.stopAudioCapture(tabId);
-    }
-  }
-
-  private async handleAudioChunk(audioChunk: Blob, tabId: number, session: ActiveSession): Promise<void> {
-    if (session.isProcessing) {
-      return; // Skip if already processing
-    }
-
-    const now = Date.now();
-    if (now - session.lastProcessedTime < AUDIO_CONFIG.PROCESSING_INTERVAL) {
-      return; // Too soon since last processing
-    }
-
-    session.isProcessing = true;
-    session.lastProcessedTime = now;
-
-    try {
-      // Add to buffer for potential future use
-      session.audioBuffer.addChunk(audioChunk);
-
-      // Check if audio contains speech
-      const hasSpeech = await session.audioProcessor.detectSpeech(audioChunk);
-      if (!hasSpeech) {
-        return;
-      }
-
-      // Process audio chunk
-      await this.processAudioChunkRealTime(audioChunk, tabId);
-    } catch (error) {
-      console.error('Error processing audio chunk:', error);
-    } finally {
-      session.isProcessing = false;
-    }
-  }
-
-  private async processAudioChunkRealTime(audioChunk: Blob, tabId: number): Promise<void> {
-    try {
-      const settings = await chrome.storage.sync.get(['sourceLanguage', 'targetLanguage']);
-      const sourceLanguage = settings.sourceLanguage || 'auto';
-      const targetLanguage = settings.targetLanguage || 'en';
-
-      let result: WhisperResponse;
-
-      // Use appropriate API based on language settings
-      if (sourceLanguage === targetLanguage || targetLanguage === 'auto') {
-        // Just transcribe
-        result = await apiService.transcribeAudio(audioChunk, sourceLanguage);
-      } else {
-        // Transcribe and translate
-        result = await apiService.translateAudioToLanguage(audioChunk, targetLanguage, sourceLanguage);
-      }
-
-      if (result.text && result.text.trim()) {
-        // Send to content script for display
-        await chrome.tabs.sendMessage(tabId, {
-          type: 'DISPLAY_SUBTITLE',
-          text: result.text,
-          language: result.detected_language || sourceLanguage
-        });
-      }
-    } catch (error) {
-      console.error('Real-time processing failed:', error);
-      // Don't display error to user for real-time processing failures
-    }
-  }
-
-  async stopAudioCapture(tabId: number) {
-    const session = this.activeSessions.get(tabId);
-    if (session) {
-      // Stop audio processing
-      session.audioProcessor.cleanup();
-      
-      // Stop media stream
-      session.stream.getTracks().forEach(track => track.stop());
-      
-      // Clean up
-      this.activeSessions.delete(tabId);
-      
-      // Cancel any ongoing processing
-      if (this.processingQueue.has(tabId)) {
-        this.processingQueue.delete(tabId);
-      }
-      
-      // Notify content script
+  private async stopAudioCapture(tabId: number): Promise<{ success: boolean }> {
+    if (this.activeTabId === tabId) {
       try {
-        await chrome.tabs.sendMessage(tabId, {
-          type: 'CAPTURE_STOPPED'
-        });
+        await chrome.runtime.sendMessage({ type: 'STOP_OFFSCREEN_CAPTURE' });
       } catch (error) {
-        // Tab might be closed, ignore error
+        // offscreen document may already be gone
       }
+      await this.closeOffscreenDocument();
+      this.activeTabId = null;
+      this.warnedMissingKeyTabs.delete(tabId);
+
+      await this.safeSendMessage(tabId, { type: 'CAPTURE_STOPPED' });
     }
     return { success: true };
   }
 
-  async processAudioChunk(audioData: any, tabId: number) {
-    try {
-      const settings = await chrome.storage.sync.get(['sourceLanguage']);
-      // Convert audio data to appropriate format for speech recognition
-      const transcript = await this.speechToText(audioData, settings);
-      
-      if (transcript && transcript.trim()) {
-        // Send transcript to content script for display
-        await chrome.tabs.sendMessage(tabId, {
-          type: 'DISPLAY_SUBTITLE',
-          text: transcript,
-          language: settings.sourceLanguage
-        });
+  private async handleTranscriptionResult(text: string): Promise<void> {
+    if (this.activeTabId === null || !text || !text.trim()) return;
+    const tabId = this.activeTabId;
+    const { text: finalText, language } = await this.maybeTranslate(text, tabId);
+    await this.safeSendMessage(tabId, { type: 'DISPLAY_SUBTITLE', text: finalText, language });
+  }
 
-        return { success: true, transcript };
-      }
-      
-      return { success: true, transcript: null };
+  private async handleModelLoadingProgress(status: string): Promise<void> {
+    if (this.activeTabId === null) return;
+    const statusMessages: Record<string, string> = {
+      downloading: 'Loading speech model... (first time only, may take a minute)',
+      ready: 'Speech model ready',
+      'cpu-fallback': 'WebGPU unavailable — running in CPU mode, captions may be slower'
+    };
+    await this.safeSendMessage(this.activeTabId, {
+      type: 'CAPTION_STATUS',
+      message: statusMessages[status] || status
+    });
+  }
+
+  private async maybeTranslate(text: string, tabId: number): Promise<{ text: string; language: string }> {
+    const settings = await chrome.storage.sync.get(['sourceLanguage', 'targetLanguage']);
+    const sourceLanguage = settings.sourceLanguage || 'auto';
+    const targetLanguage = settings.targetLanguage || 'en';
+
+    if (sourceLanguage === targetLanguage) {
+      return { text, language: sourceLanguage };
+    }
+
+    try {
+      const result = await apiService.translateText(text, sourceLanguage, targetLanguage);
+      return { text: result.translatedText, language: targetLanguage };
     } catch (error) {
-      console.error('Error processing audio:', error);
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      return { success: false, error: errorMessage };
+      if (error instanceof APIError && error.status === 401 && !this.warnedMissingKeyTabs.has(tabId)) {
+        this.warnedMissingKeyTabs.add(tabId);
+        await this.safeSendMessage(tabId, {
+          type: 'CAPTION_ERROR',
+          message: 'No Google Translate API key configured. Showing untranslated captions — add a key in the extension popup to enable translation.'
+        });
+      }
+      console.error('Translation failed, falling back to untranslated text:', error);
+      return { text, language: sourceLanguage };
     }
   }
 
-  async speechToText(audioData: any, settings: any) {
-    // Placeholder for speech recognition API call
-    // In production, this would call Google Speech-to-Text or similar
+  private async safeSendMessage(tabId: number, message: ExtensionMessage): Promise<void> {
     try {
-      const response = await fetch('https://your-backend-api.com/speech-to-text', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${settings.apiKey}`
-        },
-        body: JSON.stringify({
-          audio: audioData,
-          language: settings.sourceLanguage
-        })
-      });
-
-      const result = await response.json();
-      return result.transcript;
+      await chrome.tabs.sendMessage(tabId, message);
     } catch (error) {
-      console.error('Speech recognition failed:', error);
-      return null;
+      // tab might be closed or navigating away; ignore
     }
   }
 
@@ -340,9 +237,9 @@ class SubtitleService {
     try {
       const settings = await chrome.storage.sync.get(['sourceLanguage']);
       const sourceLanguage = settings.sourceLanguage || 'auto';
-      
+
       const result = await apiService.translateText(text, sourceLanguage, targetLang);
-      return { success: true, translatedText: result.translated_text };
+      return { success: true, translatedText: result.translatedText };
     } catch (error) {
       console.error('Translation failed:', error);
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -350,16 +247,14 @@ class SubtitleService {
     }
   }
 
-  handleTabUpdate(tabId: number, changeInfo: chrome.tabs.TabChangeInfo, tab: chrome.tabs.Tab) {
-    // Clean up if tab is navigating away
-    if (changeInfo.status === 'loading' && this.activeSessions.has(tabId)) {
+  handleTabUpdate(tabId: number, changeInfo: chrome.tabs.TabChangeInfo): void {
+    if (changeInfo.status === 'loading' && this.activeTabId === tabId) {
       this.stopAudioCapture(tabId);
     }
   }
 
-  handleTabRemoved(tabId: number) {
-    // Clean up stream when tab is closed
-    if (this.activeSessions.has(tabId)) {
+  handleTabRemoved(tabId: number): void {
+    if (this.activeTabId === tabId) {
       this.stopAudioCapture(tabId);
     }
   }
