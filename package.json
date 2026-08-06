@@ -2,6 +2,9 @@
   "name": "auto-subtitle-translator",
   "version": "1.0.0",
   "description": "Browser extension for auto-generating and translating subtitles",
+  "dependencies": {
+    "@huggingface/transformers": "^3.0.0"
+  },
   "scripts": {
     "build": "npm run build:dev",
     "build:dev": "webpack --mode development",
