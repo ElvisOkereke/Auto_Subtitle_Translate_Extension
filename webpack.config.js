@@ -1,25 +1,25 @@
 const path = require('path');
 const CopyWebpackPlugin = require('copy-webpack-plugin');
-const webpack = require('webpack');
-require('dotenv').config({ path: '.env.development' });
 
 module.exports = (env, argv) => {
   const isProduction = argv.mode === 'production';
-  
+
   return {
     entry: {
       background: './src/background.ts',
       content: './src/content.ts',
       popup: './src/popup.ts',
-      realTimeTranslate: './src/realTimeTranslate.ts'
+      realTimeTranslate: './src/realTimeTranslate.ts',
+      offscreen: './src/offscreen.ts',
+      'whisper.worker': './src/whisper.worker.ts'
     },
-    
+
     output: {
       path: path.resolve(__dirname, 'dist'),
       filename: '[name].js',
       clean: true
     },
-    
+
     module: {
       rules: [
         {
@@ -31,50 +31,30 @@ module.exports = (env, argv) => {
         }
       ]
     },
-    
+
     plugins: [
       new CopyWebpackPlugin({
         patterns: [
-          {
-            from: 'manifest.json',
-            to: 'manifest.json'
-          },
-          {
-            from: 'popup.html',
-            to: 'popup.html'
-          },
-          {
-            from: 'subtitle-overlay.css',
-            to: 'subtitle-overlay.css'
-          },
-          {
-            from: 'icons/',
-            to: 'icons/',
-            noErrorOnMissing: true
-          }
+          { from: 'manifest.json', to: 'manifest.json' },
+          { from: 'popup.html', to: 'popup.html' },
+          { from: 'offscreen.html', to: 'offscreen.html' },
+          { from: 'subtitle-overlay.css', to: 'subtitle-overlay.css' },
+          { from: 'icons/', to: 'icons/', noErrorOnMissing: true }
         ]
-      }),
-      new webpack.DefinePlugin({
-        'WHISPER_SERVICE_URL': JSON.stringify(process.env.WHISPER_SERVICE_URL)
       })
     ],
-    
+
     optimization: {
       minimize: isProduction,
-      splitChunks: {
-        chunks: 'all',
-        cacheGroups: {
-          vendor: {
-            test: /[\\/]node_modules[\\/]/,
-            name: 'vendors',
-            chunks: 'all'
-          }
-        }
-      }
+      // Every entry (including whisper.worker, loaded via `new Worker(url)`)
+      // must be a single self-contained file. Chunk-splitting would extract
+      // shared node_modules code into a vendors.js that nothing declares
+      // how to load.
+      splitChunks: false
     },
-    
+
     devtool: isProduction ? false : 'source-map',
-    
+
     resolve: {
       extensions: ['.ts', '.js', '.json']
     }
