@@ -29,6 +29,24 @@ needs a context that has one.
 - Fix the service-worker/`AudioContext` bug as part of this work, since the
   new architecture requires solving the same underlying problem anyway.
 
+## Existing feature carried forward unchanged: Screen Translate
+
+The extension has a second, separate translation feature independent of the
+audio-captioning pipeline: "Screen Translate" (`popup.ts` /
+`realTimeTranslate.ts`). The user toggles it, then either selects text or
+drags a box on the page; the extension reads the DOM text at that location
+(no OCR, no audio involved) and shows a translated overlay via
+`TRANSLATE_SELECTED_TEXT` → `background.translateText()` →
+`apiService.translateText()`.
+
+This feature is **out of scope for changes** but must keep working: it
+already calls the same `apiService.translateText()` method this redesign
+repoints at the Google Cloud Translation API, so it is carried forward
+automatically as part of the `apiService.ts` rework and requires no
+dedicated implementation work of its own. It should be included in manual
+verification (see Testing Approach) to confirm it still works once
+`apiService.ts` no longer talks to the self-hosted backend.
+
 ## Non-goals (v1)
 
 - Supporting more than one actively-captioning tab at a time.
@@ -195,3 +213,7 @@ lifecycle. These are manual-verification territory.
 - No WebGPU (disable via `chrome://flags` or test on older hardware) —
   confirm WASM fallback still produces captions, slower, with the CPU-mode
   note visible.
+- Screen Translate (existing, unrelated feature): toggle it, select text or
+  drag a box on a page, confirm the translated overlay still appears now
+  that `apiService.ts` talks to Google Translate instead of the old
+  self-hosted backend.
