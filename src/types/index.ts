@@ -7,7 +7,6 @@ export interface ExtensionMessage {
 export type MessageType = 
   | 'START_CAPTURE'
   | 'STOP_CAPTURE'
-  | 'PROCESS_AUDIO'
   | 'GET_SETTINGS'
   | 'UPDATE_SETTINGS'
   | 'TRANSLATE_TEXT'
@@ -20,7 +19,14 @@ export type MessageType =
   | 'START_ROI_SELECTION'
   | 'END_ROI_SELECTION'
   | 'TRANSLATE_SELECTED_TEXT'
-  | 'SHOW_TRANSLATION_OVERLAY';
+  | 'SHOW_TRANSLATION_OVERLAY'
+  | 'START_OFFSCREEN_CAPTURE'
+  | 'STOP_OFFSCREEN_CAPTURE'
+  | 'TRANSCRIPTION_RESULT'
+  | 'TRANSCRIPTION_ERROR'
+  | 'MODEL_LOADING_PROGRESS'
+  | 'CAPTION_ERROR'
+  | 'CAPTION_STATUS';
 
 export interface StartCaptureMessage extends ExtensionMessage {
   type: 'START_CAPTURE';
@@ -28,11 +34,6 @@ export interface StartCaptureMessage extends ExtensionMessage {
 
 export interface StopCaptureMessage extends ExtensionMessage {
   type: 'STOP_CAPTURE';
-}
-
-export interface ProcessAudioMessage extends ExtensionMessage {
-  type: 'PROCESS_AUDIO';
-  audioData: ArrayBuffer | string;
 }
 
 export interface GetSettingsMessage extends ExtensionMessage {
@@ -69,6 +70,16 @@ export interface DisplaySubtitleMessage extends ExtensionMessage {
   language: string;
 }
 
+export interface CaptionErrorMessage extends ExtensionMessage {
+  type: 'CAPTION_ERROR';
+  message: string;
+}
+
+export interface CaptionStatusMessage extends ExtensionMessage {
+  type: 'CAPTION_STATUS';
+  message: string;
+}
+
 export interface UpdateStyleMessage extends ExtensionMessage {
   type: 'UPDATE_STYLE';
   style: SubtitleStyle;
@@ -101,6 +112,31 @@ export interface ShowTranslationOverlayMessage extends ExtensionMessage {
   position: { x: number; y: number };
 }
 
+export interface StartOffscreenCaptureMessage extends ExtensionMessage {
+  type: 'START_OFFSCREEN_CAPTURE';
+  streamId: string;
+  sourceLanguage: string;
+}
+
+export interface StopOffscreenCaptureMessage extends ExtensionMessage {
+  type: 'STOP_OFFSCREEN_CAPTURE';
+}
+
+export interface TranscriptionResultMessage extends ExtensionMessage {
+  type: 'TRANSCRIPTION_RESULT';
+  text: string;
+}
+
+export interface TranscriptionErrorMessage extends ExtensionMessage {
+  type: 'TRANSCRIPTION_ERROR';
+  message: string;
+}
+
+export interface ModelLoadingProgressMessage extends ExtensionMessage {
+  type: 'MODEL_LOADING_PROGRESS';
+  status: 'downloading' | 'cpu-fallback' | 'ready';
+}
+
 // Settings types
 export interface ExtensionSettings {
   sourceLanguage: string;
@@ -108,6 +144,7 @@ export interface ExtensionSettings {
   subtitleStyle: SubtitlePosition;
   fontSize: FontSize;
   enabled: boolean;
+  googleTranslateApiKey: string;
 }
 
 export type SubtitlePosition = 'top' | 'center' | 'bottom';
