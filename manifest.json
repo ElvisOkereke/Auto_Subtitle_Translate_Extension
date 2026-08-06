@@ -8,7 +8,8 @@
     "activeTab",
     "tabCapture",
     "storage",
-    "scripting"
+    "scripting",
+    "offscreen"
   ],
   
   "host_permissions": [

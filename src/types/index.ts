@@ -20,7 +20,12 @@ export type MessageType =
   | 'START_ROI_SELECTION'
   | 'END_ROI_SELECTION'
   | 'TRANSLATE_SELECTED_TEXT'
-  | 'SHOW_TRANSLATION_OVERLAY';
+  | 'SHOW_TRANSLATION_OVERLAY'
+  | 'START_OFFSCREEN_CAPTURE'
+  | 'STOP_OFFSCREEN_CAPTURE'
+  | 'TRANSCRIPTION_RESULT'
+  | 'TRANSCRIPTION_ERROR'
+  | 'MODEL_LOADING_PROGRESS';
 
 export interface StartCaptureMessage extends ExtensionMessage {
   type: 'START_CAPTURE';
@@ -99,6 +104,31 @@ export interface ShowTranslationOverlayMessage extends ExtensionMessage {
   originalText: string;
   translatedText: string;
   position: { x: number; y: number };
+}
+
+export interface StartOffscreenCaptureMessage extends ExtensionMessage {
+  type: 'START_OFFSCREEN_CAPTURE';
+  streamId: string;
+  sourceLanguage: string;
+}
+
+export interface StopOffscreenCaptureMessage extends ExtensionMessage {
+  type: 'STOP_OFFSCREEN_CAPTURE';
+}
+
+export interface TranscriptionResultMessage extends ExtensionMessage {
+  type: 'TRANSCRIPTION_RESULT';
+  text: string;
+}
+
+export interface TranscriptionErrorMessage extends ExtensionMessage {
+  type: 'TRANSCRIPTION_ERROR';
+  message: string;
+}
+
+export interface ModelLoadingProgressMessage extends ExtensionMessage {
+  type: 'MODEL_LOADING_PROGRESS';
+  status: 'downloading' | 'cpu-fallback' | 'ready';
 }
 
 // Settings types
