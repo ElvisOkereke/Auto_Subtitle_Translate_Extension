@@ -1,277 +1,95 @@
-// apiService.ts - API service for communicating with whisper-service
-import { getApiConfig, API_ENDPOINTS, ApiConfig } from '../config';
+// apiService.ts - Client for the Google Cloud Translation API
 import { APIError } from '../types';
 
-export interface WhisperResponse {
-  text: string;
-  detected_language?: string;
-  segments?: any[];
-  processing_time: number;
-  task: string;
-}
+const TRANSLATE_ENDPOINT = 'https://translation.googleapis.com/language/translate/v2';
+const REQUEST_TIMEOUT_MS = 15000;
+const MAX_RETRIES = 3;
 
-export interface TranslationResponse {
-  translated_text: string;
-  source_language: string;
-  target_language: string;
-  detected_language: string;
-  processing_time: number;
-}
-
-export interface HealthResponse {
-  status: string;
-  model: string;
-  device: string;
-  gpu_available: boolean;
-  supported_tasks: string[];
+export interface TranslationResult {
+  translatedText: string;
+  detectedSourceLanguage?: string;
 }
 
 export class ApiService {
-  private config: ApiConfig | null = null;
-  private requestQueue: Map<string, Promise<any>> = new Map();
-  
-  private async getConfig(): Promise<ApiConfig> {
-    if (!this.config) {
-      this.config = await getApiConfig();
+  private async getApiKey(): Promise<string> {
+    const { googleTranslateApiKey } = await chrome.storage.sync.get(['googleTranslateApiKey']);
+    if (!googleTranslateApiKey) {
+      throw new APIError('No Google Translate API key configured', 401);
     }
-    return this.config;
-  }
-
-  async healthCheck(): Promise<HealthResponse> {
-    try {
-      const config = await this.getConfig();
-      const response = await this.makeRequest('GET', config.healthCheckUrl);
-      return response as HealthResponse;
-    } catch (error) {
-      throw new APIError('Health check failed', 0, error);
-    }
-  }
-
-  async transcribeAudio(
-    audioBlob: Blob,
-    sourceLanguage: string = 'auto',
-    returnSegments: boolean = false
-  ): Promise<WhisperResponse> {
-    const formData = new FormData();
-    formData.append('audio_file', audioBlob, 'audio.webm');
-    formData.append('source_language', sourceLanguage === 'auto' ? '' : sourceLanguage);
-    formData.append('return_segments', returnSegments.toString());
-    formData.append('return_language', 'true');
-
-    try {
-      const config = await this.getConfig();
-      const response = await this.makeRequest(
-        'POST',
-        `${config.whisperServiceUrl}${API_ENDPOINTS.TRANSCRIBE}`,
-        formData
-      );
-      return response as WhisperResponse;
-    } catch (error) {
-      throw new APIError('Transcription failed', 0, error);
-    }
-  }
-
-  async translateAudioToLanguage(
-    audioBlob: Blob,
-    targetLanguage: string,
-    sourceLanguage: string = 'auto',
-    returnSegments: boolean = false
-  ): Promise<WhisperResponse> {
-    const formData = new FormData();
-    formData.append('audio_file', audioBlob, 'audio.webm');
-    formData.append('source_language', sourceLanguage === 'auto' ? '' : sourceLanguage);
-    formData.append('target_language', targetLanguage);
-    formData.append('return_segments', returnSegments.toString());
-    formData.append('return_language', 'true');
-
-    try {
-      const config = await this.getConfig();
-      const response = await this.makeRequest(
-        'POST',
-        `${config.whisperServiceUrl}${API_ENDPOINTS.TRANSLATE_AUDIO_TO_LANGUAGE}`,
-        formData
-      );
-      return response as WhisperResponse;
-    } catch (error) {
-      throw new APIError('Audio translation failed', 0, error);
-    }
+    return googleTranslateApiKey;
   }
 
   async translateText(
     text: string,
     sourceLanguage: string,
     targetLanguage: string
-  ): Promise<TranslationResponse> {
-    const requestData = {
-      text,
-      source_language: sourceLanguage,
-      target_language: targetLanguage
-    };
-
-    try {
-      const config = await this.getConfig();
-      const response = await this.makeRequest(
-        'POST',
-        `${config.whisperServiceUrl}${API_ENDPOINTS.TRANSLATE_TEXT}`,
-        JSON.stringify(requestData),
-        {
-          'Content-Type': 'application/json'
-        }
-      );
-      return response as TranslationResponse;
-    } catch (error) {
-      throw new APIError('Text translation failed', 0, error);
+  ): Promise<TranslationResult> {
+    const apiKey = await this.getApiKey();
+    const body: Record<string, string> = { q: text, target: targetLanguage, format: 'text' };
+    if (sourceLanguage && sourceLanguage !== 'auto') {
+      body.source = sourceLanguage;
     }
+
+    return this.retryRequest(() => this.executeTranslate(apiKey, body));
   }
 
-  async detectLanguage(audioBlob: Blob): Promise<{
-    detected_language: string;
-    confidence: string;
-    text_preview: string;
-  }> {
-    const formData = new FormData();
-    formData.append('audio_file', audioBlob, 'audio.webm');
-
-    try {
-      const config = await this.getConfig();
-      const response = await this.makeRequest(
-        'POST',
-        `${config.whisperServiceUrl}${API_ENDPOINTS.DETECT_LANGUAGE}`,
-        formData
-      );
-      return response;
-    } catch (error) {
-      throw new APIError('Language detection failed', 0, error);
-    }
-  }
-
-  private async makeRequest(
-    method: string,
-    url: string,
-    body?: FormData | string,
-    headers?: Record<string, string>
-  ): Promise<any> {
-    // Create a unique key for request deduplication
-    const requestKey = `${method}:${url}:${body ? body.toString().slice(0, 100) : ''}`;
-    
-    // Check if the same request is already in progress
-    if (this.requestQueue.has(requestKey)) {
-      return this.requestQueue.get(requestKey);
-    }
-
-    const requestPromise = this.executeRequest(method, url, body, headers);
-    this.requestQueue.set(requestKey, requestPromise);
-
-    try {
-      const result = await requestPromise;
-      this.requestQueue.delete(requestKey);
-      return result;
-    } catch (error) {
-      this.requestQueue.delete(requestKey);
-      throw error;
-    }
-  }
-
-  private async executeRequest(
-    method: string,
-    url: string,
-    body?: FormData | string,
-    headers?: Record<string, string>
-  ): Promise<any> {
+  private async executeTranslate(
+    apiKey: string,
+    body: Record<string, string>
+  ): Promise<TranslationResult> {
     const controller = new AbortController();
-    const config = await this.getConfig();
-    const timeoutId = setTimeout(() => controller.abort(), config.requestTimeout);
+    const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
     try {
-      const requestInit: RequestInit = {
-        method,
-        signal: controller.signal,
-        headers: headers || {}
-      };
-
-      if (body) {
-        requestInit.body = body;
-      }
-
-      const response = await fetch(url, requestInit);
-      clearTimeout(timeoutId);
+      const response = await fetch(`${TRANSLATE_ENDPOINT}?key=${encodeURIComponent(apiKey)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: controller.signal
+      });
 
       if (!response.ok) {
         const errorText = await response.text();
-        throw new APIError(
-          `API request failed: ${response.status} ${response.statusText}`,
-          response.status,
-          errorText
-        );
+        throw new APIError(`Translation request failed: ${response.status}`, response.status, errorText);
       }
 
-      const contentType = response.headers.get('content-type');
-      if (contentType && contentType.includes('application/json')) {
-        return await response.json();
-      } else {
-        return await response.text();
+      const json = await response.json();
+      const translation = json?.data?.translations?.[0];
+      if (!translation) {
+        throw new APIError('Malformed translation response', 500, json);
       }
+
+      return {
+        translatedText: translation.translatedText,
+        detectedSourceLanguage: translation.detectedSourceLanguage
+      };
     } catch (error) {
+      if (error instanceof APIError) throw error;
+      if (error instanceof Error && error.name === 'AbortError') {
+        throw new APIError('Translation request timeout', 408);
+      }
+      throw new APIError('Network error', 0, error instanceof Error ? error.message : String(error));
+    } finally {
       clearTimeout(timeoutId);
-      
-      if (error instanceof APIError) {
-        throw error;
-      }
-
-      if (typeof error === 'object' && error !== null && 'name' in error && (error as any).name === 'AbortError') {
-        throw new APIError('Request timeout', 408, 'Request was aborted due to timeout');
-      }
-
-      let errorMessage = 'Unknown error';
-      if (typeof error === 'object' && error !== null && 'message' in error && typeof (error as any).message === 'string') {
-        errorMessage = (error as any).message;
-      }
-      throw new APIError('Network error', 0, errorMessage);
     }
   }
 
-  // Retry mechanism for failed requests
-  async retryRequest<T>(
-    requestFn: () => Promise<T>,
-    maxRetries?: number
-  ): Promise<T> {
-    const config = await this.getConfig();
-    const actualMaxRetries = maxRetries ?? config.maxRetries;
-    let lastError: Error;
+  private async retryRequest<T>(requestFn: () => Promise<T>, maxRetries = MAX_RETRIES): Promise<T> {
+    let lastError!: Error;
 
-    for (let attempt = 0; attempt <= actualMaxRetries; attempt++) {
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
         return await requestFn();
       } catch (error) {
         lastError = error as Error;
-        
-        if (attempt === actualMaxRetries) {
-          break;
-        }
-
-        // Exponential backoff
+        if (attempt === maxRetries) break;
         const delay = Math.pow(2, attempt) * 1000;
         await new Promise(resolve => setTimeout(resolve, delay));
       }
     }
 
-    throw lastError!;
-  }
-
-  // Update API configuration (for switching between local and cloud)
-  updateConfig(newConfig: Partial<ApiConfig>) {
-    if (!this.config) {
-      throw new Error('Cannot update config before initial config is loaded.');
-    }
-    // Only overwrite defined properties
-    this.config = {
-      ...this.config,
-      ...Object.fromEntries(
-        Object.entries(newConfig).filter(([_, v]) => v !== undefined)
-      )
-    } as ApiConfig;
+    throw lastError;
   }
 }
 
-// Singleton instance
 export const apiService = new ApiService();
