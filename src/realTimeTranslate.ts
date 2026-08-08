@@ -9,11 +9,28 @@ import {
   ROIData
 } from './types';
 
+function extractTextAtRect(rect: DOMRect): string | null {
+  const centerX = rect.x + rect.width / 2;
+  const centerY = rect.y + rect.height / 2;
+  const elements = document.elementsFromPoint(centerX, centerY);
+
+  for (const element of elements) {
+    if (element.textContent) {
+      const text = element.textContent.trim();
+      if (text) return text;
+    }
+  }
+
+  return null;
+}
+
 class RealTimeTranslator {
   private isActive: boolean;
   private isSelecting: boolean;
   private selectionOverlay: HTMLDivElement | null;
   private translationOverlays: Map<string, HTMLDivElement>;
+  private overlayRects: Map<string, DOMRect>;
+  private overlayTimers: Map<string, number>;
   private roiSelector: ROISelector;
 
   constructor() {
@@ -21,6 +38,8 @@ class RealTimeTranslator {
     this.isSelecting = false;
     this.selectionOverlay = null;
     this.translationOverlays = new Map();
+    this.overlayRects = new Map();
+    this.overlayTimers = new Map();
     this.roiSelector = new ROISelector();
     this.setupMessageListener();
     this.setupTextSelectionListener();
@@ -247,10 +266,20 @@ class RealTimeTranslator {
 
     overlay.innerHTML = `
       <div style="font-size: 12px; opacity: 0.7; margin-bottom: 5px;">Original:</div>
-      <div style="margin-bottom: 8px; font-style: italic;">${this.escapeHtml(originalText)}</div>
+      <div data-role="original-text" style="margin-bottom: 8px; font-style: italic;">${this.escapeHtml(originalText)}</div>
       <div style="font-size: 12px; opacity: 0.7; margin-bottom: 5px;">Translation:</div>
-      <div style="font-weight: bold;">${this.escapeHtml(translatedText)}</div>
+      <div data-role="translated-text" style="font-weight: bold;">${this.escapeHtml(translatedText)}</div>
       <div style="text-align: right; margin-top: 8px;">
+        <button id="refresh-${overlayId}" title="Refresh" style="
+          background: #2196F3;
+          color: white;
+          border: none;
+          padding: 2px 8px;
+          border-radius: 3px;
+          cursor: pointer;
+          font-size: 11px;
+          margin-right: 4px;
+        ">⟳</button>
         <button id="close-${overlayId}" style="
           background: #f44336;
           color: white;
@@ -265,18 +294,91 @@ class RealTimeTranslator {
 
     document.body.appendChild(overlay);
     this.translationOverlays.set(overlayId, overlay);
+    this.overlayRects.set(overlayId, rect);
 
-    // Auto-hide after 10 seconds
-    setTimeout(() => {
+    const timerId = window.setTimeout(() => {
       this.removeOverlay(overlayId);
     }, 10000);
+    this.overlayTimers.set(overlayId, timerId);
 
-    // Add close button functionality
+    const refreshBtn = document.getElementById(`refresh-${overlayId}`);
+    if (refreshBtn) {
+      refreshBtn.addEventListener('click', () => {
+        this.refreshOverlay(overlayId);
+      });
+    }
+
     const closeBtn = document.getElementById(`close-${overlayId}`);
     if (closeBtn) {
       closeBtn.addEventListener('click', () => {
         this.removeOverlay(overlayId);
       });
+    }
+  }
+
+  private updateTranslationOverlay(overlayId: string, originalText: string, translatedText: string): void {
+    const overlay = this.translationOverlays.get(overlayId);
+    if (!overlay) return;
+
+    const originalDiv = overlay.querySelector<HTMLDivElement>('[data-role="original-text"]');
+    const translatedDiv = overlay.querySelector<HTMLDivElement>('[data-role="translated-text"]');
+    if (originalDiv) originalDiv.textContent = originalText;
+    if (translatedDiv) translatedDiv.textContent = translatedText;
+
+    const existingTimer = this.overlayTimers.get(overlayId);
+    if (existingTimer !== undefined) {
+      window.clearTimeout(existingTimer);
+    }
+
+    const timerId = window.setTimeout(() => {
+      this.removeOverlay(overlayId);
+    }, 10000);
+    this.overlayTimers.set(overlayId, timerId);
+  }
+
+  private async refreshOverlay(overlayId: string): Promise<void> {
+    const rect = this.overlayRects.get(overlayId);
+    if (!rect) return;
+
+    const refreshBtn = document.getElementById(`refresh-${overlayId}`) as HTMLButtonElement | null;
+    const originalLabel = refreshBtn?.textContent ?? '⟳';
+    if (refreshBtn) {
+      refreshBtn.textContent = '...';
+      refreshBtn.setAttribute('disabled', 'true');
+    }
+
+    try {
+      const textContent = extractTextAtRect(rect);
+      if (!textContent) {
+        this.showError('No text found to translate', rect);
+        return;
+      }
+
+      const settings = await chrome.runtime.sendMessage({
+        type: 'GET_SETTINGS'
+      });
+
+      const targetLang = settings.targetLanguage || 'en';
+
+      const translation = await chrome.runtime.sendMessage({
+        type: 'TRANSLATE_TEXT',
+        text: textContent,
+        targetLang
+      });
+
+      if (translation.success) {
+        this.updateTranslationOverlay(overlayId, textContent, translation.translatedText);
+      } else {
+        this.showError('Translation failed', rect);
+      }
+    } catch (error) {
+      console.error('Error refreshing translation:', error);
+      this.showError('Translation error', rect);
+    } finally {
+      if (refreshBtn) {
+        refreshBtn.textContent = originalLabel;
+        refreshBtn.removeAttribute('disabled');
+      }
     }
   }
 
@@ -310,15 +412,26 @@ class RealTimeTranslator {
       overlay.remove();
       this.translationOverlays.delete(overlayId);
     }
+    this.overlayRects.delete(overlayId);
+
+    const timerId = this.overlayTimers.get(overlayId);
+    if (timerId !== undefined) {
+      window.clearTimeout(timerId);
+      this.overlayTimers.delete(overlayId);
+    }
   }
 
   private clearAllOverlays(): void {
-    this.translationOverlays.forEach((overlay, id) => {
+    this.translationOverlays.forEach((overlay) => {
       if (overlay.parentNode) {
         overlay.remove();
       }
     });
     this.translationOverlays.clear();
+    this.overlayRects.clear();
+
+    this.overlayTimers.forEach((timerId) => window.clearTimeout(timerId));
+    this.overlayTimers.clear();
   }
 
   private escapeHtml(text: string): string {
@@ -423,23 +536,14 @@ class ROISelector {
   }
 
   private processROI(roi: ROIData): void {
-    // Extract text from the ROI area
-    const elements = document.elementsFromPoint(roi.x + roi.width / 2, roi.y + roi.height / 2);
-    let textContent = '';
-
-    for (const element of elements) {
-      if (element.textContent) {
-        textContent = element.textContent.trim();
-        if (textContent) break;
-      }
-    }
+    const rect = new DOMRect(roi.x, roi.y, roi.width, roi.height);
+    const textContent = extractTextAtRect(rect);
 
     if (textContent) {
-      // Send message to translate the extracted text
       chrome.runtime.sendMessage({
         type: 'TRANSLATE_SELECTED_TEXT',
         text: textContent,
-        rect: new DOMRect(roi.x, roi.y, roi.width, roi.height)
+        rect
       });
     }
   }
