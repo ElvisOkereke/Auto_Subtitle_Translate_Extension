@@ -145,6 +145,8 @@ export interface ExtensionSettings {
   fontSize: FontSize;
   enabled: boolean;
   googleTranslateApiKey: string;
+  translationProvider: 'google' | 'deepl';
+  deeplApiKey: string;
 }
 
 export type SubtitlePosition = 'top' | 'center' | 'bottom';
