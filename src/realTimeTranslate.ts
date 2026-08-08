@@ -139,19 +139,7 @@ class RealTimeTranslator {
       // Show loading indicator
       this.showLoadingIndicator(rect);
 
-      // Get settings
-      const settings = await chrome.runtime.sendMessage({
-        type: 'GET_SETTINGS'
-      });
-
-      const targetLang = settings.targetLanguage || 'en';
-
-      // Translate text
-      const translation = await chrome.runtime.sendMessage({
-        type: 'TRANSLATE_TEXT',
-        text,
-        targetLang
-      });
+      const translation = await this.fetchTranslation(text);
 
       // Hide loading indicator
       this.hideLoadingIndicator();
@@ -170,6 +158,22 @@ class RealTimeTranslator {
 
   private async translateSelectedText(text: string, rect: DOMRect): Promise<void> {
     await this.translateAndShowText(text, rect);
+  }
+
+  private async fetchTranslation(text: string): Promise<{ success: true; translatedText: string } | { success: false }> {
+    const settings = await chrome.runtime.sendMessage({
+      type: 'GET_SETTINGS'
+    });
+
+    const targetLang = settings.targetLanguage || 'en';
+
+    const translation = await chrome.runtime.sendMessage({
+      type: 'TRANSLATE_TEXT',
+      text,
+      targetLang
+    });
+
+    return translation;
   }
 
   private showStatusIndicator(message: string): void {
@@ -354,17 +358,7 @@ class RealTimeTranslator {
         return;
       }
 
-      const settings = await chrome.runtime.sendMessage({
-        type: 'GET_SETTINGS'
-      });
-
-      const targetLang = settings.targetLanguage || 'en';
-
-      const translation = await chrome.runtime.sendMessage({
-        type: 'TRANSLATE_TEXT',
-        text: textContent,
-        targetLang
-      });
+      const translation = await this.fetchTranslation(textContent);
 
       if (translation.success) {
         this.updateTranslationOverlay(overlayId, textContent, translation.translatedText);
