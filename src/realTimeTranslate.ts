@@ -93,9 +93,9 @@ class RealTimeTranslator {
     this.isActive = true;
     this.showStatusIndicator('Screen translation active - Draw a rectangle to select area');
     document.body.style.cursor = 'crosshair';
-    this.installClickGuard();
     // Start ROI selection
     this.roiSelector.startSelection();
+    this.installClickGuard();
   }
 
   private stopTranslation(): void {
@@ -472,18 +472,18 @@ class ROISelector {
 
   startSelection(): void {
     this.isSelecting = true;
-    document.addEventListener('mousedown', this.handleMouseDown.bind(this));
-    document.addEventListener('mousemove', this.handleMouseMove.bind(this));
-    document.addEventListener('mouseup', this.handleMouseUp.bind(this));
+    document.addEventListener('mousedown', this.handleMouseDown.bind(this), true);
+    document.addEventListener('mousemove', this.handleMouseMove.bind(this), true);
+    document.addEventListener('mouseup', this.handleMouseUp.bind(this), true);
     document.body.style.userSelect = 'none';
   }
 
   stopSelection(): void {
     this.isSelecting = false;
     this.removeSelectionBox();
-    document.removeEventListener('mousedown', this.handleMouseDown.bind(this));
-    document.removeEventListener('mousemove', this.handleMouseMove.bind(this));
-    document.removeEventListener('mouseup', this.handleMouseUp.bind(this));
+    document.removeEventListener('mousedown', this.handleMouseDown.bind(this), true);
+    document.removeEventListener('mousemove', this.handleMouseMove.bind(this), true);
+    document.removeEventListener('mouseup', this.handleMouseUp.bind(this), true);
     document.body.style.userSelect = '';
   }
 
