@@ -32,6 +32,8 @@ class SubtitleService {
       subtitleStyle: 'bottom',
       fontSize: 'medium',
       googleTranslateApiKey: '',
+      translationProvider: 'google',
+      deeplApiKey: '',
       enabled: false
     };
 
@@ -68,6 +70,8 @@ class SubtitleService {
             subtitleStyle: 'bottom',
             fontSize: 'medium',
             googleTranslateApiKey: '',
+            translationProvider: 'google',
+            deeplApiKey: '',
             enabled: false
           };
           return await chrome.storage.sync.get(defaultSettings);
@@ -201,9 +205,10 @@ class SubtitleService {
   }
 
   private async maybeTranslate(text: string, tabId: number): Promise<{ text: string; language: string }> {
-    const settings = await chrome.storage.sync.get(['sourceLanguage', 'targetLanguage']);
+    const settings = await chrome.storage.sync.get(['sourceLanguage', 'targetLanguage', 'translationProvider']);
     const sourceLanguage = settings.sourceLanguage || 'auto';
     const targetLanguage = settings.targetLanguage || 'en';
+    const providerName = settings.translationProvider === 'deepl' ? 'DeepL' : 'Google Translate';
 
     if (sourceLanguage === targetLanguage) {
       return { text, language: sourceLanguage };
@@ -217,7 +222,7 @@ class SubtitleService {
         this.warnedMissingKeyTabs.add(tabId);
         await this.safeSendMessage(tabId, {
           type: 'CAPTION_ERROR',
-          message: 'No Google Translate API key configured. Showing untranslated captions — add a key in the extension popup to enable translation.'
+          message: `No ${providerName} API key configured. Showing untranslated captions — add a key in the extension popup to enable translation.`
         });
       }
       console.error('Translation failed, falling back to untranslated text:', error);
