@@ -1,7 +1,9 @@
-// apiService.ts - Client for the Google Cloud Translation API
+// apiService.ts - Client for the Google Cloud Translation API and the DeepL API
 import { APIError } from '../types';
 
-const TRANSLATE_ENDPOINT = 'https://translation.googleapis.com/language/translate/v2';
+const GOOGLE_TRANSLATE_ENDPOINT = 'https://translation.googleapis.com/language/translate/v2';
+const DEEPL_FREE_ENDPOINT = 'https://api-free.deepl.com/v2/translate';
+const DEEPL_PRO_ENDPOINT = 'https://api.deepl.com/v2/translate';
 const REQUEST_TIMEOUT_MS = 15000;
 const MAX_RETRIES = 3;
 
@@ -10,13 +12,39 @@ export interface TranslationResult {
   detectedSourceLanguage?: string;
 }
 
+// DeepL requires a regional variant for some target languages that Google
+// treats as a single generic code.
+const DEEPL_TARGET_OVERRIDES: Record<string, string> = {
+  en: 'EN-US',
+  pt: 'PT-PT'
+};
+
+function toDeepLTarget(code: string): string {
+  return DEEPL_TARGET_OVERRIDES[code.toLowerCase()] || code.toUpperCase();
+}
+
+function toDeepLSource(code: string): string {
+  return code.toUpperCase();
+}
+
+interface TranslationSettings {
+  translationProvider: 'google' | 'deepl';
+  googleTranslateApiKey: string;
+  deeplApiKey: string;
+}
+
 export class ApiService {
-  private async getApiKey(): Promise<string> {
-    const { googleTranslateApiKey } = await chrome.storage.sync.get(['googleTranslateApiKey']);
-    if (!googleTranslateApiKey) {
-      throw new APIError('No Google Translate API key configured', 401);
-    }
-    return googleTranslateApiKey;
+  private async getSettings(): Promise<TranslationSettings> {
+    const settings = await chrome.storage.sync.get([
+      'translationProvider',
+      'googleTranslateApiKey',
+      'deeplApiKey'
+    ]);
+    return {
+      translationProvider: settings.translationProvider === 'deepl' ? 'deepl' : 'google',
+      googleTranslateApiKey: settings.googleTranslateApiKey || '',
+      deeplApiKey: settings.deeplApiKey || ''
+    };
   }
 
   async translateText(
@@ -24,28 +52,37 @@ export class ApiService {
     sourceLanguage: string,
     targetLanguage: string
   ): Promise<TranslationResult> {
-    const apiKey = await this.getApiKey();
+    const settings = await this.getSettings();
+
+    if (settings.translationProvider === 'deepl') {
+      if (!settings.deeplApiKey) {
+        throw new APIError('No DeepL API key configured', 401);
+      }
+      return this.retryRequest(() =>
+        this.executeDeepLTranslate(settings.deeplApiKey, text, sourceLanguage, targetLanguage)
+      );
+    }
+
+    if (!settings.googleTranslateApiKey) {
+      throw new APIError('No Google Translate API key configured', 401);
+    }
     const body: Record<string, string> = { q: text, target: targetLanguage, format: 'text' };
     if (sourceLanguage && sourceLanguage !== 'auto') {
       body.source = sourceLanguage;
     }
-
-    return this.retryRequest(() => this.executeTranslate(apiKey, body));
+    return this.retryRequest(() => this.executeGoogleTranslate(settings.googleTranslateApiKey, body));
   }
 
-  private async executeTranslate(
+  private async executeGoogleTranslate(
     apiKey: string,
     body: Record<string, string>
   ): Promise<TranslationResult> {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-
-    try {
-      const response = await fetch(`${TRANSLATE_ENDPOINT}?key=${encodeURIComponent(apiKey)}`, {
+    return this.withTimeout(async signal => {
+      const response = await fetch(`${GOOGLE_TRANSLATE_ENDPOINT}?key=${encodeURIComponent(apiKey)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
-        signal: controller.signal
+        signal
       });
 
       if (!response.ok) {
@@ -63,6 +100,56 @@ export class ApiService {
         translatedText: translation.translatedText,
         detectedSourceLanguage: translation.detectedSourceLanguage
       };
+    });
+  }
+
+  private async executeDeepLTranslate(
+    apiKey: string,
+    text: string,
+    sourceLanguage: string,
+    targetLanguage: string
+  ): Promise<TranslationResult> {
+    const endpoint = apiKey.endsWith(':fx') ? DEEPL_FREE_ENDPOINT : DEEPL_PRO_ENDPOINT;
+    const body: Record<string, unknown> = { text: [text], target_lang: toDeepLTarget(targetLanguage) };
+    if (sourceLanguage && sourceLanguage !== 'auto') {
+      body.source_lang = toDeepLSource(sourceLanguage);
+    }
+
+    return this.withTimeout(async signal => {
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `DeepL-Auth-Key ${apiKey}`
+        },
+        body: JSON.stringify(body),
+        signal
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new APIError(`Translation request failed: ${response.status}`, response.status, errorText);
+      }
+
+      const json = await response.json();
+      const translation = json?.translations?.[0];
+      if (!translation) {
+        throw new APIError('Malformed translation response', 500, json);
+      }
+
+      return {
+        translatedText: translation.text,
+        detectedSourceLanguage: translation.detected_source_language?.toLowerCase()
+      };
+    });
+  }
+
+  private async withTimeout<T>(fn: (signal: AbortSignal) => Promise<T>): Promise<T> {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
+    try {
+      return await fn(controller.signal);
     } catch (error) {
       if (error instanceof APIError) throw error;
       if (error instanceof Error && error.name === 'AbortError') {
