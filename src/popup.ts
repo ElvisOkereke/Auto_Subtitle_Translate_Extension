@@ -10,8 +10,20 @@ interface PopupElements {
   targetLanguage: HTMLSelectElement;
   subtitleStyle: HTMLSelectElement;
   fontSize: HTMLSelectElement;
+  translationProvider: HTMLSelectElement;
   googleTranslateApiKey: HTMLInputElement;
+  deeplApiKey: HTMLInputElement;
+  googleApiKeyGroup: HTMLDivElement;
+  deeplApiKeyGroup: HTMLDivElement;
 }
+
+const NON_SETTING_ELEMENT_KEYS = [
+  'toggleButton',
+  'screenTranslateButton',
+  'status',
+  'googleApiKeyGroup',
+  'deeplApiKeyGroup'
+];
 
 class PopupController {
   private isActive: boolean;
@@ -35,7 +47,11 @@ class PopupController {
     const targetLanguage = document.getElementById('targetLanguage') as HTMLSelectElement | null;
     const subtitleStyle = document.getElementById('subtitleStyle') as HTMLSelectElement | null;
     const fontSize = document.getElementById('fontSize') as HTMLSelectElement | null;
+    const translationProvider = document.getElementById('translationProvider') as HTMLSelectElement | null;
     const googleTranslateApiKey = document.getElementById('googleTranslateApiKey') as HTMLInputElement | null;
+    const deeplApiKey = document.getElementById('deeplApiKey') as HTMLInputElement | null;
+    const googleApiKeyGroup = document.getElementById('googleApiKeyGroup') as HTMLDivElement | null;
+    const deeplApiKeyGroup = document.getElementById('deeplApiKeyGroup') as HTMLDivElement | null;
 
     if (
       !toggleButton ||
@@ -45,7 +61,11 @@ class PopupController {
       !targetLanguage ||
       !subtitleStyle ||
       !fontSize ||
-      !googleTranslateApiKey
+      !translationProvider ||
+      !googleTranslateApiKey ||
+      !deeplApiKey ||
+      !googleApiKeyGroup ||
+      !deeplApiKeyGroup
     ) {
       throw new Error('One or more popup elements not found in the DOM.');
     }
@@ -58,7 +78,11 @@ class PopupController {
       targetLanguage,
       subtitleStyle,
       fontSize,
-      googleTranslateApiKey
+      translationProvider,
+      googleTranslateApiKey,
+      deeplApiKey,
+      googleApiKeyGroup,
+      deeplApiKeyGroup
     };
   }
 
@@ -71,13 +95,23 @@ class PopupController {
       this.toggleScreenTranslation();
     });
 
+    this.elements.translationProvider.addEventListener('change', () => {
+      this.updateApiKeyVisibility();
+    });
+
     Object.keys(this.elements).forEach(key => {
-      if (key !== 'toggleButton' && key !== 'screenTranslateButton' && key !== 'status') {
+      if (!NON_SETTING_ELEMENT_KEYS.includes(key)) {
         (this.elements[key as keyof PopupElements] as HTMLElement).addEventListener('change', () => {
           this.saveSettings();
         });
       }
     });
+  }
+
+  private updateApiKeyVisibility() {
+    const isDeepL = this.elements.translationProvider.value === 'deepl';
+    this.elements.googleApiKeyGroup.classList.toggle('hidden', isDeepL);
+    this.elements.deeplApiKeyGroup.classList.toggle('hidden', !isDeepL);
   }
 
   async loadSettings() {
@@ -88,6 +122,8 @@ class PopupController {
         subtitleStyle: 'bottom',
         fontSize: 'medium',
         googleTranslateApiKey: '',
+        translationProvider: 'google',
+        deeplApiKey: '',
         enabled: false
       };
 
@@ -97,7 +133,10 @@ class PopupController {
       this.elements.targetLanguage.value = settings.targetLanguage;
       this.elements.subtitleStyle.value = settings.subtitleStyle;
       this.elements.fontSize.value = settings.fontSize;
+      this.elements.translationProvider.value = settings.translationProvider;
       this.elements.googleTranslateApiKey.value = settings.googleTranslateApiKey;
+      this.elements.deeplApiKey.value = settings.deeplApiKey;
+      this.updateApiKeyVisibility();
 
       this.isActive = settings.enabled;
       this.updateToggleButton();
@@ -115,7 +154,10 @@ class PopupController {
     this.elements.targetLanguage.value = 'en';
     this.elements.subtitleStyle.value = 'bottom';
     this.elements.fontSize.value = 'medium';
+    this.elements.translationProvider.value = 'google';
     this.elements.googleTranslateApiKey.value = '';
+    this.elements.deeplApiKey.value = '';
+    this.updateApiKeyVisibility();
     this.isActive = false;
     this.updateToggleButton();
   }
@@ -127,7 +169,9 @@ class PopupController {
         targetLanguage: this.elements.targetLanguage.value,
         subtitleStyle: this.elements.subtitleStyle.value,
         fontSize: this.elements.fontSize.value,
+        translationProvider: this.elements.translationProvider.value,
         googleTranslateApiKey: this.elements.googleTranslateApiKey.value,
+        deeplApiKey: this.elements.deeplApiKey.value,
         enabled: this.isActive
       };
 

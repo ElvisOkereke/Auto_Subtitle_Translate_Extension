@@ -213,8 +213,21 @@
         </div>
         
         <div class="setting-group">
+            <label for="translationProvider">Translation Provider:</label>
+            <select id="translationProvider">
+                <option value="google">Google Translate</option>
+                <option value="deepl">DeepL</option>
+            </select>
+        </div>
+
+        <div class="setting-group" id="googleApiKeyGroup">
             <label for="googleTranslateApiKey">Google Translate API Key:</label>
             <input type="password" id="googleTranslateApiKey" placeholder="Paste your API key">
+        </div>
+
+        <div class="setting-group hidden" id="deeplApiKeyGroup">
+            <label for="deeplApiKey">DeepL API Key:</label>
+            <input type="password" id="deeplApiKey" placeholder="Paste your API key">
         </div>
     </div>
     
