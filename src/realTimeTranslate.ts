@@ -93,6 +93,7 @@ class RealTimeTranslator {
     this.isActive = true;
     this.showStatusIndicator('Screen translation active - Draw a rectangle to select area');
     document.body.style.cursor = 'crosshair';
+    this.installClickGuard();
     // Start ROI selection
     this.roiSelector.startSelection();
   }
@@ -102,6 +103,28 @@ class RealTimeTranslator {
     this.clearAllOverlays();
     this.hideStatusIndicator();
     document.body.style.cursor = '';
+    this.removeClickGuard();
+  }
+
+  private handleGuardedEvent = (event: Event): void => {
+    const target = event.target as Element | null;
+    if (target?.closest('[data-rtt-owned]')) {
+      return;
+    }
+    event.stopPropagation();
+    event.preventDefault();
+  };
+
+  private installClickGuard(): void {
+    document.addEventListener('mousedown', this.handleGuardedEvent, true);
+    document.addEventListener('mouseup', this.handleGuardedEvent, true);
+    document.addEventListener('click', this.handleGuardedEvent, true);
+  }
+
+  private removeClickGuard(): void {
+    document.removeEventListener('mousedown', this.handleGuardedEvent, true);
+    document.removeEventListener('mouseup', this.handleGuardedEvent, true);
+    document.removeEventListener('click', this.handleGuardedEvent, true);
   }
 
   private startSelection(): void {
@@ -252,6 +275,7 @@ class RealTimeTranslator {
     const overlayId = `translation-${Date.now()}`;
     const overlay = document.createElement('div');
     overlay.id = overlayId;
+    overlay.setAttribute('data-rtt-owned', '');
     overlay.style.cssText = `
       position: fixed;
       top: ${rect.bottom + window.scrollY + 5}px;
@@ -274,7 +298,7 @@ class RealTimeTranslator {
       <div style="font-size: 12px; opacity: 0.7; margin-bottom: 5px;">Translation:</div>
       <div data-role="translated-text" style="font-weight: bold;">${this.escapeHtml(translatedText)}</div>
       <div style="text-align: right; margin-top: 8px;">
-        <button id="refresh-${overlayId}" title="Refresh" style="
+        <button id="refresh-${overlayId}" data-rtt-owned title="Refresh" style="
           background: #2196F3;
           color: white;
           border: none;
@@ -284,7 +308,7 @@ class RealTimeTranslator {
           font-size: 11px;
           margin-right: 4px;
         ">⟳</button>
-        <button id="close-${overlayId}" style="
+        <button id="close-${overlayId}" data-rtt-owned style="
           background: #f44336;
           color: white;
           border: none;
@@ -507,6 +531,7 @@ class ROISelector {
 
   private createSelectionBox(x: number, y: number): void {
     this.selectionBox = document.createElement('div');
+    this.selectionBox.setAttribute('data-rtt-owned', '');
     this.selectionBox.style.cssText = `
       position: fixed;
       left: ${x}px;
