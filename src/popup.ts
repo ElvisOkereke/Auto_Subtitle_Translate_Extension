@@ -5,6 +5,8 @@ import { ExtensionSettings } from './types';
 interface PopupElements {
   toggleButton: HTMLButtonElement;
   screenTranslateButton: HTMLButtonElement;
+  drawNewBoxButton: HTMLButtonElement;
+  screenTranslateStatus: HTMLDivElement;
   status: HTMLDivElement;
   sourceLanguage: HTMLSelectElement;
   targetLanguage: HTMLSelectElement;
@@ -20,6 +22,8 @@ interface PopupElements {
 const NON_SETTING_ELEMENT_KEYS = [
   'toggleButton',
   'screenTranslateButton',
+  'drawNewBoxButton',
+  'screenTranslateStatus',
   'status',
   'googleApiKeyGroup',
   'deeplApiKeyGroup'
@@ -37,11 +41,14 @@ class PopupController {
     this.initializeElements();
     this.loadSettings();
     this.setupEventListeners();
+    this.refreshScreenTranslateState();
   }
 
   initializeElements() {
     const toggleButton = document.getElementById('toggleButton') as HTMLButtonElement | null;
     const screenTranslateButton = document.getElementById('screenTranslateButton') as HTMLButtonElement | null;
+    const drawNewBoxButton = document.getElementById('drawNewBoxButton') as HTMLButtonElement | null;
+    const screenTranslateStatus = document.getElementById('screenTranslateStatus') as HTMLDivElement | null;
     const status = document.getElementById('status') as HTMLDivElement | null;
     const sourceLanguage = document.getElementById('sourceLanguage') as HTMLSelectElement | null;
     const targetLanguage = document.getElementById('targetLanguage') as HTMLSelectElement | null;
@@ -56,6 +63,8 @@ class PopupController {
     if (
       !toggleButton ||
       !screenTranslateButton ||
+      !drawNewBoxButton ||
+      !screenTranslateStatus ||
       !status ||
       !sourceLanguage ||
       !targetLanguage ||
@@ -73,6 +82,8 @@ class PopupController {
     this.elements = {
       toggleButton,
       screenTranslateButton,
+      drawNewBoxButton,
+      screenTranslateStatus,
       status,
       sourceLanguage,
       targetLanguage,
@@ -93,6 +104,10 @@ class PopupController {
 
     this.elements.screenTranslateButton.addEventListener('click', () => {
       this.toggleScreenTranslation();
+    });
+
+    this.elements.drawNewBoxButton.addEventListener('click', () => {
+      this.drawNewBox();
     });
 
     this.elements.translationProvider.addEventListener('change', () => {
@@ -225,9 +240,10 @@ class PopupController {
   }
 
   async toggleScreenTranslation() {
+    const wasScreenTranslating = this.isScreenTranslating;
+
     try {
-      this.isScreenTranslating = !this.isScreenTranslating;
-      this.updateScreenTranslateButton();
+      this.renderScreenTranslateState(wasScreenTranslating ? 'inactive' : 'armed');
 
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
 
@@ -254,8 +270,65 @@ class PopupController {
         ? (error as Error).message
         : String(error);
       this.showStatus('Failed to toggle screen translation: ' + errorMsg, 'error');
-      this.isScreenTranslating = !this.isScreenTranslating;
-      this.updateScreenTranslateButton();
+      this.renderScreenTranslateState(wasScreenTranslating ? 'armed' : 'inactive');
+    }
+  }
+
+  async refreshScreenTranslateState() {
+    try {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+
+      if (!tab || typeof tab.id !== 'number') {
+        this.renderScreenTranslateState('inactive');
+        return;
+      }
+
+      const response = await chrome.tabs.sendMessage(tab.id, {
+        type: 'GET_SCREEN_TRANSLATE_STATE'
+      });
+
+      this.renderScreenTranslateState(response?.state ?? 'inactive');
+    } catch (error) {
+      this.renderScreenTranslateState('inactive');
+    }
+  }
+
+  renderScreenTranslateState(state: 'inactive' | 'armed' | 'ready-to-redraw') {
+    this.isScreenTranslating = state !== 'inactive';
+    this.updateScreenTranslateButton();
+
+    if (state === 'inactive') {
+      this.elements.screenTranslateStatus.classList.add('hidden');
+      this.elements.drawNewBoxButton.classList.add('hidden');
+      return;
+    }
+
+    this.elements.screenTranslateStatus.textContent = state === 'armed'
+      ? 'Drag a box around text to translate.'
+      : "Click 'Draw New Box' to translate another area.";
+    this.elements.screenTranslateStatus.className = 'status success';
+    this.elements.drawNewBoxButton.classList.toggle('hidden', state !== 'ready-to-redraw');
+  }
+
+  async drawNewBox() {
+    try {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+
+      if (!tab || typeof tab.id !== 'number') {
+        throw new Error('No active tab found');
+      }
+
+      chrome.tabs.sendMessage(tab.id, {
+        type: 'DRAW_NEW_BOX'
+      });
+
+      this.renderScreenTranslateState('armed');
+    } catch (error) {
+      console.error('Failed to draw new box:', error);
+      const errorMsg = (error && typeof error === 'object' && 'message' in error)
+        ? (error as Error).message
+        : String(error);
+      this.showStatus('Failed to draw new box: ' + errorMsg, 'error');
     }
   }
 
