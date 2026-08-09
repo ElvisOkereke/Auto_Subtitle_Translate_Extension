@@ -40,7 +40,7 @@ class RealTimeTranslator {
     this.translationOverlays = new Map();
     this.overlayRects = new Map();
     this.overlayTimers = new Map();
-    this.roiSelector = new ROISelector();
+    this.roiSelector = new ROISelector(() => this.updateControlPanel('ready-to-redraw'));
     this.setupMessageListener();
     this.setupTextSelectionListener();
   }
@@ -521,11 +521,13 @@ class ROISelector {
   private isSelecting: boolean;
   private startPoint: { x: number; y: number } | null;
   private selectionBox: HTMLDivElement | null;
+  private onSelectionEnded: () => void;
 
-  constructor() {
+  constructor(onSelectionEnded: () => void) {
     this.isSelecting = false;
     this.startPoint = null;
     this.selectionBox = null;
+    this.onSelectionEnded = onSelectionEnded;
   }
 
   startSelection(): void {
@@ -585,6 +587,7 @@ class ROISelector {
     }
 
     this.stopSelection();
+    this.onSelectionEnded();
   }
 
   private createSelectionBox(x: number, y: number): void {
