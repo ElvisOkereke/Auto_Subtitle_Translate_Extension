@@ -532,34 +532,34 @@ class ROISelector {
 
   startSelection(): void {
     this.isSelecting = true;
-    document.addEventListener('mousedown', this.handleMouseDown.bind(this), true);
-    document.addEventListener('mousemove', this.handleMouseMove.bind(this), true);
-    document.addEventListener('mouseup', this.handleMouseUp.bind(this), true);
+    document.addEventListener('mousedown', this.handleMouseDown, true);
+    document.addEventListener('mousemove', this.handleMouseMove, true);
+    document.addEventListener('mouseup', this.handleMouseUp, true);
     document.body.style.userSelect = 'none';
   }
 
   stopSelection(): void {
     this.isSelecting = false;
     this.removeSelectionBox();
-    document.removeEventListener('mousedown', this.handleMouseDown.bind(this), true);
-    document.removeEventListener('mousemove', this.handleMouseMove.bind(this), true);
-    document.removeEventListener('mouseup', this.handleMouseUp.bind(this), true);
+    document.removeEventListener('mousedown', this.handleMouseDown, true);
+    document.removeEventListener('mousemove', this.handleMouseMove, true);
+    document.removeEventListener('mouseup', this.handleMouseUp, true);
     document.body.style.userSelect = '';
   }
 
-  private handleMouseDown(event: MouseEvent): void {
+  private handleMouseDown = (event: MouseEvent): void => {
     if (!this.isSelecting) return;
-    
+
     this.startPoint = { x: event.clientX, y: event.clientY };
     this.createSelectionBox(event.clientX, event.clientY);
-  }
+  };
 
-  private handleMouseMove(event: MouseEvent): void {
+  private handleMouseMove = (event: MouseEvent): void => {
     if (!this.isSelecting || !this.startPoint || !this.selectionBox) return;
 
     const currentX = event.clientX;
     const currentY = event.clientY;
-    
+
     const left = Math.min(this.startPoint.x, currentX);
     const top = Math.min(this.startPoint.y, currentY);
     const width = Math.abs(currentX - this.startPoint.x);
@@ -569,9 +569,9 @@ class ROISelector {
     this.selectionBox.style.top = `${top}px`;
     this.selectionBox.style.width = `${width}px`;
     this.selectionBox.style.height = `${height}px`;
-  }
+  };
 
-  private handleMouseUp(event: MouseEvent): void {
+  private handleMouseUp = (event: MouseEvent): void => {
     if (!this.isSelecting || !this.startPoint) return;
 
     const roi: ROIData = {
@@ -588,7 +588,7 @@ class ROISelector {
 
     this.stopSelection();
     this.onSelectionEnded();
-  }
+  };
 
   private createSelectionBox(x: number, y: number): void {
     this.selectionBox = document.createElement('div');
