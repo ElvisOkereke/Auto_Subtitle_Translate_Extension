@@ -19,6 +19,8 @@ export type MessageType =
   | 'START_ROI_SELECTION'
   | 'END_ROI_SELECTION'
   | 'TRANSLATE_SELECTED_TEXT'
+  | 'GET_SCREEN_TRANSLATE_STATE'
+  | 'DRAW_NEW_BOX'
   | 'SHOW_TRANSLATION_OVERLAY'
   | 'START_OFFSCREEN_CAPTURE'
   | 'STOP_OFFSCREEN_CAPTURE'
@@ -103,6 +105,18 @@ export interface TranslateSelectedTextMessage extends ExtensionMessage {
   type: 'TRANSLATE_SELECTED_TEXT';
   text: string;
   rect: DOMRect;
+}
+
+export interface GetScreenTranslateStateMessage extends ExtensionMessage {
+  type: 'GET_SCREEN_TRANSLATE_STATE';
+}
+
+export interface DrawNewBoxMessage extends ExtensionMessage {
+  type: 'DRAW_NEW_BOX';
+}
+
+export interface ScreenTranslateStateResponse {
+  state: 'inactive' | 'armed' | 'ready-to-redraw';
 }
 
 export interface ShowTranslationOverlayMessage extends ExtensionMessage {
