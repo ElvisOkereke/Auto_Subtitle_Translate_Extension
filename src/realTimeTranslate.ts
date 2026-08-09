@@ -91,7 +91,7 @@ class RealTimeTranslator {
 
   private startTranslation(): void {
     this.isActive = true;
-    this.showStatusIndicator('Screen translation active - Draw a rectangle to select area');
+    this.showControlPanel();
     document.body.style.cursor = 'crosshair';
     // Start ROI selection
     this.roiSelector.startSelection();
@@ -100,8 +100,9 @@ class RealTimeTranslator {
 
   private stopTranslation(): void {
     this.isActive = false;
+    this.roiSelector.stopSelection();
     this.clearAllOverlays();
-    this.hideStatusIndicator();
+    this.hideControlPanel();
     document.body.style.cursor = '';
     this.removeClickGuard();
   }
@@ -199,12 +200,13 @@ class RealTimeTranslator {
     return translation;
   }
 
-  private showStatusIndicator(message: string): void {
-    let indicator = document.getElementById('translation-status-indicator');
-    if (!indicator) {
-      indicator = document.createElement('div');
-      indicator.id = 'translation-status-indicator';
-      indicator.style.cssText = `
+  private showControlPanel(): void {
+    let panel = document.getElementById('screen-translate-panel');
+    if (!panel) {
+      panel = document.createElement('div');
+      panel.id = 'screen-translate-panel';
+      panel.setAttribute('data-rtt-owned', '');
+      panel.style.cssText = `
         position: fixed;
         top: 20px;
         right: 20px;
@@ -217,15 +219,71 @@ class RealTimeTranslator {
         font-size: 14px;
         box-shadow: 0 2px 10px rgba(0,0,0,0.1);
       `;
-      document.body.appendChild(indicator);
+      document.body.appendChild(panel);
     }
-    indicator.textContent = message;
+    this.updateControlPanel('armed');
   }
 
-  private hideStatusIndicator(): void {
-    const indicator = document.getElementById('translation-status-indicator');
-    if (indicator) {
-      indicator.remove();
+  private updateControlPanel(state: 'armed' | 'ready-to-redraw'): void {
+    const panel = document.getElementById('screen-translate-panel');
+    if (!panel) return;
+
+    const message = state === 'armed'
+      ? 'Screen Translate active — drag a box around text to translate.'
+      : "Click 'Draw New Box' to translate another area.";
+
+    const drawNewBoxButton = state === 'ready-to-redraw'
+      ? `<button id="screen-translate-draw-btn" data-rtt-owned style="
+          background: #2196F3;
+          color: white;
+          border: none;
+          padding: 4px 10px;
+          border-radius: 3px;
+          cursor: pointer;
+          font-size: 12px;
+          margin-right: 6px;
+        ">Draw New Box</button>`
+      : '';
+
+    panel.innerHTML = `
+      <div style="margin-bottom: 8px;">${message}</div>
+      <div style="text-align: right;">
+        ${drawNewBoxButton}
+        <button id="screen-translate-stop-btn" data-rtt-owned style="
+          background: #f44336;
+          color: white;
+          border: none;
+          padding: 4px 10px;
+          border-radius: 3px;
+          cursor: pointer;
+          font-size: 12px;
+        ">Stop</button>
+      </div>
+    `;
+
+    if (state === 'ready-to-redraw') {
+      const drawBtn = document.getElementById('screen-translate-draw-btn');
+      if (drawBtn) {
+        drawBtn.addEventListener('click', () => {
+          this.clearAllOverlays();
+          this.roiSelector.startSelection();
+          this.updateControlPanel('armed');
+        });
+      }
+    }
+
+    const stopBtn = document.getElementById('screen-translate-stop-btn');
+    if (stopBtn) {
+      stopBtn.addEventListener('click', () => {
+        this.stopTranslation();
+      });
+    }
+  }
+
+  private hideControlPanel(): void {
+    const panel = document.getElementById('screen-translate-panel');
+    if (panel) {
+      panel.remove();
     }
   }
 
