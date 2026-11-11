@@ -1,40 +1,59 @@
-// content.ts - Content script for subtitle overlay
+// content.ts - Content script for the live subtitle overlay
 
 import {
   ExtensionMessage,
-  CaptureStartedMessage,
-  CaptureStoppedMessage,
   DisplaySubtitleMessage,
   UpdateStyleMessage,
   CaptionErrorMessage,
-  CaptionStatusMessage
+  CaptionStatusMessage,
+  SubtitlePosition,
+  FontSize
 } from './types';
 
-class SubtitleOverlay {
-  private isActive: boolean;
-  private overlay: HTMLDivElement | null;
+const SUBTITLE_LINGER_MS = 6000;
+const STATUS_LINGER_MS = 2500;
+const ERROR_LINGER_MS = 6000;
+const MAX_VISIBLE_LINES = 2;
+
+const POSITION_STYLES: Record<SubtitlePosition, Partial<CSSStyleDeclaration>> = {
+  top: { top: '8%', bottom: '', transform: 'translateX(-50%)' },
+  center: { top: '50%', bottom: '', transform: 'translate(-50%, -50%)' },
+  bottom: { top: '', bottom: '10%', transform: 'translateX(-50%)' }
+};
+
+const FONT_SIZES: FontSize[] = ['small', 'medium', 'large', 'x-large'];
+
+export class SubtitleOverlay {
+  private isActive = false;
+  private overlay: HTMLDivElement | null = null;
+  private captions: HTMLDivElement | null = null;
+  private notices: HTMLDivElement | null = null;
+  private position: SubtitlePosition = 'bottom';
+  private fontSize: FontSize = 'medium';
 
   constructor() {
-    this.isActive = false;
-    this.overlay = null;
     this.setupMessageListener();
-    this.detectVideoElements();
+    this.watchStyleSettings();
+  }
+
+  get active(): boolean {
+    return this.isActive;
   }
 
   private setupMessageListener(): void {
     chrome.runtime.onMessage.addListener(
-      (message: ExtensionMessage, sender: chrome.runtime.MessageSender, sendResponse: (response?: any) => void) => {
+      (message: ExtensionMessage, _sender: chrome.runtime.MessageSender, sendResponse: (response?: any) => void) => {
         switch (message.type) {
           case 'TOGGLE_SUBTITLES':
-            this.toggleSubtitles();
-            break;
+            this.toggleSubtitles().then(() => sendResponse({ active: this.isActive }));
+            return true;
 
-          case 'TOGGLE_SCREEN_TRANSLATION':
-            // Forwarded to RealTimeTranslator, handled by realTimeTranslate.js
-            break;
+          case 'GET_SUBTITLE_STATE':
+            sendResponse({ active: this.isActive });
+            return false;
 
           case 'CAPTURE_STARTED':
-            this.onCaptureStarted((message as CaptureStartedMessage).streamId);
+            this.showStatus('Listening for audio...');
             break;
 
           case 'CAPTURE_STOPPED':
@@ -43,7 +62,7 @@ class SubtitleOverlay {
 
           case 'DISPLAY_SUBTITLE': {
             const displayMsg = message as DisplaySubtitleMessage;
-            this.displaySubtitle(displayMsg.text, displayMsg.language);
+            this.displaySubtitle(displayMsg.text, displayMsg.timing);
             break;
           }
 
@@ -51,185 +70,163 @@ class SubtitleOverlay {
             this.showError((message as CaptionErrorMessage).message);
             break;
 
-          case 'CAPTION_STATUS':
-            this.showStatus((message as CaptionStatusMessage).message);
+          case 'CAPTION_STATUS': {
+            const statusMsg = message as CaptionStatusMessage;
+            this.showStatus(statusMsg.message, statusMsg.replace === true);
             break;
+          }
 
-          case 'UPDATE_STYLE':
-            this.updateSubtitleStyle((message as UpdateStyleMessage).style);
+          case 'UPDATE_STYLE': {
+            const style = (message as UpdateStyleMessage).style;
+            this.applyStyle(style.position, style.fontSize);
             break;
+          }
         }
+        return false;
       }
     );
   }
 
-  detectVideoElements() {
-    const observer = new MutationObserver((mutations) => {
-      mutations.forEach((mutation) => {
-        mutation.addedNodes.forEach((node) => {
-          if (node.nodeType === Node.ELEMENT_NODE) {
-            const element = node as Element;
-            const videos = element.tagName === 'VIDEO' ? [element] : element.querySelectorAll('video');
-            videos.forEach(video => this.setupVideoListener(video as HTMLVideoElement));
-          }
-        });
-      });
-    });
-
-    observer.observe(document.body, {
-      childList: true,
-      subtree: true
-    });
-
-    document.querySelectorAll('video').forEach(video => {
-      this.setupVideoListener(video);
-    });
-  }
-
-  setupVideoListener(video: HTMLVideoElement) {
-    video.addEventListener('play', () => {
-      if (this.isActive) {
-        this.startAudioCapture();
+  private watchStyleSettings(): void {
+    chrome.storage.sync
+      .get({ subtitleStyle: 'bottom', fontSize: 'medium' })
+      .then(s => this.applyStyle(s.subtitleStyle, s.fontSize))
+      .catch(() => undefined);
+    chrome.storage.onChanged.addListener((changes, area) => {
+      if (area !== 'sync') return;
+      if (changes.subtitleStyle || changes.fontSize) {
+        this.applyStyle(changes.subtitleStyle?.newValue, changes.fontSize?.newValue);
       }
     });
+  }
 
-    video.addEventListener('ended', () => {
-      this.stopAudioCapture();
+  applyStyle(position?: SubtitlePosition, fontSize?: FontSize): void {
+    if (position && position in POSITION_STYLES) this.position = position;
+    if (fontSize && FONT_SIZES.includes(fontSize)) this.fontSize = fontSize;
+    if (!this.overlay) return;
+    Object.assign(this.overlay.style, POSITION_STYLES[this.position]);
+    this.overlay.dataset.position = this.position;
+    this.overlay.querySelectorAll('.subtitle-text').forEach(el => {
+      FONT_SIZES.forEach(size => el.classList.toggle(size, size === this.fontSize));
     });
   }
 
-  async toggleSubtitles() {
-    this.isActive = !this.isActive;
-
+  async toggleSubtitles(): Promise<void> {
     if (this.isActive) {
-      this.createOverlay();
-      await this.startAudioCapture();
-    } else {
+      this.isActive = false;
       this.removeOverlay();
-      await this.stopAudioCapture();
+      await this.sendSafely({ type: 'STOP_CAPTURE' });
+      return;
+    }
+
+    this.isActive = true;
+    this.createOverlay();
+    const response = await this.sendSafely({ type: 'START_CAPTURE' });
+    if (!response?.success) {
+      this.isActive = false;
+      this.showError(response?.error || 'Failed to start audio capture');
     }
   }
 
-  createOverlay() {
+  private async sendSafely(message: ExtensionMessage): Promise<any> {
+    try {
+      return await chrome.runtime.sendMessage(message);
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  }
+
+  private onCaptureStopped(): void {
+    if (!this.isActive) return;
+    // Capture was stopped from elsewhere (e.g. captions started on another tab).
+    this.isActive = false;
+    this.showStatus('Captions stopped');
+  }
+
+  createOverlay(): void {
     if (this.overlay) return;
 
     this.overlay = document.createElement('div');
     this.overlay.id = 'subtitle-overlay-extension';
     this.overlay.className = 'subtitle-overlay';
-
     this.overlay.style.cssText = `
       position: fixed;
-      bottom: 10%;
       left: 50%;
-      transform: translateX(-50%);
-      z-index: 999999;
+      z-index: 2147483647;
       pointer-events: none;
       max-width: 80%;
       text-align: center;
     `;
 
+    this.notices = document.createElement('div');
+    this.notices.className = 'subtitle-notices';
+    this.captions = document.createElement('div');
+    this.captions.className = 'subtitle-captions';
+    this.overlay.append(this.notices, this.captions);
+
     document.body.appendChild(this.overlay);
+    this.applyStyle();
   }
 
-  removeOverlay() {
-    if (this.overlay) {
-      this.overlay.remove();
-      this.overlay = null;
+  removeOverlay(): void {
+    this.overlay?.remove();
+    this.overlay = null;
+    this.captions = null;
+    this.notices = null;
+  }
+
+  displaySubtitle(text: string, timing?: Record<string, number>): void {
+    if (!this.isActive || !text) return;
+    if (!this.captions) this.createOverlay();
+
+    const line = document.createElement('div');
+    line.className = `subtitle-text ${this.fontSize}`;
+    line.textContent = text;
+    if (timing) {
+      // Lets the E2E/perf harness measure pipeline latency.
+      line.dataset.timing = JSON.stringify({ ...timing, displayedAt: Date.now() });
     }
-  }
-
-  async startAudioCapture() {
-    try {
-      const response = await chrome.runtime.sendMessage({
-        type: 'START_CAPTURE'
-      });
-
-      if (!response.success) {
-        console.error('Failed to start capture:', response.error);
-        this.showError(response.error);
-      }
-    } catch (error) {
-      console.error('Error starting audio capture:', error);
-      this.showError('Failed to start audio capture');
-    }
-  }
-
-  async stopAudioCapture() {
-    try {
-      await chrome.runtime.sendMessage({
-        type: 'STOP_CAPTURE'
-      });
-    } catch (error) {
-      console.error('Error stopping audio capture:', error);
-    }
-  }
-
-  onCaptureStarted(streamId: string): void {
-    this.showStatus('Listening for audio...');
-  }
-
-  onCaptureStopped(): void {
-    this.showStatus('Audio capture stopped');
-  }
-
-  displaySubtitle(text: string, language: string): void {
-    if (!this.overlay || !text) return;
-
-    this.overlay.innerHTML = '';
-
-    const subtitleElement = document.createElement('div');
-    subtitleElement.className = 'subtitle-text';
-    subtitleElement.textContent = text;
-    this.overlay.appendChild(subtitleElement);
-
-    setTimeout(() => {
-      if (subtitleElement.parentNode) {
-        subtitleElement.remove();
-      }
-    }, 5000);
-  }
-
-  updateSubtitleStyle(style: Partial<CSSStyleDeclaration>) {
-    if (!this.overlay) return;
-    Object.assign(this.overlay.style, style);
-  }
-
-  showError(message: string) {
-    if (!this.overlay) this.createOverlay();
-
-    const errorElement = document.createElement('div');
-    errorElement.className = 'subtitle-error';
-    errorElement.textContent = `Error: ${message}`;
-    errorElement.style.color = '#ff4444';
-
-    if (this.overlay) {
-      this.overlay.appendChild(errorElement);
+    this.captions!.appendChild(line);
+    while (this.captions!.children.length > MAX_VISIBLE_LINES) {
+      this.captions!.firstElementChild!.remove();
     }
 
-    setTimeout(() => {
-      if (errorElement.parentNode) {
-        errorElement.remove();
-      }
-    }, 3000);
+    window.setTimeout(() => line.remove(), SUBTITLE_LINGER_MS);
   }
 
-  showStatus(message: string) {
-    if (!this.overlay) this.createOverlay();
+  showError(message: string): void {
+    this.addNotice('subtitle-error', `Error: ${message}`, ERROR_LINGER_MS, false);
+  }
 
-    const statusElement = document.createElement('div');
-    statusElement.className = 'subtitle-status';
-    statusElement.textContent = message;
-    statusElement.style.opacity = '0.7';
+  showStatus(message: string, replace = false): void {
+    this.addNotice('subtitle-status', message, STATUS_LINGER_MS, replace);
+  }
 
-    if (this.overlay) {
-      this.overlay.appendChild(statusElement);
+  private addNotice(className: string, text: string, lingerMs: number, replace: boolean): void {
+    if (!this.notices) this.createOverlay();
+
+    let notice: HTMLDivElement | null = replace
+      ? this.notices!.querySelector<HTMLDivElement>(`.${className}[data-replaceable]`)
+      : null;
+    if (!notice) {
+      notice = document.createElement('div');
+      notice.className = className;
+      if (replace) notice.dataset.replaceable = '';
+      this.notices!.appendChild(notice);
     }
+    notice.textContent = text;
 
-    setTimeout(() => {
-      if (statusElement.parentNode) {
-        statusElement.remove();
-      }
-    }, 2000);
+    const el = notice;
+    window.clearTimeout(Number(el.dataset.timer));
+    el.dataset.timer = String(
+      window.setTimeout(() => {
+        el.remove();
+        // Once captions are off and the last notice fades, take the overlay down too.
+        if (!this.isActive && this.notices && !this.notices.children.length && !this.captions?.children.length) {
+          this.removeOverlay();
+        }
+      }, lingerMs)
+    );
   }
 }
 
