@@ -77,3 +77,11 @@ jspm_packages/
 # Temporary files
 *.tmp
 *.temp
+
+# E2E artifacts
+e2e/.results/
+e2e/.cache/
+playwright-report/
+test-results/
+e2e/.perf/
+e2e/.perf-chrome.log

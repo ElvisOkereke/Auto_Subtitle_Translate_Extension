@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="fr">
+<head><meta charset="utf-8"><title>Screen Translate fixture</title>
+<style>
+  body { font-family: sans-serif; margin: 0; padding: 40px; }
+  #target { font-size: 28px; width: 500px; padding: 20px; background: #eee; }
+  #video-box { margin-top: 40px; width: 480px; height: 270px; background: #222; color: #fff; position: relative; }
+  #video-caption { position: absolute; bottom: 20px; left: 0; right: 0; text-align: center; font-size: 22px; }
+  #clicks { margin-top: 20px; }
+</style></head>
+<body>
+  <p id="target">Bonjour le monde</p>
+  <div id="video-box"><div id="video-caption">Premier sous-titre</div></div>
+  <div id="clicks">page clicks: <span id="click-count">0</span></div>
+  <script>
+    // Mimics a video player's click-to-toggle-playback handler.
+    let n = 0;
+    document.getElementById('video-box').addEventListener('click', () => {
+      document.getElementById('click-count').textContent = String(++n);
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Captions fixture</title></head>
+<body style="font-family:sans-serif;padding:40px;background:#333;color:#fff">
+  <h1>Captions fixture</h1>
+  <audio id="media" controls preload="auto"></audio>
+  <script>
+    // ?audio=<file> selects the clip; playback is started by the test.
+    const params = new URLSearchParams(location.search);
+    document.getElementById('media').src = '/audio/' + (params.get('audio') || 'hello.wav');
+  </script>
+</body>
+</html>

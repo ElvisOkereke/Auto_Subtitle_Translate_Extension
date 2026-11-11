@@ -1,0 +1,26 @@
+import { defineConfig } from '@playwright/test';
+
+// The extension is loaded from dist/, so `npm run build` must run first
+// (`npm run test:e2e` does this). Each test gets a fresh Chromium profile.
+export default defineConfig({
+  testDir: './e2e/tests',
+  outputDir: './e2e/.results',
+  timeout: 60_000,
+  expect: { timeout: 10_000 },
+  fullyParallel: true,
+  workers: 4,
+  reporter: [['list']],
+  globalSetup: './e2e/helpers/global-setup.ts',
+  use: {
+    trace: 'retain-on-failure',
+    screenshot: 'only-on-failure',
+  },
+  projects: [
+    { name: 'ui', testIgnore: /captions|perf|live/ },
+    // Speech tests share one persistent profile so the Whisper model is only
+    // downloaded once; Chromium locks a profile dir, so they run serially.
+    { name: 'captions', testMatch: /captions/, workers: 1, timeout: 600_000 },
+    { name: 'perf', testMatch: /perf/, workers: 1, timeout: 1_800_000 },
+    { name: 'live', testMatch: /live/, workers: 1 },
+  ],
+});
