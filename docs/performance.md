@@ -61,18 +61,19 @@ Neighbouring-line context is the single largest quality gain.
 
 In the extension (E2E, `e2e/tests/subtitle-ocr.spec.ts`): same 2.3% CER and
 0 false positives through the real content-script → iframe → worker path;
-median **21 ms per crop in Chrome with WebGPU**, 88 ms on the wasm fallback.
+median **22 ms per crop in Chrome with WebGPU**, 88 ms on the wasm fallback.
 
 ### Live path — `e2e/tests/subtitle-mode.spec.ts` (stretch s1, 29 lines, read-ahead off)
 
 | Browser | Lines shown in time | OCR CER | Latency p50 / p90 (subtitle appears → English shown) |
 |---|---|---|---|
-| Chrome 157, WebGPU | 29 / 29 | 2.6% | **0.20 s / 0.26 s** (mock translation) |
-| Chromium, wasm | 29 / 29 | 2.0% | 0.25 s / 0.36 s (mock translation) |
-| Chrome, **real DeepL** (`live-subtitles.spec.ts`) | 28 / 29 | — | **0.50 s / 0.59 s** including the DeepL round trip |
+| Chrome 157, WebGPU | 29 / 29 | 2.0% | **0.20 s / 0.32 s** (mock translation) |
+| Chromium, wasm | 29 / 29 | 2.0% | 0.25 s / 0.37 s (mock translation) |
+| Chrome, **real DeepL** (`live-subtitles.spec.ts`) | 29 / 29 | — | **0.48 s / 0.74 s** including the DeepL round trip |
+| Chromium, **real DeepL** | 29 / 29 | — | 0.54 s / 0.65 s |
 
-The one line missed with real DeepL lasts 0.57 s — shorter than a live
-OCR + network round trip; read-ahead covers it in the default configuration.
+Every measurement starts from an empty timeline store (the E2E helpers clear
+it), so no line is replayed from an earlier run.
 
 ### Read-ahead — `e2e/tests/subtitle-readahead.spec.ts` (stretch s2, 29 lines)
 
@@ -80,7 +81,7 @@ Fixture buffers ~30 s ahead like YouTube.
 
 | Browser | Translated before they appear | Median lead | Live OCR calls in steady playback |
 |---|---|---|---|
-| Chrome 157 | **29 / 29** | 28.0 s | 0 |
+| Chrome 157 | **29 / 29** | 27.9 s | 0 |
 | Chromium | **29 / 29** | 27.9 s | 0 |
 | Read-ahead disabled (same test) | 0 / 29 | 0 s | 204 |
 
