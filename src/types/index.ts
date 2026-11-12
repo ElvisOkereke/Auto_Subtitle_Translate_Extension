@@ -12,6 +12,11 @@ export type MessageType =
   | 'TRANSLATE_TEXT'
   | 'TRANSLATE_SUBTITLE_LINE'
   | 'GET_TRANSLATION_PLAN'
+  | 'UPGRADE_SUBTITLE'
+  | 'GET_VIDEO_CONTEXT'
+  | 'GET_GLOSSARY'
+  | 'EDIT_GLOSSARY_ENTRY'
+  | 'GLOSSARY_CHANGED'
   | 'TOGGLE_SUBTITLES'
   | 'GET_SUBTITLE_STATE'
   | 'CAPTURE_STARTED'
@@ -79,6 +84,14 @@ export interface DisplaySubtitleMessage extends ExtensionMessage {
   language: string;
   /** Pipeline timings in ms (segmentId, audioMs, queueMs, inferenceMs, translationMs). */
   timing?: Record<string, number>;
+  /** Lets a later UPGRADE_SUBTITLE (Claude's version) replace this caption while it is shown. */
+  captionId?: string;
+}
+
+export interface UpgradeSubtitleMessage extends ExtensionMessage {
+  type: 'UPGRADE_SUBTITLE';
+  captionId: string;
+  text: string;
 }
 
 export interface CaptionErrorMessage extends ExtensionMessage {

@@ -97,6 +97,12 @@ export const test = base.extend<ExtensionFixtures & ExtensionOptions, { server: 
       server.setAnthropicFailure(null);
       // Lets tests drive subtitle-mode internals through the content-script test bridge.
       await sw.evaluate(() => chrome.storage.local.set({ devExposeInternals: true }));
+      // Persistent profiles keep keys and engine settings from earlier tests: start each
+      // test without them so it gets exactly what it configures.
+      await sw.evaluate(async () => {
+        await chrome.storage.local.remove(['deeplApiKey', 'googleTranslateApiKey', 'anthropicApiKey', 'claudeGatewayToken']);
+        await chrome.storage.sync.remove(['translationEngineMode', 'claudeModel', 'claudeAccess', 'claudeGatewayUrl', 'claudeGatewayAuth']);
+      });
       if (mockTranslation) {
         await sw.evaluate(
           base => chrome.storage.local.set({

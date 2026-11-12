@@ -3,6 +3,7 @@
 import {
   ExtensionMessage,
   DisplaySubtitleMessage,
+  UpgradeSubtitleMessage,
   UpdateStyleMessage,
   CaptionErrorMessage,
   CaptionStatusMessage,
@@ -62,7 +63,14 @@ export class SubtitleOverlay {
 
           case 'DISPLAY_SUBTITLE': {
             const displayMsg = message as DisplaySubtitleMessage;
-            this.displaySubtitle(displayMsg.text, displayMsg.timing);
+            this.displaySubtitle(displayMsg.text, displayMsg.timing, displayMsg.captionId);
+            break;
+          }
+
+          case 'UPGRADE_SUBTITLE': {
+            // Claude's context-aware version of a caption: swap it in only while it is still shown.
+            const upgrade = message as UpgradeSubtitleMessage;
+            this.upgradeSubtitle(upgrade.captionId, upgrade.text);
             break;
           }
 
@@ -175,13 +183,14 @@ export class SubtitleOverlay {
     this.notices = null;
   }
 
-  displaySubtitle(text: string, timing?: Record<string, number>): void {
+  displaySubtitle(text: string, timing?: Record<string, number>, captionId?: string): void {
     if (!this.isActive || !text) return;
     if (!this.captions) this.createOverlay();
 
     const line = document.createElement('div');
     line.className = `subtitle-text ${this.fontSize}`;
     line.textContent = text;
+    if (captionId) line.dataset.captionId = captionId;
     if (timing) {
       // Lets the E2E/perf harness measure pipeline latency.
       line.dataset.timing = JSON.stringify({ ...timing, displayedAt: Date.now() });
@@ -192,6 +201,15 @@ export class SubtitleOverlay {
     }
 
     window.setTimeout(() => line.remove(), SUBTITLE_LINGER_MS);
+  }
+
+  upgradeSubtitle(captionId: string, text: string): void {
+    if (!this.captions || !text) return;
+    const line = [...this.captions.querySelectorAll<HTMLElement>('.subtitle-text')].find(el => el.dataset.captionId === captionId);
+    if (line) {
+      line.textContent = text;
+      line.dataset.quality = 'better';
+    }
   }
 
   showError(message: string): void {

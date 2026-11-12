@@ -70,6 +70,25 @@ describe('content script subtitle overlay', () => {
     expect(overlay()!.querySelector('.subtitle-status')!.textContent).toBe('Speech model ready');
   });
 
+  it('an upgrade replaces a displayed caption’s text in place', async () => {
+    await chromeMock.dispatch({ type: 'TOGGLE_SUBTITLES' });
+    await chromeMock.dispatch({ type: 'DISPLAY_SUBTITLE', text: 'DeepL one', language: 'en', captionId: 'c1' });
+    await chromeMock.dispatch({ type: 'DISPLAY_SUBTITLE', text: 'DeepL two', language: 'en', captionId: 'c2' });
+    await chromeMock.dispatch({ type: 'UPGRADE_SUBTITLE', captionId: 'c1', text: 'Claude one' });
+    const lines = [...overlay()!.querySelectorAll('.subtitle-text')].map(el => el.textContent);
+    expect(lines).toEqual(['Claude one', 'DeepL two']);
+  });
+
+  it('an upgrade for a caption no longer shown is ignored', async () => {
+    await chromeMock.dispatch({ type: 'TOGGLE_SUBTITLES' });
+    for (const [text, id] of [['one', 'c1'], ['two', 'c2'], ['three', 'c3']]) {
+      await chromeMock.dispatch({ type: 'DISPLAY_SUBTITLE', text, language: 'en', captionId: id });
+    }
+    await chromeMock.dispatch({ type: 'UPGRADE_SUBTITLE', captionId: 'c1', text: 'late Claude' });
+    const lines = [...overlay()!.querySelectorAll('.subtitle-text')].map(el => el.textContent);
+    expect(lines).toEqual(['two', 'three']);
+  });
+
   it('replaces download progress instead of stacking it', async () => {
     await chromeMock.dispatch({ type: 'TOGGLE_SUBTITLES' });
     await chromeMock.dispatch({ type: 'CAPTION_STATUS', message: 'Downloading speech model... 10%', replace: true });

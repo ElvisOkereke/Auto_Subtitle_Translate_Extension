@@ -13,11 +13,12 @@ import { GoogleEngine } from './translation/engines/google';
 
 // Fast (DeepL/Google) and best (Claude with video context + glossary) tiers;
 // at most 4 requests in flight, lines on screen now first.
+const glossaryStore = new GlossaryStore(chrome.storage.local);
 const translation = new TranslationService({
   settings: getSettings,
   secrets: getSecrets,
   overrides: getEndpointOverrides,
-  glossary: new GlossaryStore(chrome.storage.local),
+  glossary: glossaryStore,
   usage: new StorageUsageMeter(chrome.storage.local),
   makeClaude: cfg => new ClaudeEngine(cfg),
   makeFast: (provider, apiKey, endpoint) => (provider === 'deepl' ? new DeepLEngine({ apiKey, endpoint }) : new GoogleEngine({ apiKey, endpoint })),
@@ -32,6 +33,8 @@ const HANDLED_MESSAGE_TYPES = new Set<string>([
   'TRANSLATE_TEXT',
   'TRANSLATE_SUBTITLE_LINE',
   'GET_TRANSLATION_PLAN',
+  'GET_GLOSSARY',
+  'EDIT_GLOSSARY_ENTRY',
   'TRANSCRIPTION_RESULT',
   'TRANSCRIPTION_ERROR',
   'MODEL_LOADING_PROGRESS'
@@ -119,6 +122,23 @@ class SubtitleService {
 
         case 'GET_TRANSLATION_PLAN':
           return await translation.plan();
+
+        case 'GET_GLOSSARY': {
+          const videoKey = await this.videoKeyOfTab(message.tabId);
+          return videoKey ? await glossaryStore.list(videoKey) : { topic: null, entries: [], version: 0 };
+        }
+
+        case 'EDIT_GLOSSARY_ENTRY': {
+          // A correction or deletion from the popup: store it, then re-translate lines using it.
+          const videoKey = await this.videoKeyOfTab(message.tabId);
+          if (!videoKey || typeof message.source !== 'string' || !(typeof message.target === 'string' || message.target === null)) {
+            return { success: false, error: 'Invalid glossary edit' };
+          }
+          const target = typeof message.target === 'string' && message.target.trim() ? message.target.trim() : null;
+          const version = await glossaryStore.edit(videoKey, message.source, target);
+          await this.safeSendMessage(message.tabId, { type: 'GLOSSARY_CHANGED', terms: [message.source] });
+          return { success: true, version };
+        }
 
         case 'TRANSLATE_SUBTITLE_LINE':
           return await this.translateSubtitleLine(message, sender);
@@ -241,14 +261,82 @@ class SubtitleService {
   private async handleTranscriptionResult(text: string, timing?: Record<string, number>): Promise<void> {
     const tabId = await getActiveTabId();
     if (tabId === null || !text || !text.trim()) return;
+    const source = text.trim();
+    const captionId = `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
     const translateStartedAt = performance.now();
-    const { text: finalText, language } = await this.maybeTranslate(text.trim(), tabId);
+    const plan = await translation.plan();
+    const previousLines = await this.recentCaptions(tabId, source);
+
+    if (plan.best && !plan.fast) {
+      // Claude only: show its version (or the original if Claude fails without a fast key).
+      const best = await this.bestCaption(tabId, source, previousLines);
+      await this.safeSendMessage(tabId, {
+        type: 'DISPLAY_SUBTITLE',
+        text: best ?? source,
+        language: best ? (await getSettings()).targetLanguage : 'auto',
+        captionId,
+        timing: { ...timing, translationMs: performance.now() - translateStartedAt }
+      });
+      return;
+    }
+
+    const { text: finalText, language } = await this.maybeTranslate(source, tabId);
     await this.safeSendMessage(tabId, {
       type: 'DISPLAY_SUBTITLE',
       text: finalText,
       language,
+      captionId,
       timing: { ...timing, translationMs: performance.now() - translateStartedAt }
     });
+    if (plan.best) {
+      // Fast then best: Claude's context-aware version replaces the caption if it is still shown.
+      const best = await this.bestCaption(tabId, source, previousLines);
+      if (best && best !== finalText) await this.safeSendMessage(tabId, { type: 'UPGRADE_SUBTITLE', captionId, text: best });
+    }
+  }
+
+  /** Claude's translation of a caption with the page's video context, or null. */
+  private async bestCaption(tabId: number, source: string, previousLines: string[]): Promise<string | null> {
+    const { sourceLanguage } = await getSettings();
+    const video = await this.videoContextOf(tabId);
+    const result = await translation.translateLine({ tier: 'best', text: source, sourceLang: sourceLanguage, previousLines, nextLines: [], priority: 'live', video });
+    if (result.warning) await this.safeSendMessage(tabId, { type: 'CAPTION_ERROR', message: result.warning });
+    return result.success && result.quality === 'better' && result.translatedText ? result.translatedText : null;
+  }
+
+  /** The tab's video context (title, channel, description) from the subtitle content script. */
+  private async videoContextOf(tabId: number): Promise<typeof NO_VIDEO> {
+    try {
+      const ctx = await chrome.tabs.sendMessage(tabId, { type: 'GET_VIDEO_CONTEXT' }, { frameId: 0 });
+      if (ctx && typeof ctx.title === 'string') {
+        const tab = await chrome.tabs.get(tabId);
+        // Identity from the URL Chrome reports, context text from the page.
+        return { ...ctx, url: tab.url ?? ctx.url, videoId: tab.url ? videoIdFrom(tab.url) : null };
+      }
+    } catch {
+      // no content script (e.g. restricted page)
+    }
+    return NO_VIDEO;
+  }
+
+  /** Glossary key of the video in a tab: site-scoped video id, or the page URL. */
+  private async videoKeyOfTab(tabId: unknown): Promise<string | null> {
+    if (typeof tabId !== 'number') return null;
+    try {
+      const tab = await chrome.tabs.get(tabId);
+      return tab.url ? (videoIdFrom(tab.url) ?? tab.url) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** The last captions of this tab (source text) as context; remembers the new one. */
+  private async recentCaptions(tabId: number, source: string): Promise<string[]> {
+    const key = `recentCaptions:${tabId}`;
+    const stored = await chrome.storage.session.get(key);
+    const previous: string[] = Array.isArray(stored[key]) ? stored[key] : [];
+    await chrome.storage.session.set({ [key]: [...previous, source].slice(-3) });
+    return previous;
   }
 
   private async handleModelLoadingProgress(status: string, percent?: number): Promise<void> {

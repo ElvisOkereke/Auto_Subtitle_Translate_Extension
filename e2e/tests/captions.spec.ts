@@ -100,6 +100,25 @@ test('speech in a tab becomes translated subtitles', async ({ context, fixtureUR
   await expect.poll(() => offscreenOpen(sw)).toBe(false);
 });
 
+test('a spoken caption is shown with DeepL, then upgraded to the Claude version', async ({ context, fixtureURL, openPopup, translationCalls, configure }) => {
+  await configure({ translationProvider: 'deepl', deeplApiKey: 'test-key:fx', anthropicApiKey: 'sk-test', sourceLanguage: 'en', targetLanguage: 'fr', translationEngineMode: 'fast-then-best' });
+  const page = await context.newPage();
+  await page.goto(`${fixtureURL}/captions.html?audio=hello.wav`);
+  await startCaptions(page, openPopup);
+  await waitForModel(page);
+  await play(page);
+  const upgraded = captionLines(page).filter({ hasText: /\[CLAUDE\].*weather/i });
+  await expect(upgraded).toBeVisible({ timeout: 60_000 });
+  await expect(upgraded).toHaveAttribute('data-quality', 'better');
+  // DeepL answered first (the caption appeared with its text), Claude after.
+  const order = translationCalls.filter(c => /weather/i.test(c.text)).map(c => c.provider);
+  expect(order[0]).toBe('deepl');
+  expect(order).toContain('anthropic');
+  // Claude got the earlier caption as context.
+  const claude = translationCalls.filter(c => c.provider === 'anthropic' && c.kind === 'translate' && /weather/i.test(c.text));
+  expect(claude[0].text.toLowerCase()).toContain('hello world');
+});
+
 test('captions keep working after the service worker is restarted', async ({ context, fixtureURL, openPopup, extensionId }) => {
   const page = await context.newPage();
   await page.goto(`${fixtureURL}/captions.html?audio=hello.wav`);
