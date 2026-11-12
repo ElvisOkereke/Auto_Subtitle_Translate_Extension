@@ -36,7 +36,7 @@ interface Harness {
   saved: TimelineLine[] | null;
   overlayText(): string | null;
   /** Translation requests seen (tier + text). */
-  requests: { tier: string; text: string; video: unknown }[];
+  requests: { tier: string; text: string; video: unknown; noFallback?: boolean }[];
   /** Held best-tier answers (holdBest). */
   heldBest: (() => void)[];
 }
@@ -83,7 +83,7 @@ async function harness(
     deps: {
       ocr,
       translate: async req => {
-        h.requests.push({ tier: req.tier, text: req.text, video: req.video });
+        h.requests.push({ tier: req.tier, text: req.text, video: req.video, noFallback: req.noFallback });
         if (req.tier !== 'best') return { success: true, translatedText: `EN ${req.text}`, quality: 'fast' };
         if (opts.holdBest) await new Promise<void>(r => h.heldBest.push(r));
         return { success: true, translatedText: `CLAUDE ${req.text}`, quality: 'better' };
@@ -231,6 +231,16 @@ describe('SubtitleMode', () => {
       const line = h.mode.timeline.toJSON()[0];
       expect(line.quality).toBe('better');
       expect(h.mode.betterAt.has(line.start)).toBe(true);
+    });
+
+    it('with both tiers the Claude request asks for no fast fallback (the fast tier is already requested)', async () => {
+      const h = (current = await harness({ readAhead: false, plan: { fast: true, best: true } }));
+      await liveLine(h, SIG(200), 10, text(1));
+      expect(h.requests.find(r => r.tier === 'best')!.noFallback).toBe(true);
+      const solo = await harness({ readAhead: false, plan: { fast: false, best: true } });
+      await liveLine(solo, SIG(200), 10, text(2));
+      expect(solo.requests.find(r => r.tier === 'best')!.noFallback).toBeFalsy();
+      solo.mode.stop();
     });
 
     it('best only shows nothing until Claude answers', async () => {

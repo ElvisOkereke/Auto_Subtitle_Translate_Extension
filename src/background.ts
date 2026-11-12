@@ -22,6 +22,8 @@ const translation = new TranslationService({
   usage: new StorageUsageMeter(chrome.storage.local),
   makeClaude: cfg => new ClaudeEngine(cfg),
   makeFast: (provider, apiKey, endpoint) => (provider === 'deepl' ? new DeepLEngine({ apiKey, endpoint }) : new GoogleEngine({ apiKey, endpoint })),
+  // The popup shows the last Claude failure (e.g. a rejected key) until Claude works again.
+  reportClaudeError: error => (error ? chrome.storage.session.set({ claudeError: error }) : chrome.storage.session.remove('claudeError')),
 });
 const NO_VIDEO = { videoId: null, url: '', title: '', channel: '', description: '' };
 
@@ -276,12 +278,13 @@ class SubtitleService {
     const previousLines = await this.recentCaptions(tabId, source);
 
     if (plan.best && !plan.fast) {
-      // Claude only: show its version (or the original if Claude fails without a fast key).
-      const best = await this.bestCaption(tabId, source, previousLines);
+      // Claude only: its version, else the fast engine's fallback, else the original.
+      const best = await this.bestCaption(tabId, source, previousLines, false);
+      const shown = best.success && best.translatedText ? best.translatedText : null;
       await this.safeSendMessage(tabId, {
         type: 'DISPLAY_SUBTITLE',
-        text: best ?? source,
-        language: best ? (await getSettings()).targetLanguage : 'auto',
+        text: shown ?? source,
+        language: shown ? (await getSettings()).targetLanguage : 'auto',
         captionId,
         timing: { ...timing, translationMs: performance.now() - translateStartedAt }
       });
@@ -298,18 +301,21 @@ class SubtitleService {
     });
     if (plan.best) {
       // Fast then best: Claude's context-aware version replaces the caption if it is still shown.
-      const best = await this.bestCaption(tabId, source, previousLines);
-      if (best && best !== finalText) await this.safeSendMessage(tabId, { type: 'UPGRADE_SUBTITLE', captionId, text: best });
+      // (no fast fallback: the fast translation is already on screen)
+      const best = await this.bestCaption(tabId, source, previousLines, true);
+      if (best.success && best.quality === 'better' && best.translatedText && best.translatedText !== finalText) {
+        await this.safeSendMessage(tabId, { type: 'UPGRADE_SUBTITLE', captionId, text: best.translatedText });
+      }
     }
   }
 
-  /** Claude's translation of a caption with the page's video context, or null. */
-  private async bestCaption(tabId: number, source: string, previousLines: string[]): Promise<string | null> {
+  /** Claude's translation of a caption with the page's video context (or the fast fallback). */
+  private async bestCaption(tabId: number, source: string, previousLines: string[], noFallback: boolean) {
     const { sourceLanguage } = await getSettings();
     const video = await this.videoContextOf(tabId);
-    const result = await translation.translateLine({ tier: 'best', text: source, sourceLang: sourceLanguage, previousLines, nextLines: [], priority: 'live', video });
+    const result = await translation.translateLine({ tier: 'best', text: source, sourceLang: sourceLanguage, previousLines, nextLines: [], priority: 'live', video, noFallback });
     if (result.warning) await this.safeSendMessage(tabId, { type: 'CAPTION_ERROR', message: result.warning });
-    return result.success && result.quality === 'better' && result.translatedText ? result.translatedText : null;
+    return result;
   }
 
   /** The tab's video context (title, channel, description) from the subtitle content script. */
@@ -421,6 +427,7 @@ class SubtitleService {
       nextLines: m.nextLines ?? [],
       priority: (m.priority as JobPriority) ?? 'live',
       video,
+      noFallback: m.noFallback === true,
     });
   }
 

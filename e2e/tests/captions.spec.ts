@@ -119,6 +119,17 @@ test('a spoken caption is shown with DeepL, then upgraded to the Claude version'
   expect(claude[0].text.toLowerCase()).toContain('hello world');
 });
 
+test('Best only with Claude failing still shows the DeepL caption', async ({ context, fixtureURL, openPopup, configure, server }) => {
+  await configure({ translationProvider: 'deepl', deeplApiKey: 'test-key:fx', anthropicApiKey: 'sk-test', sourceLanguage: 'en', targetLanguage: 'fr', translationEngineMode: 'best' });
+  server.setAnthropicFailure(529);
+  const page = await context.newPage();
+  await page.goto(`${fixtureURL}/captions.html?audio=hello.wav`);
+  await startCaptions(page, openPopup);
+  await waitForModel(page);
+  await play(page);
+  await expect(captionLines(page).filter({ hasText: /\[FR\].*weather/i })).toBeVisible({ timeout: 60_000 });
+});
+
 test('captions keep working after the service worker is restarted', async ({ context, fixtureURL, openPopup, extensionId }) => {
   const page = await context.newPage();
   await page.goto(`${fixtureURL}/captions.html?audio=hello.wav`);

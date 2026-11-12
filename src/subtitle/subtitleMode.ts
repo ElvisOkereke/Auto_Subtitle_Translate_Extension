@@ -21,6 +21,8 @@ export interface TranslateRequest {
   nextLines: string[];
   priority: 'live' | 'readahead';
   video: VideoContext;
+  /** Best tier only: the fast tier was requested too, so Claude failing must not trigger a second fast request. */
+  noFallback?: boolean;
 }
 
 export interface TranslateResponse {
@@ -441,7 +443,16 @@ export class SubtitleMode {
   private async requestTier(line: TimelineLine, tier: 'fast' | 'best', priority: 'live' | 'readahead'): Promise<void> {
     const { previous, next } = this.timeline.neighbours(line.start, 2);
     const response = await this.deps
-      .translate({ tier, text: line.source, sourceLang: this.lang, previousLines: previous, nextLines: next, priority, video: this.deps.video ?? NO_VIDEO })
+      .translate({
+        tier,
+        text: line.source,
+        sourceLang: this.lang,
+        previousLines: previous,
+        nextLines: next,
+        priority,
+        video: this.deps.video ?? NO_VIDEO,
+        ...(tier === 'best' && this.deps.plan?.fast ? { noFallback: true } : {}),
+      })
       .catch(error => ({ success: false, error: String(error) }) as TranslateResponse);
     if (this.state === 'stopped') return; // late answer for a mode that is gone (stopped / navigated away)
     if (!response.success || !response.translatedText) {

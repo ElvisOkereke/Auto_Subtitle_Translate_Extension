@@ -15,7 +15,11 @@ export interface ClaudeConfig {
   baseURL: string;
   auth: { kind: 'x-api-key' | 'bearer'; token: string };
   fetch?: typeof fetch;
+  /** Per-attempt request timeout (default 20 s; the SDK's own default is 10 minutes). */
+  timeoutMs?: number;
 }
+
+const TIMEOUT_MS = 20_000;
 
 export class ClaudeEngine implements TranslationEngine {
   readonly id = 'claude' as const;
@@ -31,7 +35,9 @@ export class ClaudeEngine implements TranslationEngine {
       // for x-api-key expect exactly that header, so set it explicitly.
       ...(bearer ? {} : { defaultHeaders: { 'x-api-key': cfg.auth.token, authorization: null } }),
       dangerouslyAllowBrowser: true,
-      maxRetries: 2,
+      // A hung Claude must not hold lines (or the request lanes) for minutes: the fast tier covers.
+      maxRetries: 1,
+      timeout: cfg.timeoutMs ?? TIMEOUT_MS,
       ...(cfg.fetch ? { fetch: cfg.fetch } : {}),
     });
   }

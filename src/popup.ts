@@ -315,6 +315,18 @@ class PopupController {
     });
   }
 
+  /** The last Claude failure the service worker recorded (cleared when Claude works again). */
+  private async showClaudeError(): Promise<void> {
+    try {
+      const { claudeError } = (await chrome.storage.session.get('claudeError')) as { claudeError?: { status: number | null; message: string } };
+      if (claudeError && !this.elements.claudeStatus.textContent) {
+        this.elements.claudeStatus.textContent = `Claude error${claudeError.status ? ` (${claudeError.status})` : ''}: ${claudeError.message}`.slice(0, 240);
+      }
+    } catch {
+      // no session storage (tests) or not available: nothing to show
+    }
+  }
+
   /** Key vs gateway fields, the gateway URL check, and "(needs Claude access)" on Claude modes. */
   private updateClaudeFields(): boolean {
     const gateway = this.elements.claudeAccess.value === 'gateway';
@@ -360,6 +372,7 @@ class PopupController {
       this.elements.claudeGatewayToken.value = secrets.claudeGatewayToken;
       this.updateApiKeyVisibility();
       this.updateClaudeFields();
+      await this.showClaudeError();
 
       this.updateToggleButton();
 

@@ -56,6 +56,15 @@ describe('buildTranslateMessages', () => {
     expect(text).toContain('렙차 난다');
   });
 
+  it('sends only origin, path and video id of the page URL (no query tokens)', () => {
+    const r = req();
+    r.video = { ...r.video, url: 'https://player.example/watch/42?v=abc&token=SECRET123&sig=xyz#t=10' };
+    const text = allText(buildTranslateMessages(r).system as any) + allText(buildTopicMessages(r.video, [], 'ko', 'en').messages[0].content as any);
+    expect(text).toContain('https://player.example/watch/42?v=abc');
+    expect(text).not.toContain('SECRET123');
+    expect(text).not.toContain('sig=');
+  });
+
   it('marks page text as data to translate, never instructions', () => {
     const { system } = buildTranslateMessages(req());
     expect(allText(system as any)).toMatch(/<video_context>[\s\S]*<\/video_context>/);

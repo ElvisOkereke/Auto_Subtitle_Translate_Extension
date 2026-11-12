@@ -92,6 +92,17 @@ describe('ClaudeEngine', () => {
     expect(topic.usage?.inputTokens).toBe(1200);
   });
 
+  it('gives up on a hung Claude request after its timeout (no 10-minute SDK default)', async () => {
+    const hang = (async (_u: RequestInfo | URL, init?: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })));
+      })) as typeof fetch;
+    const engine = new ClaudeEngine({ model: 'claude-opus-5-5', baseURL: 'https://api.anthropic.com', auth: { kind: 'x-api-key', token: 'k' }, fetch: hang, timeoutMs: 100 });
+    const t0 = Date.now();
+    await expect(engine.translateBatch(req())).rejects.toBeTruthy();
+    expect(Date.now() - t0).toBeLessThan(2000); // timeout x (1 + 1 retry) plus backoff
+  });
+
   it('rejects with the HTTP status when Claude fails', async () => {
     const f = fakeFetch(() => ({ type: 'error', error: { type: 'authentication_error', message: 'bad key' } }), 401);
     const engine = new ClaudeEngine({ model: 'claude-opus-5-5', baseURL: 'https://api.anthropic.com', auth: { kind: 'x-api-key', token: 'k' }, fetch: f.fn });

@@ -9,7 +9,11 @@ function memoryArea(): StorageArea & { data: Record<string, any> } {
       return Object.fromEntries(list.filter(k => k in data).map(k => [k, structuredClone(data[k])]));
     },
     async set(items) {
+      await new Promise(r => setTimeout(r, 1)); // like chrome.storage: async, so read-modify-write can interleave
       for (const [k, v] of Object.entries(items)) data[k] = structuredClone(v);
+    },
+    async remove(keys) {
+      for (const k of Array.isArray(keys) ? keys : [keys]) delete data[k];
     },
   };
 }
@@ -139,4 +143,38 @@ describe('GlossaryStore', () => {
       { source: '뽀삐', target: 'Poppy', scope: 'topic' },
     ]);
   });
+
+  it('concurrent writes never lose each other’s terms', async () => {
+    const store = new GlossaryStore(memoryArea());
+    await store.setVideoMeta('v', { topic: 't', topicKey: 'k' });
+    await Promise.all([
+      store.learn('v', [{ source: '뽀삐', target: 'Poppy' }]),
+      store.learn('v', [{ source: '렙차', target: 'level gap' }]),
+      store.edit('v', '갱', 'gank'),
+    ]);
+    expect((await store.effective('v')).map(e => e.source).sort()).toEqual(['갱', '렙차', '뽀삐'].sort());
+  });
+
+  it('the model cannot override or re-learn a user correction or deletion', async () => {
+    const store = new GlossaryStore(memoryArea());
+    await store.setVideoMeta('v', { topic: 't', topicKey: 'k' });
+    await store.learn('v', [{ source: '뽀삐', target: 'Poppy' }, { source: '갱', target: 'gang' }]);
+    await store.edit('v', '뽀삐', 'Poppy (champion)');
+    await store.edit('v', '갱', null);
+    await store.learn('v', [{ source: '뽀삐', target: 'Poppy' }, { source: '갱', target: 'gang' }], 'chanA');
+    expect(await store.effective('v')).toEqual([{ source: '뽀삐', target: 'Poppy (champion)' }]);
+  });
+
+  it('stored videos are capped: the least recently used are pruned', async () => {
+    const area = memoryArea();
+    const store = new GlossaryStore(area, { maxVideos: 3 });
+    for (const v of ['v1', 'v2', 'v3', 'v4']) {
+      await store.setVideoMeta(v, { topic: 't', topicKey: 'k' });
+      await store.learn(v, [{ source: `term-${v}`, target: 'x' }]);
+    }
+    expect(area.data['glossary:video:v1']).toBeUndefined();
+    expect(area.data['glossary:meta:v1']).toBeUndefined();
+    expect(area.data['glossary:video:v4']).toBeDefined();
+  });
 });
+

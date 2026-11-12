@@ -2,7 +2,7 @@
 // "fast" (DeepL/Google) and "best" (Claude with video context, topic and
 // glossary) tiers, Claude batching by priority, fallback to the fast engine,
 // usage metering. Dependencies are injected so the rules are unit-tested.
-import { APIError, ExtensionSettings } from '../types';
+import { ExtensionSettings } from '../types';
 import type { Secrets } from '../settings';
 import type { EndpointOverrides } from '../services/apiService';
 import { PriorityRunner } from '../utils/priorityRunner';
@@ -29,6 +29,15 @@ export interface LineTranslateRequest {
   nextLines: string[];
   priority: 'live' | 'readahead';
   video: VideoContext;
+  /** The caller already requested the fast tier for this line: on Claude failure, don't pay for it twice. */
+  noFallback?: boolean;
+}
+
+/** Last Claude failure, for the popup (null = Claude is working). */
+export interface ClaudeErrorReport {
+  status: number | null;
+  message: string;
+  at: number;
 }
 
 export interface LineTranslateResponse {
@@ -104,9 +113,24 @@ export interface TranslationServiceDeps {
   batch?: { maxLines: number; windowMs: number };
   /** How long a line waits for the video's topic summary before going without it (ms). */
   topicWaitMs?: number;
+  /** Where the last Claude error goes (the popup shows it); null clears it. */
+  reportClaudeError?(error: ClaudeErrorReport | null): Promise<void>;
+  clock?: () => number;
 }
 
 const TOPIC_WAIT_MS = 1500;
+/** After a 429/5xx/timeout, Claude is left alone this long (fast tier carries on). */
+const COOLDOWN_MS = 30_000;
+/** A failed topic summary is retried at most this often per video. */
+const TOPIC_RETRY_MS = 60_000;
+const MAX_TRACKED_VIDEOS = 50;
+
+const statusOf = (error: unknown): number | null => {
+  const status = (error as { status?: unknown })?.status;
+  return typeof status === 'number' ? status : null;
+};
+/** Errors that won't fix themselves until the user changes the Claude settings. */
+const isConfigError = (status: number | null) => status === 400 || status === 401 || status === 403 || status === 404;
 
 interface BatchContext {
   sourceLang: string;
@@ -124,8 +148,13 @@ export class TranslationService {
   private readonly batcher: ClaudeBatcher;
   private readonly batchContexts = new Map<string, BatchContext>();
   private readonly topics = new Map<string, Promise<void>>();
+  private readonly topicFailedAt = new Map<string, number>();
   private lineSeq = 0;
   private authWarned = false;
+  /** Claude is skipped until this time (transient errors)... */
+  private coolUntil = 0;
+  /** ...or while the settings are the ones that produced a config error (401/403/400). */
+  private brokenConfig: string | null = null;
 
   constructor(private readonly deps: TranslationServiceDeps) {
     const { maxLines, windowMs } = deps.batch ?? { maxLines: 8, windowMs: 150 };
@@ -148,7 +177,8 @@ export class TranslationService {
     const hasClaude = this.claudeConfig(settings, secrets, overrides) !== null;
     const mode = settings.translationEngineMode;
     if (mode === 'fast') return { fast: true, best: false };
-    if (mode === 'best') return { fast: false, best: hasClaude };
+    // Best only needs Claude; without it, fall back to the fast engine rather than translate nothing.
+    if (mode === 'best') return hasClaude ? { fast: false, best: true } : { fast: true, best: false };
     return { fast: true, best: hasClaude };
   }
 
@@ -178,22 +208,39 @@ export class TranslationService {
     }
 
     const cfg = this.claudeConfig(settings, secrets, overrides);
+    const cfgSignature = cfg ? JSON.stringify([cfg.baseURL, cfg.model, cfg.auth]) : null;
+    if (this.brokenConfig !== null && this.brokenConfig !== cfgSignature) {
+      this.brokenConfig = null; // settings changed: try Claude again
+      this.authWarned = false;
+    }
     let warning: string | undefined;
     let claudeError = 'Claude access is not configured';
-    if (cfg) {
+    const now = this.now();
+    if (cfg && this.brokenConfig === cfgSignature) {
+      claudeError = 'Claude rejected the current settings - check the Claude key or gateway in the popup';
+    } else if (cfg && now < this.coolUntil) {
+      claudeError = 'Claude is cooling down after an error';
+    } else if (cfg) {
       try {
         const text = await this.translateWithClaude(req, targetLang, cfg);
-        if (text) return { success: true, translatedText: text, quality: 'better', engine: 'claude' };
+        if (text) {
+          void this.report(null);
+          return { success: true, translatedText: text, quality: 'better', engine: 'claude' };
+        }
         claudeError = 'Claude returned no translation for this line';
       } catch (error) {
+        const status = statusOf(error);
         claudeError = `Claude: ${errorMessage(error)}`;
-        if (error instanceof APIError ? error.status === 401 : (error as { status?: number })?.status === 401) {
-          if (!this.authWarned) warning = 'Claude rejected the API key or token (401) - check the Claude settings.';
+        if (isConfigError(status)) this.brokenConfig = cfgSignature;
+        else this.coolUntil = this.now() + COOLDOWN_MS;
+        void this.report({ status, message: errorMessage(error), at: this.now() });
+        if (status === 401 || status === 403) {
+          if (!this.authWarned) warning = 'Claude rejected the API key or token - check the Claude settings.';
           this.authWarned = true;
         }
       }
     }
-    if (!fastKey) return { success: false, error: claudeError, ...(warning ? { warning } : {}) };
+    if (!fastKey || req.noFallback) return { success: false, error: claudeError, ...(warning ? { warning } : {}) };
     try {
       return { ...(await fast()), ...(warning ? { warning } : {}) };
     } catch (error) {
@@ -210,6 +257,22 @@ export class TranslationService {
     await this.ensureTopic(video.videoId ?? video.url, req, settings.targetLanguage, this.deps.makeClaude(cfg));
   }
 
+  private now(): number {
+    return this.deps.clock ? this.deps.clock() : Date.now();
+  }
+
+  private errorReported = false;
+
+  private async report(error: ClaudeErrorReport | null): Promise<void> {
+    if (!error && !this.errorReported) return; // nothing to clear (no storage write per line)
+    this.errorReported = !!error;
+    try {
+      await this.deps.reportClaudeError?.(error);
+    } catch {
+      // reporting is best-effort
+    }
+  }
+
   private async translateWithClaude(req: LineTranslateRequest, targetLang: string, cfg: ClaudeConfig): Promise<string | null> {
     const claude = this.deps.makeClaude(cfg);
     const videoKey = req.video.videoId ?? req.video.url;
@@ -217,7 +280,9 @@ export class TranslationService {
     // lines must not wait seconds for it: give it a short head start only.
     await Promise.race([this.ensureTopic(videoKey, req, targetLang, claude), new Promise(r => setTimeout(r, this.deps.topicWaitMs ?? TOPIC_WAIT_MS))]);
     const key = JSON.stringify([videoKey, req.sourceLang, targetLang, cfg.model, cfg.baseURL]);
+    this.batchContexts.delete(key); // re-insert: most recent last
     this.batchContexts.set(key, { sourceLang: req.sourceLang, targetLang, video: req.video, videoKey, claude });
+    trimOldest(this.batchContexts, MAX_TRACKED_VIDEOS);
     const line = (): LineRequest => ({ id: `L${++this.lineSeq}`, text: req.text, previous: req.previousLines, next: req.nextLines });
     // Models occasionally skip a line in a batch: ask once more for it alone.
     return (await this.batcher.add(key, line(), req.priority)) ?? this.batcher.add(key, line(), 'live');
@@ -227,8 +292,14 @@ export class TranslationService {
   private ensureTopic(videoKey: string, req: LineTranslateRequest, targetLang: string, claude: ClaudeLike): Promise<void> {
     let pending = this.topics.get(videoKey);
     if (!pending) {
+      const failedAt = this.topicFailedAt.get(videoKey);
+      if (failedAt !== undefined && this.now() - failedAt < TOPIC_RETRY_MS) return Promise.resolve();
       pending = (async () => {
-        if (await this.deps.glossary.getVideoMeta(videoKey)) return;
+        try {
+          if (await this.deps.glossary.getVideoMeta(videoKey)) return;
+        } catch {
+          // storage trouble: summarise anyway
+        }
         let topic: TopicResult;
         try {
           topic = await this.claudeRunner.run(
@@ -237,28 +308,54 @@ export class TranslationService {
           );
         } catch (error) {
           console.warn('Topic summary failed:', error);
-          this.topics.delete(videoKey); // try again with a later line
+          this.topics.delete(videoKey);
+          this.topicFailedAt.set(videoKey, this.now()); // retried after TOPIC_RETRY_MS, not on every line
+          trimOldest(this.topicFailedAt, MAX_TRACKED_VIDEOS);
           return;
         }
-        await this.deps.glossary.setVideoMeta(videoKey, { topic: topic.topic, topicKey: topic.topicKey });
-        await this.deps.glossary.learn(videoKey, topic.glossary, req.video.channel);
-        if (topic.usage) await this.deps.usage.record(topic.usage, 0);
+        // Best-effort persistence: a full storage must not break translation.
+        await bestEffort(async () => {
+          await this.deps.glossary.setVideoMeta(videoKey, { topic: topic.topic, topicKey: topic.topicKey });
+          await this.deps.glossary.learn(videoKey, topic.glossary, req.video.channel);
+        });
+        if (topic.usage) await bestEffort(() => this.deps.usage.record(topic.usage!, 0));
       })();
       this.topics.set(videoKey, pending);
+      trimOldest(this.topics, MAX_TRACKED_VIDEOS);
     }
     return pending;
   }
 
   private async runClaudeBatch(key: string, lines: LineRequest[], priority: 'live' | 'readahead'): Promise<Map<string, string>> {
     const ctx = this.batchContexts.get(key)!;
-    const [meta, glossary] = await Promise.all([this.deps.glossary.getVideoMeta(ctx.videoKey), this.deps.glossary.effective(ctx.videoKey)]);
+    const [meta, glossary] = await Promise.all([
+      this.deps.glossary.getVideoMeta(ctx.videoKey).catch(() => null),
+      this.deps.glossary.effective(ctx.videoKey).catch(() => []),
+    ]);
     const result = await this.claudeRunner.run(
       () => ctx.claude.translateBatch({ sourceLang: ctx.sourceLang, targetLang: ctx.targetLang, lines, video: ctx.video, topic: meta?.topic || null, glossary }),
       priority
     );
-    await this.deps.glossary.learn(ctx.videoKey, result.glossaryUpdates, ctx.video.channel);
-    if (result.usage) await this.deps.usage.record(result.usage, result.translations.length);
+    // The translations are paid for: storage trouble while recording must not lose them.
+    await bestEffort(() => this.deps.glossary.learn(ctx.videoKey, result.glossaryUpdates, ctx.video.channel));
+    if (result.usage) await bestEffort(() => this.deps.usage.record(result.usage!, result.translations.length));
     return new Map(result.translations.map(t => [t.id, t.text]));
+  }
+}
+
+async function bestEffort(fn: () => Promise<unknown>): Promise<void> {
+  try {
+    await fn();
+  } catch (error) {
+    console.warn('Translation bookkeeping failed:', error);
+  }
+}
+
+/** Keeps a Map to its `max` most recently inserted entries. */
+function trimOldest<K, V>(map: Map<K, V>, max: number): void {
+  for (const key of map.keys()) {
+    if (map.size <= max) break;
+    map.delete(key);
   }
 }
 

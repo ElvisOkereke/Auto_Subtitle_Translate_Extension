@@ -30,12 +30,23 @@ const CACHE = { type: 'ephemeral' as const };
 
 const escapeTags = (s: string) => s.replace(/</g, '‹').replace(/>/g, '›');
 
+/** Origin, path and the video id only: query strings can carry session tokens or signatures. */
+export function shareableUrl(url: string): string {
+  try {
+    const u = new URL(url);
+    const v = u.searchParams.get('v');
+    return `${u.origin}${u.pathname}${v ? `?v=${encodeURIComponent(v)}` : ''}`;
+  } catch {
+    return '';
+  }
+}
+
 function videoBlock(video: VideoContext): string {
   return [
     '<video_context>',
     `Title: ${escapeTags(video.title)}`,
     `Channel: ${escapeTags(video.channel)}`,
-    `URL: ${escapeTags(video.url)}`,
+    `URL: ${escapeTags(shareableUrl(video.url))}`,
     `Description: ${escapeTags(video.description.slice(0, DESCRIPTION_MAX))}`,
     '</video_context>',
   ].join('\n');

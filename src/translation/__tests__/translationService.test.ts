@@ -41,6 +41,8 @@ interface Fakes {
   setClaudeDrop(ids: boolean): void;
   /** Drop this many lines from replies, once each (model skipping ids). */
   dropOnce(texts: string[]): void;
+  errors: (unknown)[];
+  now: { t: number };
 }
 
 function fakes(opts: { settings?: Partial<typeof DEFAULT_SETTINGS>; secrets?: Record<string, string>; topicMs?: number; claudeMs?: number } = {}): Fakes {
@@ -52,6 +54,8 @@ function fakes(opts: { settings?: Partial<typeof DEFAULT_SETTINGS>; secrets?: Re
   f.setClaudeFailure = e => (failure = e);
   f.setClaudeDrop = d => (drop = d);
   f.dropOnce = texts => (dropTexts = new Set(texts));
+  f.errors = [];
+  f.now = { t: 1_000_000 };
   const deps: TranslationServiceDeps = {
     settings: async () => ({ ...DEFAULT_SETTINGS, translationProvider: 'deepl', ...opts.settings }),
     secrets: async () => ({ deeplApiKey: 'k:fx', googleTranslateApiKey: '', anthropicApiKey: 'sk-ant', claudeGatewayToken: '', ...opts.secrets }),
@@ -88,6 +92,10 @@ function fakes(opts: { settings?: Partial<typeof DEFAULT_SETTINGS>; secrets?: Re
     }),
     batch: { maxLines: 8, windowMs: 20 },
     topicWaitMs: 100,
+    reportClaudeError: async e => {
+      f.errors.push(e);
+    },
+    clock: () => f.now.t,
   };
   f.service = new TranslationService(deps);
   return f;
@@ -98,6 +106,8 @@ describe('TranslationService', () => {
     expect(await fakes().service.plan()).toEqual({ fast: true, best: true });
     expect(await fakes({ settings: { translationEngineMode: 'fast' } }).service.plan()).toEqual({ fast: true, best: false });
     expect(await fakes({ settings: { translationEngineMode: 'best' } }).service.plan()).toEqual({ fast: false, best: true });
+    // Best only without Claude access falls back to the fast engine (subtitles must not disappear).
+    expect(await fakes({ settings: { translationEngineMode: 'best' }, secrets: { anthropicApiKey: '' } }).service.plan()).toEqual({ fast: true, best: false });
     expect(await fakes({ secrets: { anthropicApiKey: '' } }).service.plan()).toEqual({ fast: true, best: false });
     const gatewayNoToken = fakes({ settings: { claudeAccess: 'gateway', claudeGatewayUrl: 'https://gw.example' }, secrets: { anthropicApiKey: '' } });
     expect(await gatewayNoToken.service.plan()).toEqual({ fast: true, best: false });
@@ -229,6 +239,70 @@ describe('TranslationService', () => {
     const results = await Promise.all(['a', 'b', 'c'].map(t => f.service.translateLine(request({ text: t, priority: 'readahead' }))));
     expect(results.map(r => r.translatedText)).toEqual(['CLAUDE(a)', 'CLAUDE(b)', 'CLAUDE(c)']);
     expect(f.claudeBatches[f.claudeBatches.length - 1].lines.map(l => l.text)).toEqual(['b']);
+  });
+
+  it('noFallback: a best request whose caller already asked for the fast tier is not translated twice by DeepL', async () => {
+    const f = fakes();
+    f.setClaudeFailure(new APIError('overloaded', 529));
+    const r = await f.service.translateLine(request({ noFallback: true }));
+    expect(r.success).toBe(false);
+    expect(f.fastCalls).toEqual([]);
+  });
+
+  it('after a 429/5xx Claude is skipped for a cooldown; after a 401 until the settings change', async () => {
+    const f = fakes();
+    await f.service.translateLine(request({ text: 'warm-up' }));
+    f.setClaudeFailure(new APIError('rate limited', 429));
+    await f.service.translateLine(request({ text: 'a' }));
+    const calls = f.claudeBatches.length;
+    await f.service.translateLine(request({ text: 'b' }));
+    expect(f.claudeBatches.length).toBe(calls); // cooling down: no new Claude call
+    f.setClaudeFailure(null);
+    f.now.t += 31_000;
+    expect((await f.service.translateLine(request({ text: 'c' }))).engine).toBe('claude');
+
+    const g = fakes();
+    await g.service.translateLine(request({ text: 'warm-up' }));
+    g.setClaudeFailure(new APIError('bad key', 401));
+    await g.service.translateLine(request({ text: 'a' }));
+    const after401 = g.claudeBatches.length;
+    g.now.t += 600_000;
+    await g.service.translateLine(request({ text: 'b' }));
+    expect(g.claudeBatches.length).toBe(after401); // still the same bad key: not retried
+  });
+
+  it('Claude errors are reported (for the popup) and cleared after a success', async () => {
+    const f = fakes();
+    f.setClaudeFailure(new APIError('bad key', 401));
+    await f.service.translateLine(request());
+    expect(f.errors[f.errors.length - 1]).toMatchObject({ status: 401 });
+    f.setClaudeFailure(null);
+    f.now.t += 600_000;
+    await (f.service as any).deps.settings().then(() => undefined);
+    (f.service as any).brokenConfig = null; // as if the key was fixed in the popup
+    await f.service.translateLine(request({ text: '렙차' }));
+    expect(f.errors[f.errors.length - 1]).toBeNull();
+    const ok = fakes();
+    await ok.service.translateLine(request());
+    expect(ok.errors).toEqual([]); // nothing to clear: no write
+  });
+
+  it('a failed topic summary is not retried on every line', async () => {
+    const f = fakes();
+    let topicFailures = 0;
+    (f.service as any).deps.makeClaude = ((orig: any) => (cfg: any) => {
+      const e = orig(cfg);
+      return { ...e, translateBatch: e.translateBatch, summarizeTopic: async () => { topicFailures++; throw new APIError('overloaded', 529); } };
+    })((f.service as any).deps.makeClaude);
+    for (const t of ['a', 'b', 'c']) await f.service.translateLine(request({ text: t, sourceLang: 'ko' }));
+    expect(topicFailures).toBe(1);
+  });
+
+  it('storage errors while recording glossary or usage never throw away a translation', async () => {
+    const f = fakes();
+    (f.service as any).deps.glossary.learn = async () => { throw new Error('QUOTA_BYTES quota exceeded'); };
+    (f.service as any).deps.usage.record = async () => { throw new Error('QUOTA_BYTES quota exceeded'); };
+    expect(await f.service.translateLine(request())).toMatchObject({ engine: 'claude', translatedText: 'CLAUDE(뽀삐 나왔네)' });
   });
 });
 

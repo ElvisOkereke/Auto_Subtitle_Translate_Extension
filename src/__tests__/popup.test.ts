@@ -91,11 +91,12 @@ describe('popup modes', () => {
 });
 
 describe('popup translation engine settings', () => {
-  async function loadPopup(syncData: Record<string, unknown> = {}, localData: Record<string, unknown> = {}) {
+  async function loadPopup(syncData: Record<string, unknown> = {}, localData: Record<string, unknown> = {}, sessionData: Record<string, unknown> = {}) {
     const html = fs.readFileSync(path.join(__dirname, '../../popup.html'), 'utf8');
     document.documentElement.innerHTML = html.replace(/<script[\s\S]*?<\/script>/g, '');
     const chromeMock = installChromeMock(syncData);
     (chromeMock as any).storage.local.get = jest.fn(async () => localData);
+    (chromeMock as any).storage.session = { get: jest.fn(async () => sessionData) };
     chromeMock.tabs.query.mockResolvedValue([{ id: 1 }]);
     chromeMock.tabs.sendMessage.mockImplementation(async (_id: number, msg: any) => {
       if (msg.type === 'GET_SUBTITLE_MODE_STATE') return { mode: 'off', state: 'stopped', videoId: 'v1', hasBox: false };
@@ -152,6 +153,12 @@ describe('popup translation engine settings', () => {
     el('anthropicApiKey').dispatchEvent(new Event('change'));
     await new Promise(r => setTimeout(r, 10));
     expect(label('best')).not.toMatch(/needs Claude access/);
+  });
+
+  it('shows the last Claude error (e.g. a rejected key) in the Claude settings', async () => {
+    await loadPopup({}, { anthropicApiKey: 'sk-bad' }, { claudeError: { status: 401, message: 'invalid x-api-key', at: Date.now() } });
+    expect(el('claudeStatus').textContent).toMatch(/401/);
+    expect(el('claudeStatus').textContent).toMatch(/invalid x-api-key/);
   });
 });
 
