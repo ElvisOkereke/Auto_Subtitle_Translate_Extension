@@ -7,7 +7,8 @@
   body { margin: 0; background: #0f0f0f; color: #f1f1f1; font-family: sans-serif; }
   #page { padding: 24px; }
   /* Mirrors YouTube's player DOM so selectors/behaviour match the real site. */
-  #movie_player { position: relative; width: 1280px; height: 720px; background: #000; }
+  #movie_player { position: relative; width: min(1280px, calc(100vw - 48px)); aspect-ratio: 16 / 9; background: #000; }
+  #movie_player:fullscreen { width: 100vw; height: 100vh; aspect-ratio: auto; }
   .html5-video-container, .html5-main-video { width: 100%; height: 100%; }
   .html5-main-video { display: block; object-fit: contain; }
   #page-text { margin-top: 24px; font-size: 22px; width: 600px; }
@@ -20,6 +21,7 @@
       <video class="html5-main-video" muted playsinline></video>
     </div>
   </div>
+  <button id="fs-btn" onclick="document.getElementById('movie_player').requestFullscreen()">Fullscreen</button>
   <p id="page-text">자막이 아닌 일반 페이지 텍스트입니다</p>
 </div>
 <script>
