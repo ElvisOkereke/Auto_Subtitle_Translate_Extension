@@ -7,6 +7,7 @@ import { boxToPage, contentRect, pageToBox, Rect } from './videoGeometry';
 import { videoIdFrom } from './videoId';
 import { MseReadAhead } from './readAhead/readAheadSource';
 import { ModeLauncher } from './modeLauncher';
+import { readVideoContext } from './videoContext';
 import type { NormalizedBox, SubtitleLanguage } from './types';
 
 const MIN_BOX_WIDTH = 24;
@@ -64,7 +65,21 @@ async function startMode(video: HTMLVideoElement, videoId: string, box: Normaliz
     await client.preload(lang); // first run downloads the OCR models
     const { devSubtitle } = await chrome.storage.local.get('devSubtitle');
     const readAhead = devSubtitle?.readAhead === false ? null : new MseReadAhead(video, box);
-    return SubtitleMode.start({ video, videoId, box, lang, deps: { ocr: client, translate, store: client.timelineStorage(), readAhead } });
+    const plan = await chrome.runtime.sendMessage({ type: 'GET_TRANSLATION_PLAN' }).catch(() => null);
+    return SubtitleMode.start({
+      video,
+      videoId,
+      box,
+      lang,
+      deps: {
+        ocr: client,
+        translate,
+        store: client.timelineStorage(),
+        readAhead,
+        plan: plan && typeof plan.fast === 'boolean' ? plan : { fast: true, best: false },
+        video: readVideoContext(document, location.href),
+      },
+    });
   });
   if (started) enabled = true;
 }
@@ -132,6 +147,14 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       })().then(sendResponse, e => sendResponse({ success: false, error: String(e) }));
       return true;
     }
+    case 'GET_VIDEO_CONTEXT':
+      // Audio mode asks what the video is about (translator context).
+      sendResponse(readVideoContext(document, location.href));
+      return false;
+    case 'GLOSSARY_CHANGED':
+      // A glossary entry was corrected in the popup: re-translate lines using it.
+      launcher.current?.onGlossaryChanged(Array.isArray(message.terms) ? message.terms : []);
+      return false;
     case 'STOP_SUBTITLE_MODE':
       enabled = false;
       stopMode();
@@ -176,7 +199,15 @@ installTestBridge({
     return mode
       ? mode.timeline
           .toJSON()
-          .map(l => ({ start: l.start, end: l.end, source: l.source, translation: l.translation, translatedAt: mode.translatedAt.get(l.start) ?? null }))
+          .map(l => ({
+            start: l.start,
+            end: l.end,
+            source: l.source,
+            translation: l.translation,
+            quality: l.quality,
+            translatedAt: mode.translatedAt.get(l.start) ?? null,
+            betterAt: mode.betterAt.get(l.start) ?? null,
+          }))
       : [];
   },
   'mode.stats': async () => {

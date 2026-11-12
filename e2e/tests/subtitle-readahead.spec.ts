@@ -6,6 +6,7 @@ import { CACHE, FIXTURES, ROOT } from '../helpers/paths';
 import { browserKind } from '../helpers/launch';
 import { astTest } from '../helpers/bridge';
 import { charErrorRate } from '../helpers/cer';
+import { clearTranslationState } from '../helpers/subtitles';
 
 // Read-ahead: the fixture plays stretch s2 through MSE with ~30 s buffered ahead
 // (like YouTube); the extension decodes that buffer and translates subtitles
@@ -18,7 +19,7 @@ interface Line { stretch: string; start: number; end: number; ko: string }
 const lines: Line[] = JSON.parse(fs.readFileSync(path.join(FIXTURES, 'subtitles/_zIrbXw-SVs.timeline.json'), 'utf8')).lines.filter(
   (l: Line) => l.stretch === 's2'
 );
-interface TLine { start: number; end: number | null; source: string; translation: string | null; translatedAt: number | null }
+interface TLine { start: number; end: number | null; source: string; translation: string | null; translatedAt: number | null; betterAt: number | null }
 interface Stats { state: string; ocrCalls: number; raOcrCalls: number; readAheadLead: number }
 
 async function drawBox(page: Page) {
@@ -34,7 +35,9 @@ async function drawBox(page: Page) {
 
 test('subtitles are translated before they appear', async ({ context, fixtureURL, openPopup, configure, sw }) => {
   test.setTimeout(420_000);
-  await configure({ translationProvider: 'deepl', deeplApiKey: 'k:fx', targetLanguage: 'en', subtitleLanguage: 'ko' });
+  // Both tiers (mock DeepL + mock Claude): read-ahead should get Claude's version in before lines appear too.
+  await configure({ translationProvider: 'deepl', deeplApiKey: 'k:fx', anthropicApiKey: 'sk-test', targetLanguage: 'en', subtitleLanguage: 'ko', translationEngineMode: 'fast-then-best' });
+  await clearTranslationState(sw);
   await sw.evaluate(off => chrome.storage.local.set({ devSubtitle: { readAhead: !off } }), !!process.env.READAHEAD_OFF);
 
   const page = await context.newPage();
@@ -65,10 +68,12 @@ test('subtitles are translated before they appear', async ({ context, fixtureURL
 
   const notReady: string[] = [];
   let ready = 0;
+  let claudeReady = 0;
   for (const line of lines) {
     const match = timeline.find(
       tl => tl.start >= line.start - 0.6 && tl.start <= line.end && charErrorRate(line.ko, tl.source).errors / [...line.ko.replace(/\s+/g, '')].length <= 0.5
     );
+    if (match?.betterAt !== null && match?.betterAt !== undefined && match.betterAt < line.start) claudeReady++;
     if (match?.translatedAt !== null && match?.translatedAt !== undefined && match.translatedAt < line.start) ready++;
     else notReady.push(`${line.start.toFixed(2)} ${line.ko} (translatedAt ${match?.translatedAt?.toFixed(2) ?? 'never'})`);
   }
@@ -79,6 +84,7 @@ test('subtitles are translated before they appear', async ({ context, fixtureURL
     lines: lines.length,
     readyBeforeShown: ready,
     readyBeforeShownRatio: ready / lines.length,
+    claudeReadyBeforeShownRatio: claudeReady / lines.length,
     notReady,
     medianLead: [...leads].sort((a, b) => a - b)[Math.floor(leads.length / 2)] ?? 0,
     liveOcrCallsSteady: end.ocrCalls - (atSteady?.ocrCalls ?? 0),
@@ -90,5 +96,6 @@ test('subtitles are translated before they appear', async ({ context, fixtureURL
   fs.writeFileSync(path.join(ROOT, `e2e/.perf/subtitle-readahead-${browserKind()}.json`), JSON.stringify(report, null, 2));
 
   expect(report.readyBeforeShownRatio).toBeGreaterThanOrEqual(0.9);
+  if (!process.env.READAHEAD_OFF) expect(report.claudeReadyBeforeShownRatio).toBeGreaterThanOrEqual(0.9);
   expect(report.liveOcrCallsSteady).toBeLessThanOrEqual(Math.ceil(0.1 * steadyLines));
 });

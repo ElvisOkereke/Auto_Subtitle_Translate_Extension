@@ -35,9 +35,15 @@ interface Harness {
   sampleNow: { sig: Uint8Array; videoTime: number; grab: () => Promise<ImageBitmap> } | null;
   saved: TimelineLine[] | null;
   overlayText(): string | null;
+  /** Translation requests seen (tier + text). */
+  requests: { tier: string; text: string; video: unknown }[];
+  /** Held best-tier answers (holdBest). */
+  heldBest: (() => void)[];
 }
 
-async function harness(opts: { holdAccurate?: boolean; readAhead?: boolean; stored?: TimelineLine[] } = {}): Promise<Harness> {
+async function harness(
+  opts: { holdAccurate?: boolean; readAhead?: boolean; stored?: TimelineLine[]; plan?: { fast: boolean; best: boolean }; holdBest?: boolean } = {}
+): Promise<Harness> {
   const player = document.createElement('div');
   player.className = 'html5-video-player';
   const video = document.createElement('video');
@@ -48,7 +54,7 @@ async function harness(opts: { holdAccurate?: boolean; readAhead?: boolean; stor
   player.appendChild(video);
   document.body.appendChild(player);
 
-  const h = { video, fastCalls: 0, liveText: '', held: [], sampleNow: null, saved: null } as unknown as Harness;
+  const h = { video, fastCalls: 0, liveText: '', held: [], sampleNow: null, saved: null, requests: [], heldBest: [] } as unknown as Harness;
   const ocr: SubtitleModeDeps['ocr'] = {
     recognize(c, _lang, tier) {
       const result = (t: string): OcrResult => ({ text: t, confidence: t ? 1 : 0, ms: 1, tier: tier ?? 'fast' });
@@ -76,7 +82,14 @@ async function harness(opts: { holdAccurate?: boolean; readAhead?: boolean; stor
     lang: 'ko',
     deps: {
       ocr,
-      translate: async req => ({ success: true, translatedText: `EN ${req.text}` }),
+      translate: async req => {
+        h.requests.push({ tier: req.tier, text: req.text, video: req.video });
+        if (req.tier !== 'best') return { success: true, translatedText: `EN ${req.text}`, quality: 'fast' };
+        if (opts.holdBest) await new Promise<void>(r => h.heldBest.push(r));
+        return { success: true, translatedText: `CLAUDE ${req.text}`, quality: 'better' };
+      },
+      plan: opts.plan,
+      video: { videoId: 'vid', url: 'https://www.youtube.com/watch?v=vid', title: 'LoL', channel: 'c', description: 'd' },
       store: {
         load: async () => new Timeline(opts.stored ?? []),
         save: async (_id, timeline) => {
@@ -196,5 +209,53 @@ describe('SubtitleMode', () => {
     await flush();
     expect(h.fastCalls).toBe(1);
     expect(h.overlayText()).toBe(`EN ${text(7)}`);
+  });
+
+  describe('fast then best', () => {
+    it('the fast translation shows first, then the Claude version replaces it once', async () => {
+      const h = (current = await harness({ readAhead: false, plan: { fast: true, best: true }, holdBest: true }));
+      await liveLine(h, SIG(200), 10, text(1));
+      expect(h.overlayText()).toBe(`EN ${text(1)}`);
+      expect(h.requests.map(r => r.tier).sort()).toEqual(['best', 'fast']);
+      expect(h.requests[0].video).toMatchObject({ title: 'LoL' });
+      h.heldBest.shift()!();
+      await flush();
+      expect(h.overlayText()).toBe(`CLAUDE ${text(1)}`);
+      expect(h.mode.timeline.at(10.2)).toMatchObject({ translation: `CLAUDE ${text(1)}`, quality: 'better' });
+    });
+
+    it('best only shows nothing until Claude answers', async () => {
+      const h = (current = await harness({ readAhead: false, plan: { fast: false, best: true }, holdBest: true }));
+      await liveLine(h, SIG(200), 10, text(1));
+      expect(h.requests.map(r => r.tier)).toEqual(['best']);
+      expect(h.overlayText()).toBeNull();
+      h.heldBest.shift()!();
+      await flush();
+      expect(h.overlayText()).toBe(`CLAUDE ${text(1)}`);
+    });
+
+    it('a best answer arriving after stop() is dropped', async () => {
+      const h = await harness({ readAhead: false, plan: { fast: true, best: true }, holdBest: true });
+      await liveLine(h, SIG(200), 10, text(1));
+      h.mode.stop();
+      await flush();
+      h.heldBest.shift()!();
+      await flush();
+      expect(h.mode.timeline.toJSON()[0].translation).toBe(`EN ${text(1)}`); // (stop closed the line at the last frame)
+      expect(document.querySelector('.ast-subtitle-overlay')).toBeNull();
+    });
+
+    it('a glossary correction re-translates matching lines and swaps the one on screen once', async () => {
+      const h = (current = await harness({ readAhead: false, plan: { fast: true, best: true } }));
+      await liveLine(h, SIG(200), 10, text(1));
+      expect(h.overlayText()).toBe(`CLAUDE ${text(1)}`);
+      const before = h.requests.length;
+      h.mode.onGlossaryChanged([text(1).slice(0, 2), 'not-in-any-line']);
+      await flush();
+      expect(h.requests.slice(before).map(r => r.tier)).toEqual(['best']);
+      h.mode.onGlossaryChanged(['nothing matches']);
+      await flush();
+      expect(h.requests.length).toBe(before + 1);
+    });
   });
 });

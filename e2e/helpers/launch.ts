@@ -47,6 +47,13 @@ function baseArgs(o: LaunchOptions): string[] {
  *   Windows) it ships the D3D12 shader compiler WebGPU needs.
  */
 export async function launchExtensionBrowser(o: LaunchOptions): Promise<LaunchedBrowser> {
+  // Persistent profiles can keep running a cached service-worker script even
+  // after the extension version changes (seen in Chromium too: a new background
+  // message type went unanswered). Drop the registrations before every launch;
+  // the Cache API data next to them (downloaded models) is kept.
+  for (const dir of ['Database', 'ScriptCache']) {
+    fs.rmSync(`${o.profileDir}/Default/Service Worker/${dir}`, { recursive: true, force: true });
+  }
   if (browserKind() === 'chromium') {
     const context = await chromium.launchPersistentContext(o.profileDir, {
       channel: 'chromium',

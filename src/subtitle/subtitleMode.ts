@@ -10,13 +10,17 @@ import { Timeline, TimelineLine, TimelineStorage } from './timeline';
 import { isSameLine } from './textSimilarity';
 import type { NormalizedBox, OcrResult, SubtitleLanguage } from './types';
 import type { ReadAheadSource } from './readAhead/readAheadSource';
+import type { VideoContext } from '../translation/types';
 
 export interface TranslateRequest {
+  /** 'fast' = DeepL/Google, 'best' = Claude with video context and glossary. */
+  tier: 'fast' | 'best';
   text: string;
   sourceLang: SubtitleLanguage;
   previousLines: string[];
   nextLines: string[];
   priority: 'live' | 'readahead';
+  video: VideoContext;
 }
 
 export interface TranslateResponse {
@@ -32,6 +36,10 @@ export interface SubtitleModeDeps {
   store: TimelineStorage | null;
   /** Future frames decoded from the player's buffer (null = live path only). */
   readAhead?: ReadAheadSource | null;
+  /** Which tiers to request per line (default: fast only). */
+  plan?: { fast: boolean; best: boolean };
+  /** What the video is about (translator context). */
+  video?: VideoContext;
   /** Frame source for the live path (defaults to FrameSampler; unit tests pass a fake). */
   createSampler?: (video: HTMLVideoElement, box: NormalizedBox, onFrame: FrameHandler) => LiveSampler;
 }
@@ -45,6 +53,7 @@ const RECHECK_MS = 750; // re-read a displayed line if nothing triggered a read 
 const SAVE_EVERY_MS = 10_000;
 const MAX_READ_AHEAD_QUEUE = 32;
 const MAX_OPEN_LINE_S = 8; // a saved line with no end is closed after this long
+const NO_VIDEO: VideoContext = { videoId: null, url: '', title: '', channel: '', description: '' };
 
 export class SubtitleMode {
   state: SubtitleModeState = 'loading';
@@ -54,6 +63,8 @@ export class SubtitleMode {
   translateCalls = 0;
   /** Video time at which each line's translation arrived, keyed by line start. */
   readonly translatedAt = new Map<number, number>();
+  /** Video time at which each line's Claude ('better') translation arrived. */
+  readonly betterAt = new Map<number, number>();
 
   // Read-ahead: frames decoded ahead of playback run through their own tracker.
   private readonly raTracker = new LineTracker({ changeThreshold: 0.04, stableFrames: 2 });
@@ -408,18 +419,38 @@ export class SubtitleMode {
     void this.translate(line, 'live');
   }
 
-  private async translate(line: TimelineLine, priority: 'live' | 'readahead'): Promise<void> {
-    const { previous, next } = this.timeline.neighbours(line.start, 2);
+  /** Requests every tier the plan asks for; the timeline keeps the best translation. */
+  private translate(line: TimelineLine, priority: 'live' | 'readahead'): void {
     this.translateCalls++;
+    const plan = this.deps.plan ?? { fast: true, best: false };
+    if (plan.fast) void this.requestTier(line, 'fast', priority);
+    if (plan.best) void this.requestTier(line, 'best', priority);
+  }
+
+  /** A glossary entry was corrected: lines using any of these terms get a new Claude translation. */
+  onGlossaryChanged(terms: string[]): void {
+    if (this.state === 'stopped' || !this.deps.plan?.best) return;
+    const wanted = terms.filter(Boolean);
+    for (const line of this.timeline.matching(l => wanted.some(t => l.source.includes(t)))) {
+      void this.requestTier(line, 'best', line === this.current ? 'live' : 'readahead');
+    }
+  }
+
+  private async requestTier(line: TimelineLine, tier: 'fast' | 'best', priority: 'live' | 'readahead'): Promise<void> {
+    const { previous, next } = this.timeline.neighbours(line.start, 2);
     const response = await this.deps
-      .translate({ text: line.source, sourceLang: this.lang, previousLines: previous, nextLines: next, priority })
+      .translate({ tier, text: line.source, sourceLang: this.lang, previousLines: previous, nextLines: next, priority, video: this.deps.video ?? NO_VIDEO })
       .catch(error => ({ success: false, error: String(error) }) as TranslateResponse);
+    if (this.state === 'stopped') return; // late answer for a mode that is gone (stopped / navigated away)
     if (!response.success || !response.translatedText) {
       console.warn('Subtitle translation failed:', response.error);
       return;
     }
-    this.timeline.setTranslation(line.start, response.translatedText, response.quality ?? 'fast');
+    const before = line.translation;
+    this.timeline.setTranslation(line.start, response.translatedText, response.quality ?? (tier === 'best' ? 'better' : 'fast'));
+    if (line.translation === before) return; // not better than what we have (or identical)
     if (!this.translatedAt.has(line.start)) this.translatedAt.set(line.start, this.video.currentTime);
+    if (line.quality === 'better' && !this.betterAt.has(line.start)) this.betterAt.set(line.start, this.video.currentTime);
     if (this.current === line && this.state === 'running') {
       this.overlay.show(line.translation!, { lineStart: line.start, quality: line.quality === 'better' ? 'better' : 'fast' });
     }

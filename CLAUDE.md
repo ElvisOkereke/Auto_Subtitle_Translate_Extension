@@ -81,8 +81,9 @@ live in `src/utils/modelConfig.ts`.
   `E2E_BROWSER=chrome` to run against installed Google Chrome (real WebGPU).
 - Persistent test profiles keep running a cached service-worker script until
   the extension version changes: global setup bumps `dist/manifest.json` to
-  `<base>.<run>` every run; Chrome mode also deletes
-  `Default/Service Worker/{Database,ScriptCache}` before launch. Never use
+  `<base>.<run>` every run, and every launch (Chromium and Chrome) deletes
+  `Default/Service Worker/{Database,ScriptCache}` — the version bump alone
+  still left Chromium on a stale background script. Never use
   `chrome.runtime.reload()` for this (it disabled the command-line extension).
 - Content scripts' IndexedDB/localStorage belong to the *website's* origin.
   Anything the site mustn't read lives in the extension origin (subtitle

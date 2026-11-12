@@ -104,3 +104,12 @@ export function containsTerm(text: string, term: string): boolean {
   const norm = (s: string) => s.toLowerCase().replace(/[\s-]+/g, '');
   return norm(text).includes(norm(term));
 }
+
+/** Forget glossaries, topics and usage from earlier tests (persistent profiles keep chrome.storage.local). */
+export async function clearTranslationState(sw: { evaluate: (fn: () => Promise<unknown>) => Promise<unknown> }): Promise<void> {
+  await sw.evaluate(async () => {
+    const all = await chrome.storage.local.get(null);
+    const keys = Object.keys(all).filter(k => k.startsWith('glossary:') || k === 'translationUsage');
+    if (keys.length) await chrome.storage.local.remove(keys);
+  });
+}

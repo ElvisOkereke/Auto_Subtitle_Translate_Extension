@@ -71,6 +71,11 @@ export class Timeline {
     });
   }
 
+  /** Live line objects matching a predicate (callers may update them through this timeline). */
+  matching(pred: (line: TimelineLine) => boolean): TimelineLine[] {
+    return this.lines.filter(pred);
+  }
+
   close(start: number, end: number): void {
     const line = this.lines.find(l => l.start === start);
     if (line) line.end = end;
