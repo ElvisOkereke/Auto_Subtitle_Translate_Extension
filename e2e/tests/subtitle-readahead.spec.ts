@@ -40,6 +40,7 @@ test('subtitles are translated before they appear', async ({ context, fixtureURL
   const page = await context.newPage();
   await page.goto(`${fixtureURL}/video-subs.html?v=_zIrbXw-SVs&stretch=s2`);
   await page.waitForFunction(() => (window as any).__fixture.video.readyState >= 1);
+  await astTest(page, 'timeline.clear'); // measure read-ahead itself, not lines saved by earlier tests
   const popup = await openPopup(page);
   await popup.click('#modeSubtitles');
   await popup.click('#drawSubtitleBox');

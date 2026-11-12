@@ -5,7 +5,8 @@ A Chrome (MV3) extension that translates what you watch, live:
 - **Subtitles mode** — draw a box around subtitles that are *burned into* a
   video (e.g. Korean subtitles on a League of Legends stream) and the English
   appears on top of them, in place, as the video plays. Works on YouTube and
-  other `<video>` pages.
+  other `<video>` pages; on YouTube most lines are translated before they
+  appear (read-ahead).
 - **Audio mode** — live captions from the tab's speech, translated.
 - **Screen Translate** — drag a box over text on any page for a one-shot
   translation.
@@ -43,7 +44,7 @@ audio captions.
 | Piece | Where |
 |---|---|
 | Subtitle mode controller: frame sampling → change detection → OCR → translation → per-video timeline → overlay | `src/subtitle/` |
-| Read-ahead: taps the player's MSE stream (main world), decodes buffered video ahead of playback with WebCodecs, so most subtitles are translated before they appear | `src/subtitle/readAhead/` |
+| Read-ahead (YouTube): taps the player's MSE stream (main world), decodes buffered video ahead of playback with WebCodecs, so most subtitles are translated before they appear | `src/subtitle/readAhead/` |
 | OCR: PaddleOCR PP-OCRv5 (ONNX Runtime Web, WebGPU → wasm fallback) in a worker inside a hidden extension iframe; saved timelines live in that extension-origin iframe | `src/ocr/` |
 | Live captions: tab capture → offscreen VAD → Whisper (transformers.js) worker | `src/offscreen.ts`, `src/whisper.worker.ts` |
 | Translation (DeepL / Google, neighbouring-line context, live-before-read-ahead priority) | `src/services/apiService.ts`, `src/background.ts` |

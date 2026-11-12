@@ -180,3 +180,17 @@ test('box placement rules', async ({ context, fixtureURL, openPopup, translation
   await expect(page.getByText('Box too small')).toBeVisible();
   expect((await stats(page)).state).toBe('stopped');
 });
+
+test('drawing a new box discards lines read with the old one', async ({ context, fixtureURL, openPopup }) => {
+  const page = await context.newPage();
+  await openFixture(page, fixtureURL);
+  // Lines saved from an earlier box (e.g. one drawn over the wrong region).
+  await astTest(page, 'timeline.save', {
+    videoId: '_zIrbXw-SVs',
+    lines: [{ start: 0, end: 600, source: '엉뚱한 영역', translation: 'STALE LINE', quality: 'fast' }],
+  });
+  await startViaPopup(page, openPopup);
+  const lines = await astTest<{ translation: string | null }[]>(page, 'mode.timeline');
+  expect(lines.filter(l => l.translation === 'STALE LINE')).toEqual([]);
+  await expect(page.locator('.ast-subtitle-overlay')).not.toContainText('STALE LINE');
+});

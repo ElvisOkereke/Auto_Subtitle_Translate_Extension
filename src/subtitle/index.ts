@@ -6,6 +6,7 @@ import { SubtitleMode, TranslateRequest, TranslateResponse } from './subtitleMod
 import { boxToPage, contentRect, pageToBox, Rect } from './videoGeometry';
 import { videoIdFrom } from './videoId';
 import { MseReadAhead } from './readAhead/readAheadSource';
+import { ModeLauncher } from './modeLauncher';
 import type { NormalizedBox, SubtitleLanguage } from './types';
 
 const MIN_BOX_WIDTH = 24;
@@ -18,7 +19,7 @@ export function getOcr(): Promise<OcrClient> {
 }
 
 
-let mode: SubtitleMode | null = null;
+const launcher = new ModeLauncher<SubtitleMode>();
 let starting: Promise<unknown> | null = null;
 /** Subtitle mode stays on across in-page navigation until the user stops it. */
 let enabled = false;
@@ -56,19 +57,20 @@ function videoAt(x: number, y: number): HTMLVideoElement | null {
 }
 
 async function startMode(video: HTMLVideoElement, videoId: string, box: NormalizedBox): Promise<void> {
-  stopMode();
-  const lang = await subtitleLanguage();
-  const client = await getOcr();
-  await client.preload(lang); // first run downloads the OCR models
-  const { devSubtitle } = await chrome.storage.local.get('devSubtitle');
-  const readAhead = devSubtitle?.readAhead === false ? null : new MseReadAhead(video, box);
-  mode = await SubtitleMode.start({ video, videoId, box, lang, deps: { ocr: client, translate, store: client.timelineStorage(), readAhead } });
-  enabled = true;
+  // The launcher discards this start if a stop, navigation or newer start overtakes it.
+  const started = await launcher.start(async () => {
+    const lang = await subtitleLanguage();
+    const client = await getOcr();
+    await client.preload(lang); // first run downloads the OCR models
+    const { devSubtitle } = await chrome.storage.local.get('devSubtitle');
+    const readAhead = devSubtitle?.readAhead === false ? null : new MseReadAhead(video, box);
+    return SubtitleMode.start({ video, videoId, box, lang, deps: { ocr: client, translate, store: client.timelineStorage(), readAhead } });
+  });
+  if (started) enabled = true;
 }
 
 function stopMode(): void {
-  mode?.stop();
-  mode = null;
+  launcher.stop();
 }
 
 export type StartResult = 'started' | 'too-small' | 'not-over-video';
@@ -81,6 +83,8 @@ async function startFromRect(rect: Rect): Promise<StartResult> {
   const box = pageToBox(rect, video.getBoundingClientRect(), contentRect(video));
   const videoId = currentVideoId() ?? location.href;
   await chrome.storage.local.set({ [boxKey(videoId)]: box });
+  // A new box means lines read through the old one may be wrong: start this video afresh.
+  await (await getOcr()).saveTimelineLines(videoId, []);
   starting = startMode(video, videoId, box);
   await starting;
   return 'started';
@@ -112,7 +116,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     case 'GET_SUBTITLE_MODE_STATE': {
       const videoId = currentVideoId();
       (videoId ? storedBox(videoId) : Promise.resolve(null)).then(box =>
-        sendResponse({ mode: mode ? 'subtitles' : 'off', state: mode?.state ?? 'stopped', videoId, hasBox: !!box })
+        sendResponse({ mode: launcher.current ? 'subtitles' : 'off', state: launcher.current?.state ?? 'stopped', videoId, hasBox: !!box })
       );
       return true;
     }
@@ -167,13 +171,17 @@ installTestBridge({
   'timeline.save': async ({ videoId, lines }) => (await getOcr()).saveTimelineLines(videoId, lines),
   'timeline.load': async ({ videoId }) => (await getOcr()).loadTimelineLines(videoId),
   'timeline.clear': async () => (await getOcr()).clearTimelines(),
-  'mode.timeline': async () =>
-    mode
+  'mode.timeline': async () => {
+    const mode = launcher.current;
+    return mode
       ? mode.timeline
           .toJSON()
-          .map(l => ({ start: l.start, end: l.end, source: l.source, translation: l.translation, translatedAt: mode!.translatedAt.get(l.start) ?? null }))
-      : [],
-  'mode.stats': async () => ({
+          .map(l => ({ start: l.start, end: l.end, source: l.source, translation: l.translation, translatedAt: mode.translatedAt.get(l.start) ?? null }))
+      : [];
+  },
+  'mode.stats': async () => {
+    const mode = launcher.current;
+    return {
     state: mode?.state ?? 'stopped',
     ocrCalls: mode?.ocrCalls ?? 0,
     translateCalls: mode?.translateCalls ?? 0,
@@ -181,5 +189,6 @@ installTestBridge({
     readAheadLead: mode?.readAheadLead ?? 0,
     timelineSize: mode?.timeline.size ?? 0,
     videoId: currentVideoId(),
-  }),
+    };
+  },
 });

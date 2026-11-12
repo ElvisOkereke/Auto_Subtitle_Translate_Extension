@@ -37,7 +37,8 @@ export interface TranslateOptions {
 }
 
 function toDeepLSource(code: string): string {
-  return code.toUpperCase();
+  // DeepL source languages have no script variants (zh-Hans/zh-Hant are target-only).
+  return code.split('-')[0].toUpperCase();
 }
 
 interface TranslationSettings {

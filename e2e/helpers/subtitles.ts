@@ -57,6 +57,10 @@ export async function recordOverlay(page: Page): Promise<void> {
 export async function openFixture(page: Page, fixtureURL: string, stretch = 's1', v = '_zIrbXw-SVs'): Promise<void> {
   await page.goto(`${fixtureURL}/video-subs.html?v=${v}&stretch=${stretch}`);
   await page.waitForFunction(() => (window as any).__fixture.video.readyState >= 1);
+  // Saved timelines live in the extension origin and survive across tests in the
+  // persistent profile: start every measurement from an empty store, or a run
+  // replays lines (and translations) an earlier test saved for the same video.
+  await astTest(page, 'timeline.clear');
   await recordOverlay(page);
 }
 

@@ -1,0 +1,200 @@
+import { SubtitleMode, SubtitleModeDeps } from '../subtitleMode';
+import { Timeline, TimelineLine } from '../timeline';
+import type { FrameHandler } from '../frameSampler';
+import type { ReadAheadFrame, ReadAheadSource } from '../readAhead/readAheadSource';
+import type { OcrResult } from '../types';
+
+// Unit harness: fake sampler, read-ahead source, OCR and translation drive the
+// real controller, timeline and overlay.
+
+const SIG = (v: number) => new Uint8Array(64 * 16).fill(v);
+/** A crop tagged with the subtitle it shows (-1 = none); the fake OCR reads the tag. */
+const crop = (n: number) => ({ n, close: jest.fn() }) as unknown as ImageBitmap;
+const text = (n: number) => String.fromCharCode(0xac00 + n * 37).repeat(6);
+const flush = async (rounds = 5) => {
+  for (let i = 0; i < rounds; i++) await new Promise(r => setTimeout(r, 0));
+};
+
+beforeAll(() => {
+  (globalThis as any).ResizeObserver ??= class {
+    observe() {}
+    disconnect() {}
+  };
+});
+
+interface Harness {
+  mode: SubtitleMode;
+  video: HTMLVideoElement;
+  onFrame: FrameHandler;
+  raFrame: ReadAheadFrame;
+  fastCalls: number;
+  /** Text the live (fast) OCR reads. */
+  liveText: string;
+  /** Held read-ahead OCR completions (holdAccurate). */
+  held: (() => void)[];
+  sampleNow: { sig: Uint8Array; videoTime: number; grab: () => Promise<ImageBitmap> } | null;
+  saved: TimelineLine[] | null;
+  overlayText(): string | null;
+}
+
+async function harness(opts: { holdAccurate?: boolean; readAhead?: boolean; stored?: TimelineLine[] } = {}): Promise<Harness> {
+  const player = document.createElement('div');
+  player.className = 'html5-video-player';
+  const video = document.createElement('video');
+  Object.defineProperty(video, 'videoWidth', { value: 1920 });
+  Object.defineProperty(video, 'videoHeight', { value: 1080 });
+  Object.defineProperty(video, 'currentTime', { value: 0, writable: true });
+  Object.defineProperty(video, 'paused', { value: false, writable: true });
+  player.appendChild(video);
+  document.body.appendChild(player);
+
+  const h = { video, fastCalls: 0, liveText: '', held: [], sampleNow: null, saved: null } as unknown as Harness;
+  const ocr: SubtitleModeDeps['ocr'] = {
+    recognize(c, _lang, tier) {
+      const result = (t: string): OcrResult => ({ text: t, confidence: t ? 1 : 0, ms: 1, tier: tier ?? 'fast' });
+      if (tier !== 'accurate') {
+        h.fastCalls++;
+        return Promise.resolve(result(h.liveText));
+      }
+      const n = (c as any).n as number;
+      const value = result(n >= 0 ? text(n) : '');
+      if (!opts.holdAccurate) return Promise.resolve(value);
+      return new Promise(resolve => h.held.push(() => resolve(value)));
+    },
+  };
+  const readAhead: ReadAheadSource = {
+    start: onFrame => (h.raFrame = onFrame),
+    restart: () => undefined,
+    setBox: () => undefined,
+    stop: () => undefined,
+    lead: 0,
+  };
+  h.mode = await SubtitleMode.start({
+    video,
+    videoId: 'vid',
+    box: { x: 0.2, y: 0.75, w: 0.6, h: 0.14 },
+    lang: 'ko',
+    deps: {
+      ocr,
+      translate: async req => ({ success: true, translatedText: `EN ${req.text}` }),
+      store: {
+        load: async () => new Timeline(opts.stored ?? []),
+        save: async (_id, timeline) => {
+          h.saved = timeline.toJSON();
+        },
+      },
+      readAhead: opts.readAhead === false ? null : readAhead,
+      createSampler: (_v, _b, onFrame) => {
+        h.onFrame = onFrame;
+        return { start: () => undefined, stop: () => undefined, setBox: () => undefined, sampleNow: () => h.sampleNow };
+      },
+    },
+  });
+  h.overlayText = () => {
+    const el = document.querySelector<HTMLElement>('.ast-subtitle-overlay');
+    return el && el.style.display !== 'none' ? el.textContent : null;
+  };
+  return h;
+}
+
+/** Live frames: two identical frames confirm a change (stableFrames 2). */
+async function liveLine(h: Harness, sig: Uint8Array, t: number, ocrText: string) {
+  h.liveText = ocrText;
+  (h.video as any).currentTime = t;
+  h.onFrame(sig, t, async () => crop(-1));
+  h.onFrame(sig, t + 0.1, async () => crop(-1));
+  await flush();
+}
+
+let current: Harness | null = null;
+afterEach(() => {
+  current?.mode.stop();
+  current = null;
+  document.body.innerHTML = '';
+});
+
+describe('SubtitleMode', () => {
+  it('a read-ahead queue overflow never leaves unread subtitles marked as covered', async () => {
+    const h = (current = await harness({ holdAccurate: true }));
+    // 40 subtitle changes decoded ahead of playback, faster than OCR reads them.
+    for (let k = 0; k < 40; k++) {
+      const sig = SIG(k % 2 ? 200 : 0);
+      const t = 100 + k * 0.25;
+      h.raFrame(crop(k), sig, t);
+      h.raFrame(crop(k), sig, t + 0.125);
+    }
+    while (h.held.length) {
+      h.held.shift()!();
+      await flush(2);
+    }
+    await flush();
+
+    // Every line that was queued is on the timeline with its own text...
+    (h.video as any).currentTime = 101.05;
+    h.onFrame(SIG(50), 101.05, async () => crop(-1));
+    expect(h.overlayText()).toBe(`EN ${text(4)}`);
+
+    // ...and where changes were dropped, the live path reads instead of trusting the timeline.
+    const before = h.fastCalls;
+    await liveLine(h, SIG(90), 108.8, text(35));
+    expect(h.fastCalls).toBeGreaterThan(before);
+  });
+
+  it('seeking closes the line that was on screen (it must not stretch over the rest of the video)', async () => {
+    const h = (current = await harness({ readAhead: false }));
+    await liveLine(h, SIG(200), 10, text(1));
+    h.onFrame(SIG(200), 10.5, async () => crop(-1));
+    (h.video as any).currentTime = 50;
+    h.video.dispatchEvent(new Event('seeking'));
+    expect(h.mode.timeline.at(60)).toBeNull();
+    expect(h.mode.timeline.at(10.2)?.end).toBeCloseTo(10.5);
+  });
+
+  it('an ad starting closes the line that was on screen', async () => {
+    const h = (current = await harness({ readAhead: false }));
+    await liveLine(h, SIG(200), 10, text(1));
+    h.video.closest('.html5-video-player')!.classList.add('ad-showing');
+    await flush();
+    expect(h.mode.timeline.at(60)).toBeNull();
+  });
+
+  it('stopping closes open lines before saving', async () => {
+    const h = await harness({ readAhead: false });
+    await liveLine(h, SIG(200), 10, text(1));
+    h.mode.stop();
+    await flush();
+    expect(h.saved?.length).toBe(1);
+    expect(h.saved!.every(l => l.end !== null)).toBe(true);
+  });
+
+  it('where read-ahead saw no subtitle, a stale open live line is not shown', async () => {
+    const h = (current = await harness());
+    await liveLine(h, SIG(200), 10, text(1));
+    expect(h.overlayText()).toBe(`EN ${text(1)}`);
+    for (let t = 11; t < 20; t += 0.125) h.raFrame(crop(-1), SIG(0), t); // read ahead: empty box
+    await flush();
+    (h.video as any).currentTime = 15;
+    h.onFrame(SIG(0), 15, async () => crop(-1));
+    expect(h.overlayText()).toBeNull();
+  });
+
+  it('open lines in a saved timeline are closed on load', async () => {
+    const h = (current = await harness({
+      readAhead: false,
+      stored: [{ start: 10, end: null, source: text(1), translation: 'EN', quality: 'fast' }],
+    }));
+    expect(h.mode.timeline.at(100)).toBeNull();
+  });
+
+  it('seeking while paused reads the frame at the new position', async () => {
+    const h = (current = await harness({ readAhead: false }));
+    (h.video as any).paused = true;
+    (h.video as any).currentTime = 30;
+    h.liveText = text(7);
+    h.sampleNow = { sig: SIG(120), videoTime: 30, grab: async () => crop(-1) };
+    h.video.dispatchEvent(new Event('seeked'));
+    await flush();
+    expect(h.fastCalls).toBe(1);
+    expect(h.overlayText()).toBe(`EN ${text(7)}`);
+  });
+});

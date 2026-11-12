@@ -75,4 +75,25 @@ describe('Fmp4Parser', () => {
   it('ignores media fragments before an init segment', () => {
     expect(new Fmp4Parser().push(fragment(0, 40, [{ size: 1, key: true }])).fragments).toEqual([]);
   });
+
+  it('reset() drops a partial segment so the next append parses cleanly (SourceBuffer.abort)', () => {
+    const parser = new Fmp4Parser();
+    parser.push(initSegment(1000));
+    const frag = fragment(0, 40, [{ size: 4, key: true }]);
+    parser.push(frag.slice(0, 20)); // partial append, then the page aborts
+    parser.reset();
+    const { fragments } = parser.push(fragment(2000, 40, [{ size: 4, key: true }]));
+    expect(fragments.map(f => f.start)).toEqual([2]);
+  });
+
+  it('never buffers unbounded garbage (corrupt or desynced input)', () => {
+    const parser = new Fmp4Parser();
+    parser.push(initSegment(1000));
+    // A box header declaring ~4 GB, followed by lots of appended bytes.
+    parser.push(Uint8Array.from([0xff, 0xff, 0xff, 0xf0, ...str('mdat')]));
+    for (let i = 0; i < 40; i++) parser.push(new Uint8Array(512 * 1024));
+    expect(parser.pendingBytes).toBeLessThanOrEqual(8 * 1024 * 1024);
+    // ...and it recovers on the next clean segment.
+    expect(parser.push(fragment(3000, 40, [{ size: 2, key: true }])).fragments.map(f => f.start)).toEqual([3]);
+  });
 });

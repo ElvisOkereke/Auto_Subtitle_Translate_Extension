@@ -32,6 +32,8 @@ interface Box {
 }
 
 const CONFIG_BOXES = ['av1C', 'avcC', 'hvcC', 'vpcC'];
+/** Partial data kept between appends is capped; beyond it the stream is treated as desynced. */
+const MAX_PENDING_BYTES = 8 * 1024 * 1024;
 const VISUAL_SAMPLE_ENTRY_FIELDS = 78;
 
 function u32(b: Uint8Array, o: number): number {
@@ -85,6 +87,15 @@ export class Fmp4Parser {
     return this.init;
   }
 
+  get pendingBytes(): number {
+    return this.pending.length;
+  }
+
+  /** Forget partial data (SourceBuffer.abort()/changeType() reset the browser's parser too). */
+  reset(): void {
+    this.pending = new Uint8Array(0);
+  }
+
   /** Feed appended bytes; returns a newly seen init segment and any complete fragments. */
   push(bytes: Uint8Array, timestampOffset = 0): { init?: Fmp4Init; fragments: Fmp4Fragment[] } {
     const b = new Uint8Array(this.pending.length + bytes.length);
@@ -112,6 +123,11 @@ export class Fmp4Parser {
       consumed = box.end;
     }
     this.pending = b.slice(moof ? moof.start : consumed);
+    if (this.pending.length > MAX_PENDING_BYTES) {
+      // Corrupt or desynced input (e.g. a garbage box size): drop it rather than
+      // buffering forever; parsing resumes at the next clean segment boundary.
+      this.pending = new Uint8Array(0);
+    }
     return { ...(init ? { init } : {}), fragments };
   }
 

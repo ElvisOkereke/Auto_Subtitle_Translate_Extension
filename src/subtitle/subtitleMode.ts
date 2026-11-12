@@ -3,7 +3,7 @@
 // Frames -> change detection -> OCR -> translation -> timeline -> overlay.
 // Lines already on the timeline (seen before, or read ahead) are shown from it
 // with no OCR or translation.
-import { FrameSampler, adShowing } from './frameSampler';
+import { FrameHandler, FrameSampler, adShowing } from './frameSampler';
 import { LineTracker } from './lineTracker';
 import { SubtitleOverlay } from './overlay';
 import { Timeline, TimelineLine, TimelineStorage } from './timeline';
@@ -32,7 +32,11 @@ export interface SubtitleModeDeps {
   store: TimelineStorage | null;
   /** Future frames decoded from the player's buffer (null = live path only). */
   readAhead?: ReadAheadSource | null;
+  /** Frame source for the live path (defaults to FrameSampler; unit tests pass a fake). */
+  createSampler?: (video: HTMLVideoElement, box: NormalizedBox, onFrame: FrameHandler) => LiveSampler;
 }
+
+export type LiveSampler = Pick<FrameSampler, 'start' | 'stop' | 'setBox' | 'sampleNow'>;
 
 export type SubtitleModeState = 'loading' | 'running' | 'paused-ad' | 'stopped';
 
@@ -40,6 +44,7 @@ const MIN_CONFIDENCE = 0.5;
 const RECHECK_MS = 750; // re-read a displayed line if nothing triggered a read for this long
 const SAVE_EVERY_MS = 10_000;
 const MAX_READ_AHEAD_QUEUE = 32;
+const MAX_OPEN_LINE_S = 8; // a saved line with no end is closed after this long
 
 export class SubtitleMode {
   state: SubtitleModeState = 'loading';
@@ -57,6 +62,8 @@ export class SubtitleMode {
   private raCurrent: TimelineLine | null = null;
   private raFrom = Infinity;
   private raTo = -Infinity;
+  /** First change read-ahead had to drop (queue full): nothing from here on is trusted until it drains. */
+  private raGap: number | null = null;
 
   /** Seconds of video read ahead of the playhead. */
   get readAheadLead(): number {
@@ -65,11 +72,12 @@ export class SubtitleMode {
 
   private readonly tracker = new LineTracker({ changeThreshold: 0.04, stableFrames: 2 });
   private readonly overlay: SubtitleOverlay;
-  private readonly sampler: FrameSampler;
+  private readonly sampler: LiveSampler;
   private current: TimelineLine | null = null;
   private reading = false;
   private pending: { t: number; crop: Promise<ImageBitmap> } | null = null;
   private lastReadAt = 0;
+  private lastFrameAt: number | null = null; // video time of the last live frame seen
   private epoch = 0; // bumped on seek/ad so stale reads are discarded
   private timers: number[] = [];
   private playerObserver: MutationObserver | null = null;
@@ -84,7 +92,8 @@ export class SubtitleMode {
     private readonly deps: SubtitleModeDeps
   ) {
     this.overlay = new SubtitleOverlay(video, box);
-    this.sampler = new FrameSampler(video, box, (sig, t, grab) => this.onFrame(sig, t, grab));
+    const onFrame: FrameHandler = (sig, t, grab) => this.onFrame(sig, t, grab);
+    this.sampler = deps.createSampler ? deps.createSampler(video, box, onFrame) : new FrameSampler(video, box, onFrame);
   }
 
   static async start(opts: {
@@ -95,6 +104,7 @@ export class SubtitleMode {
     deps: SubtitleModeDeps;
   }): Promise<SubtitleMode> {
     const timeline = opts.deps.store ? await opts.deps.store.load(opts.videoId) : new Timeline();
+    timeline.closeOpenLines(MAX_OPEN_LINE_S);
     const mode = new SubtitleMode(opts.video, opts.videoId, opts.box, opts.lang, timeline, opts.deps);
     mode.run();
     return mode;
@@ -103,9 +113,14 @@ export class SubtitleMode {
   private run(): void {
     this.on('seeking', () => this.onSeeking());
     this.on('seeked', () => {
-      this.showKnown(this.video.currentTime);
+      const known = this.showKnown(this.video.currentTime);
       this.resetReadAhead();
       this.deps.readAhead?.restart();
+      if (!known && this.video.paused && this.state === 'running') {
+        // No frames arrive while paused: read the frame at the new position now.
+        const frame = this.sampler.sampleNow();
+        if (frame) this.requestRead(frame.videoTime, frame.grab());
+      }
     });
     const player = this.video.closest('.html5-video-player');
     if (player) {
@@ -125,6 +140,8 @@ export class SubtitleMode {
 
   stop(): void {
     if (this.state === 'stopped') return;
+    this.closeCurrent();
+    this.closeReadAheadLine(this.raTo);
     this.state = 'stopped';
     this.epoch++;
     this.sampler.stop();
@@ -164,6 +181,8 @@ export class SubtitleMode {
     if (this.state === 'stopped') return;
     const ad = adShowing(this.video);
     if (ad && this.state === 'running') {
+      this.closeCurrent();
+      this.resetReadAhead();
       this.state = 'paused-ad';
       this.epoch++;
       this.pending = null;
@@ -175,7 +194,19 @@ export class SubtitleMode {
     }
   }
 
+  /** Ends the live line on screen at the last frame seen (seek, ad, stop: its real end is unknown). */
+  private closeCurrent(): void {
+    const line = this.current;
+    if (line && line.end === null) this.timeline.close(line.start, Math.max(line.start, this.lastFrameAt ?? line.start));
+  }
+
+  private closeReadAheadLine(at: number): void {
+    const line = this.raCurrent;
+    if (line && line.end === null && Number.isFinite(at)) this.timeline.close(line.start, Math.max(line.start, at));
+  }
+
   private onSeeking(): void {
+    this.closeCurrent();
     this.epoch++;
     this.pending = null;
     this.tracker.reset();
@@ -196,11 +227,18 @@ export class SubtitleMode {
 
   private onFrame(sig: Uint8Array, t: number, grab: () => Promise<ImageBitmap>): void {
     if (this.state !== 'running') return;
+    this.lastFrameAt = t;
     // A closed, translated line on the timeline covers this moment: no OCR needed.
     if (this.showKnown(t)) return;
     if (this.readAheadCovers(t)) {
       // Read-ahead already read this moment: the timeline is the truth (no line = no subtitle).
-      const line = this.timeline.at(t);
+      // An open line only counts if read-ahead itself is still on it; any other open
+      // line is a live read whose end the live path never saw.
+      let line = this.timeline.at(t);
+      if (line && line.end === null && line !== this.raCurrent) {
+        this.timeline.close(line.start, Math.max(line.start, t));
+        line = null;
+      }
       if (line?.translation) {
         if (this.current !== line) {
           this.current = line;
@@ -263,15 +301,17 @@ export class SubtitleMode {
     this.raTracker.reset();
     this.raQueue.forEach(q => q.crop.close());
     this.raQueue = [];
+    this.closeReadAheadLine(this.raTo);
     this.raCurrent = null;
     this.raFrom = Infinity;
     this.raTo = -Infinity;
+    this.raGap = null;
   }
 
   /** True when read-ahead has fully processed time t (frames seen and every change before t read). */
   private readAheadCovers(t: number): boolean {
     if (!this.deps.readAhead || this.raFrom === Infinity) return false;
-    const safeUntil = Math.min(this.raTo, this.raQueue[0]?.t ?? Infinity, this.raReadingAt ?? Infinity);
+    const safeUntil = Math.min(this.raTo, this.raQueue[0]?.t ?? Infinity, this.raReadingAt ?? Infinity, this.raGap ?? Infinity);
     return t >= this.raFrom && t < safeUntil;
   }
 
@@ -280,16 +320,25 @@ export class SubtitleMode {
       crop.close();
       return;
     }
-    if (t < this.raTo - 0.05 || t > this.raTo + 1) {
-      // Discontinuity (first frame, seek, gap): start a new covered range here.
+    const drained = this.raGap !== null && !this.raQueue.length && this.raReadingAt === null;
+    if (t < this.raTo - 0.05 || t > this.raTo + 1 || drained) {
+      // Discontinuity (first frame, seek, gap) or recovered from an overflow: start a new covered range here.
+      this.closeReadAheadLine(this.raGap ?? this.raTo);
       this.raTracker.reset();
       this.raCurrent = null;
       this.raFrom = t;
+      this.raGap = null;
     }
     this.raTo = t;
     const event = this.raTracker.push(sig, t);
     if (event) {
-      if (this.raQueue.length >= MAX_READ_AHEAD_QUEUE) this.raQueue.shift()?.crop.close(); // bounded (frames come from the page's world)
+      if (this.raGap !== null || this.raQueue.length >= MAX_READ_AHEAD_QUEUE) {
+        // OCR can't keep up (or the page floods frames): drop this change, never an
+        // older queued one, and stop trusting the timeline from here until the queue drains.
+        this.raGap ??= event.since;
+        crop.close();
+        return;
+      }
       this.raQueue.push({ t: event.since, crop });
       void this.pumpReadAhead();
     } else {

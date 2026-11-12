@@ -59,6 +59,18 @@ export class Timeline {
     line.quality = quality;
   }
 
+  /**
+   * Lines saved while still on screen (tab closed, crash) have no end; give each
+   * one the next line's start, capped at maxDuration, so none stretches forever.
+   */
+  closeOpenLines(maxDuration: number): void {
+    this.lines.forEach((line, i) => {
+      if (line.end !== null) return;
+      const next = this.lines[i + 1];
+      line.end = Math.min(line.start + maxDuration, next ? next.start : Infinity);
+    });
+  }
+
   close(start: number, end: number): void {
     const line = this.lines.find(l => l.start === start);
     if (line) line.end = end;

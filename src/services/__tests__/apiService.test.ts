@@ -233,11 +233,19 @@ describe('ApiService.translateText with subtitle context', () => {
     useProvider('deepl');
     (globalThis.fetch as jest.Mock).mockResolvedValue(okDeepL);
     await apiService.translateText('中文', 'zh-Hans', 'en');
-    expect(JSON.parse((globalThis.fetch as jest.Mock).mock.calls[0][1].body).source_lang).toBe('ZH-HANS');
+    // DeepL's source_lang only knows 'ZH'; the HANS/HANT variants exist for target_lang only.
+    expect(JSON.parse((globalThis.fetch as jest.Mock).mock.calls[0][1].body).source_lang).toBe('ZH');
 
     useProvider('google');
     (globalThis.fetch as jest.Mock).mockResolvedValue(okGoogle);
     await apiService.translateText('中文', 'zh-Hant', 'en');
     expect(JSON.parse((globalThis.fetch as jest.Mock).mock.calls[1][1].body).source).toBe('zh-TW');
+  });
+
+  it('keeps the script variant for a Chinese DeepL target', async () => {
+    useProvider('deepl');
+    (globalThis.fetch as jest.Mock).mockResolvedValue(okDeepL);
+    await apiService.translateText('hello', 'en', 'zh-Hant');
+    expect(JSON.parse((globalThis.fetch as jest.Mock).mock.calls[0][1].body).target_lang).toBe('ZH-HANT');
   });
 });

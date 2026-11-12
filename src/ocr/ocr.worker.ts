@@ -4,6 +4,8 @@ import * as ort from 'onnxruntime-web/webgpu';
 import { ctcGreedyDecode } from './ctc';
 import { detBoxes, detInputSize, filterSubtitleBoxes, groupLines, Box } from './detect';
 import { modelFor } from './models';
+import { ConsecutiveFailures, PromiseCache } from './sessionCache';
+import { verifySha256 } from './integrity';
 import type { SubtitleLanguage } from '../subtitle/types';
 
 const ctx = self as unknown as Worker;
@@ -19,8 +21,12 @@ const REC_HEIGHT = 48;
 const REC_MAX_WIDTH = 3200;
 
 let device: 'webgpu' | 'wasm' = 'wasm';
-let detSession: Promise<ort.InferenceSession> | null = null;
-const recSessions = new Map<string, Promise<{ session: ort.InferenceSession; charset: string[] }>>();
+// Failed loads are evicted (a download blip must not disable OCR until reload).
+const detSessions = new PromiseCache<ort.InferenceSession>();
+const recSessions = new PromiseCache<{ session: ort.InferenceSession; charset: string[] }>();
+// Inference that keeps failing on the GPU (device lost, driver reset) moves OCR to wasm.
+const GPU_RUN_FAILURE_LIMIT = 3;
+const gpuRunFailures = new ConsecutiveFailures(GPU_RUN_FAILURE_LIMIT);
 
 async function hasWebGpu(): Promise<boolean> {
   const gpu = (self.navigator as any)?.gpu;
@@ -35,23 +41,31 @@ async function hasWebGpu(): Promise<boolean> {
   }
 }
 
-async function fetchModel(url: string): Promise<ArrayBuffer> {
+async function fetchModel(url: string, sha256: string): Promise<ArrayBuffer> {
   const cache = await caches.open(MODEL_CACHE);
-  let response = await cache.match(url);
-  if (!response) {
-    const fresh = await fetch(url);
-    if (!fresh.ok) throw new Error(`Model download failed (${fresh.status}): ${url}`);
-    await cache.put(url, fresh.clone());
-    response = fresh;
+  const cached = await cache.match(url);
+  if (cached) {
+    const data = await cached.arrayBuffer();
+    try {
+      await verifySha256(data, sha256, url);
+      return data;
+    } catch {
+      await cache.delete(url); // corrupted cache entry: download again
+    }
   }
-  return response.arrayBuffer();
+  const fresh = await fetch(url);
+  if (!fresh.ok) throw new Error(`Model download failed (${fresh.status}): ${url}`);
+  const data = await fresh.arrayBuffer();
+  await verifySha256(data, sha256, url);
+  await cache.put(url, new Response(data));
+  return data;
 }
 
 /** Failure to create a session on the chosen device: the host may retry on wasm. */
 class SessionCreateError extends Error {}
 
-async function createSession(url: string): Promise<ort.InferenceSession> {
-  const model = new Uint8Array(await fetchModel(url));
+async function createSession(url: string, sha256: string): Promise<ort.InferenceSession> {
+  const model = new Uint8Array(await fetchModel(url, sha256));
   try {
     // logSeverityLevel 3 = errors only (the exported models trigger harmless graph-cleanup warnings).
     return await ort.InferenceSession.create(model, { executionProviders: [device], graphOptimizationLevel: 'all', logSeverityLevel: 3 });
@@ -61,21 +75,21 @@ async function createSession(url: string): Promise<ort.InferenceSession> {
 }
 
 function getDet(lang: SubtitleLanguage) {
-  detSession ??= createSession(modelFor(lang).det);
-  return detSession;
+  const { det, detSha256 } = modelFor(lang);
+  return detSessions.get(det, () => createSession(det, detSha256));
 }
 
 function getRec(lang: SubtitleLanguage) {
-  const { rec, charset } = modelFor(lang);
-  let entry = recSessions.get(rec);
-  if (!entry) {
-    entry = Promise.all([
-      createSession(rec),
-      fetch(new URL(charset, self.location.href).href).then(r => r.json() as Promise<string[]>),
-    ]).then(([session, chars]) => ({ session, charset: chars }));
-    recSessions.set(rec, entry);
-  }
-  return entry;
+  const { rec, recSha256, charset } = modelFor(lang);
+  return recSessions.get(rec, () =>
+    Promise.all([
+      createSession(rec, recSha256),
+      fetch(new URL(charset, self.location.href).href).then(r => {
+        if (!r.ok) throw new Error(`Charset load failed (${r.status})`);
+        return r.json() as Promise<string[]>;
+      }),
+    ]).then(([session, chars]) => ({ session, charset: chars }))
+  );
 }
 
 /** Draws (a region of) the bitmap at the given size and returns NCHW float data in BGR order. */
@@ -173,13 +187,16 @@ async function handle(msg: any): Promise<void> {
       const started = performance.now();
       const result = await recognize(msg.bitmap, msg.lang);
       msg.bitmap.close();
+      gpuRunFailures.success();
       ctx.postMessage({ type: 'result', id: msg.id, ...result, ms: performance.now() - started, device });
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     // Only a failure to create a WebGPU session means the GPU path is unusable
     // (it also poisons this worker's ORT state); the host then restarts us on wasm.
-    const gpuUnusable = error instanceof SessionCreateError && device === 'webgpu';
+    // So does inference failing repeatedly on the GPU.
+    const runFailed = msg.type === 'recognize' && !(error instanceof SessionCreateError);
+    const gpuUnusable = device === 'webgpu' && (error instanceof SessionCreateError || (runFailed && gpuRunFailures.failure()));
     ctx.postMessage({ type: 'error', id: msg.id, message, loadFailedOn: gpuUnusable ? 'webgpu' : undefined });
   }
 }

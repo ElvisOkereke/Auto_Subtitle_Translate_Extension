@@ -3,7 +3,7 @@
 // SourceBuffers and, when subtitle mode asks for it, decodes those fragments
 // ahead of playback with WebCodecs and posts crops of the subtitle box to the
 // isolated-world content script. Decision record: docs/superpowers/decisions/2026-11-12-read-ahead.md
-import { Fmp4Fragment, Fmp4Init, Fmp4Parser } from './fmp4';
+import { TapTrack, TrackRegistry } from './trackRegistry';
 
 interface Box {
   x: number;
@@ -12,14 +12,7 @@ interface Box {
   h: number;
 }
 
-interface Track {
-  mediaSource: MediaSource;
-  codec: string;
-  parser: Fmp4Parser;
-  init: Fmp4Init | null;
-  fragments: Fmp4Fragment[];
-  bytes: number;
-}
+type Track = TapTrack<MediaSource>;
 
 const RETAIN_BYTES = 48 * 1024 * 1024;
 const PAST_SECONDS = 5;
@@ -29,25 +22,60 @@ const DISCONTINUITY_SECONDS = 0.5;
   if ((window as any).__astMseTap) return;
   (window as any).__astMseTap = true;
 
-  const tracks: Track[] = [];
+  const registry = new TrackRegistry<MediaSource>();
   // Diagnostics, readable from the page (and E2E tests).
   const stats = ((window as any).__astTapStats = { fragments: 0, decoded: 0, posted: 0, maxDecoded: 0, resets: 0, nextTime: 0, queue: 0 });
-  const mediaSourceUrls = new Map<string, MediaSource>();
+  (window as any).__astTapRegistry = registry; // diagnostics (E2E)
 
   const origCreateObjectURL = URL.createObjectURL;
   URL.createObjectURL = function (obj: Blob | MediaSource) {
     const url = origCreateObjectURL.call(URL, obj);
-    if (obj instanceof MediaSource) mediaSourceUrls.set(url, obj);
+    if (obj instanceof MediaSource) registry.registerUrl(url, obj);
     return url;
   } as typeof URL.createObjectURL;
+
+  const origRevokeObjectURL = URL.revokeObjectURL;
+  URL.revokeObjectURL = function (url: string) {
+    registry.revokeUrl(url, [...document.querySelectorAll('video')].some(v => v.src === url));
+    return origRevokeObjectURL.call(URL, url);
+  };
+
+  const sbTracks = new WeakMap<SourceBuffer, Track>();
+  const watched = new WeakSet<MediaSource>();
+
+  const origRemove = MediaSource.prototype.removeSourceBuffer;
+  MediaSource.prototype.removeSourceBuffer = function (this: MediaSource, sb: SourceBuffer) {
+    const track = sbTracks.get(sb);
+    if (track) registry.removeTrack(track);
+    return origRemove.call(this, sb);
+  };
 
   const origAdd = MediaSource.prototype.addSourceBuffer;
   MediaSource.prototype.addSourceBuffer = function (this: MediaSource, mime: string) {
     const sb = origAdd.call(this, mime);
     if (/^video\/mp4/i.test(mime)) {
       const codec = mime.match(/codecs="?([^",]+)/i)?.[1] ?? '';
-      const track: Track = { mediaSource: this, codec, parser: new Fmp4Parser(), init: null, fragments: [], bytes: 0 };
-      tracks.push(track);
+      const track = registry.addTrack(this, codec);
+      sbTracks.set(sb, track);
+      if (!watched.has(this)) {
+        watched.add(this);
+        this.addEventListener('sourceclose', event => registry.closeMediaSource(event.target as MediaSource));
+      }
+      // abort()/changeType() reset the browser's segment parser; ours must follow
+      // or a half-parsed segment desyncs every later append.
+      const abort = sb.abort.bind(sb);
+      sb.abort = () => {
+        track.parser.reset();
+        return abort();
+      };
+      if (typeof sb.changeType === 'function') {
+        const changeType = sb.changeType.bind(sb);
+        sb.changeType = (type: string) => {
+          track.parser.reset();
+          track.codec = type.match(/codecs="?([^",]+)/i)?.[1] ?? track.codec;
+          return changeType(type);
+        };
+      }
       const append = sb.appendBuffer.bind(sb);
       sb.appendBuffer = (data: BufferSource) => {
         try {
@@ -60,6 +88,7 @@ const DISCONTINUITY_SECONDS = 0.5;
             track.bytes += f.samples.reduce((n, s) => n + s.data.byteLength, 0);
           }
           trim(track);
+          registry.releaseInactive(activeTrack());
           if (fragments.length) session?.pump();
         } catch (error) {
           console.debug('[ast] mse tap parse error', error);
@@ -75,9 +104,7 @@ const DISCONTINUITY_SECONDS = 0.5;
   }
 
   function activeTrack(): Track | null {
-    const video = mainVideo();
-    const ms = video && mediaSourceUrls.get(video.src);
-    return (ms && [...tracks].reverse().find(t => t.mediaSource === ms && t.init)) || null;
+    return registry.active(mainVideo()?.src);
   }
 
   function trim(track: Track): void {
