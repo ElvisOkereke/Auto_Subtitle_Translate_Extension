@@ -1,0 +1,536 @@
+{
+ "video": "https://youtu.be/_zIrbXw-SVs",
+ "labelledBy": "builder (from frames)",
+ "note": "start/end are seconds relative to each stretch file, from 30 fps frame analysis (e2e/scripts/label_timeline.py); text transcribed from frames. terms match case-insensitively with spaces and hyphens ignored.",
+ "stretches": [
+  {
+   "id": "s1",
+   "start": 0,
+   "end": 180.0,
+   "file": "_zIrbXw-SVs.s1.webm"
+  },
+  {
+   "id": "s2",
+   "start": 535.77,
+   "end": 720.26,
+   "file": "_zIrbXw-SVs.s2.webm"
+  }
+ ],
+ "lines": [
+  {
+   "stretch": "s1",
+   "start": 1.367,
+   "end": 2.933,
+   "ko": "아.. 귀찮은 챔피언 나왔네?",
+   "en": "Ah... an annoying champion showed up, huh?",
+   "terms": []
+  },
+  {
+   "stretch": "s1",
+   "start": 2.933,
+   "end": 5.667,
+   "ko": "우리 팀 또 조합이.. 뽀삐한테 좀 취약하긴 한데!",
+   "en": "Our team comp is kind of weak against Poppy again, though!",
+   "terms": [
+    "Poppy"
+   ]
+  },
+  {
+   "stretch": "s1",
+   "start": 5.667,
+   "end": 7.233,
+   "ko": "야이애나에다가 판테온",
+   "en": "Yasuo, Diana, plus Pantheon",
+   "terms": [
+    "Pantheon"
+   ]
+  },
+  {
+   "stretch": "s1",
+   "start": 7.233,
+   "end": 8.567,
+   "ko": "탑 카밀일 수도 있긴 한데",
+   "en": "It could be a top Camille, though",
+   "terms": [
+    "Camille"
+   ]
+  },
+  {
+   "stretch": "s1",
+   "start": 8.567,
+   "end": 10.1,
+   "ko": "웬만하면 탑 뽀삐겠지!",
+   "en": "It's probably a top Poppy!",
+   "terms": [
+    "Poppy"
+   ]
+  },
+  {
+   "stretch": "s1",
+   "start": 10.1,
+   "end": 12.533,
+   "ko": "누가 와도 텔레포트 드는 거는 좋아가지고!",
+   "en": "Taking Teleport is good no matter who shows up!",
+   "terms": [
+    "Teleport"
+   ]
+  },
+  {
+   "stretch": "s1",
+   "start": 21.4,
+   "end": 22.833,
+   "ko": "(반반 라인전)",
+   "en": "(Even laning phase)",
+   "terms": []
+  },
+  {
+   "stretch": "s1",
+   "start": 23.5,
+   "end": 24.267,
+   "ko": "계속 압박하나?",
+   "en": "Are they going to keep pressuring?",
+   "terms": []
+  },
+  {
+   "stretch": "s1",
+   "start": 33.433,
+   "end": 35.2,
+   "ko": "어쩔 수 없이 한 라인을 놓치긴 해야겠네!",
+   "en": "I'll have to give up one wave, no way around it!",
+   "terms": []
+  },
+  {
+   "stretch": "s1",
+   "start": 36.967,
+   "end": 38.433,
+   "ko": "닌탑을 빨리 사긴 해야겠어!",
+   "en": "I need to buy armor boots quickly!",
+   "terms": []
+  },
+  {
+   "stretch": "s1",
+   "start": 46.567,
+   "end": 49.4,
+   "ko": "아 뭐 땅굴에 몇 분을 숨어있는 거야 얘네는?",
+   "en": "How many of them are hiding in that tunnel?!",
+   "terms": []
+  },
+  {
+   "stretch": "s1",
+   "start": 50.167,
+   "end": 51.033,
+   "ko": "우리 팀은 뭐 없나?",
+   "en": "Doesn't our team have anything?",
+   "terms": []
+  },
+  {
+   "stretch": "s1",
+   "start": 65.933,
+   "end": 66.5,
+   "ko": "W 있긴 해!",
+   "en": "I do have W!",
+   "terms": [
+    "W"
+   ]
+  },
+  {
+   "stretch": "s1",
+   "start": 73.867,
+   "end": 75.667,
+   "ko": "이판은 게임이 좀 빡이긴 한데..",
+   "en": "This game is kind of rough, though...",
+   "terms": []
+  },
+  {
+   "stretch": "s1",
+   "start": 77.0,
+   "end": 79.567,
+   "ko": "아 이거 또.. 상상 속의 카밀과..",
+   "en": "Ah, here we go again... the Camille I imagined...",
+   "terms": [
+    "Camille"
+   ]
+  },
+  {
+   "stretch": "s1",
+   "start": 79.567,
+   "end": 80.7,
+   "ko": "신짜오와 싸워야 되네?",
+   "en": "And I have to fight Xin Zhao?",
+   "terms": [
+    "Xin Zhao"
+   ]
+  },
+  {
+   "stretch": "s1",
+   "start": 105.767,
+   "end": 106.467,
+   "ko": "또 쭉 빼야 되네?",
+   "en": "I have to back off all the way again?",
+   "terms": []
+  },
+  {
+   "stretch": "s1",
+   "start": 106.467,
+   "end": 107.167,
+   "ko": "아 ㅋㅋ.. 진짜!",
+   "en": "Haha... seriously!",
+   "terms": []
+  },
+  {
+   "stretch": "s1",
+   "start": 107.167,
+   "end": 108.6,
+   "ko": "이거는 여기까지 빼야 돼요!",
+   "en": "You have to back off this far here!",
+   "terms": []
+  },
+  {
+   "stretch": "s1",
+   "start": 108.6,
+   "end": 109.7,
+   "ko": "여기까지 확인하거든요?",
+   "en": "Because they check up to here, you know?",
+   "terms": []
+  },
+  {
+   "stretch": "s1",
+   "start": 111.6,
+   "end": 114.133,
+   "ko": "사실 상대 카밀이 저렇게까지 올라오면은",
+   "en": "Honestly, if the enemy Camille gets that far ahead,",
+   "terms": [
+    "Camille"
+   ]
+  },
+  {
+   "stretch": "s1",
+   "start": 114.133,
+   "end": 115.833,
+   "ko": "우리 팀이 어느 정도 해줘야 되는데..",
+   "en": "our team has to pull its weight...",
+   "terms": []
+  },
+  {
+   "stretch": "s1",
+   "start": 126.933,
+   "end": 128.5,
+   "ko": "그래도 2용 먹긴 해서..",
+   "en": "Still, we did get the second dragon...",
+   "terms": []
+  },
+  {
+   "stretch": "s1",
+   "start": 128.5,
+   "end": 130.667,
+   "ko": "우리 팀이 그래도 야이애나다 보니까",
+   "en": "and since our team has Yasuo and Diana,",
+   "terms": []
+  },
+  {
+   "stretch": "s1",
+   "start": 130.667,
+   "end": 133.267,
+   "ko": "한 번 잘 박아서.. 제압골 먹고 하다보면은",
+   "en": "if we land one good engage and grab some shutdown gold,",
+   "terms": []
+  },
+  {
+   "stretch": "s1",
+   "start": 133.267,
+   "end": 134.567,
+   "ko": "승산은 있긴 한데!",
+   "en": "we do have a chance to win!",
+   "terms": []
+  },
+  {
+   "stretch": "s1",
+   "start": 153.2,
+   "end": 154.533,
+   "ko": "이걸 더 오네? 신짜오는?",
+   "en": "He's still coming for this? Xin Zhao?",
+   "terms": [
+    "Xin Zhao"
+   ]
+  },
+  {
+   "stretch": "s1",
+   "start": 165.567,
+   "end": 166.667,
+   "ko": "렙차도 너무 많이 난다!",
+   "en": "The level gap is way too big!",
+   "terms": [
+    "level"
+   ]
+  },
+  {
+   "stretch": "s1",
+   "start": 178.767,
+   "end": 180.0,
+   "ko": "잡을 만한데?",
+   "en": "I could kill him?",
+   "terms": []
+  },
+  {
+   "stretch": "s2",
+   "start": 2.3,
+   "end": 3.233,
+   "ko": "다 터트리면 이길 거 같니?",
+   "en": "Do you think you'll win if you blow everything?",
+   "terms": []
+  },
+  {
+   "stretch": "s2",
+   "start": 11.067,
+   "end": 11.4,
+   "ko": "일로 와!",
+   "en": "Come here!",
+   "terms": []
+  },
+  {
+   "stretch": "s2",
+   "start": 12.667,
+   "end": 13.633,
+   "ko": "좋아요!",
+   "en": "Nice!",
+   "terms": []
+  },
+  {
+   "stretch": "s2",
+   "start": 13.633,
+   "end": 14.733,
+   "ko": "리신 궁도 뺐다!",
+   "en": "Lee Sin used his ult too!",
+   "terms": [
+    "Lee Sin"
+   ]
+  },
+  {
+   "stretch": "s2",
+   "start": 14.733,
+   "end": 16.533,
+   "ko": "일단 이번 턴도 궁도 안 써서..",
+   "en": "And I didn't even use my ult this time, so...",
+   "terms": [
+    "ult"
+   ]
+  },
+  {
+   "stretch": "s2",
+   "start": 17.533,
+   "end": 18.833,
+   "ko": "상대 피오라도 노점화고",
+   "en": "The enemy Fiora has no Ignite either,",
+   "terms": [
+    "Fiora",
+    "Ignite"
+   ]
+  },
+  {
+   "stretch": "s2",
+   "start": 20.733,
+   "end": 21.467,
+   "ko": "지금 1대1인데?",
+   "en": "It's a 1v1 now?",
+   "terms": [
+    "1v1"
+   ]
+  },
+  {
+   "stretch": "s2",
+   "start": 23.367,
+   "end": 24.667,
+   "ko": "이거는 그냥 궁 쓰지 말고",
+   "en": "For this one, just don't use ult",
+   "terms": [
+    "ult"
+   ]
+  },
+  {
+   "stretch": "s2",
+   "start": 26.267,
+   "end": 27.6,
+   "ko": "일단 요정도 딜교만 해주고!",
+   "en": "and just trade this much for now!",
+   "terms": [
+    "trade"
+   ]
+  },
+  {
+   "stretch": "s2",
+   "start": 29.933,
+   "end": 31.133,
+   "ko": "이건 끝까지 쫓아가서!",
+   "en": "Chase this one all the way!",
+   "terms": []
+  },
+  {
+   "stretch": "s2",
+   "start": 34.933,
+   "end": 36.233,
+   "ko": "집 가자! 할 게 없다",
+   "en": "Let's go home! Nothing to do",
+   "terms": []
+  },
+  {
+   "stretch": "s2",
+   "start": 36.233,
+   "end": 38.133,
+   "ko": "이미 지금 두 라인 태운 것만으로도",
+   "en": "Just from shoving two waves already,",
+   "terms": []
+  },
+  {
+   "stretch": "s2",
+   "start": 38.133,
+   "end": 39.2,
+   "ko": "기분이 좋기 때문에!",
+   "en": "I'm feeling good!",
+   "terms": []
+  },
+  {
+   "stretch": "s2",
+   "start": 43.733,
+   "end": 45.467,
+   "ko": "지금은 노스택 쌩Q 박아도",
+   "en": "even if I hit a raw Q with no stacks right now,",
+   "terms": [
+    "Q"
+   ]
+  },
+  {
+   "stretch": "s2",
+   "start": 45.467,
+   "end": 47.067,
+   "ko": "이기는 성장 차이다 보니까!",
+   "en": "I still win because of the gold gap!",
+   "terms": []
+  },
+  {
+   "stretch": "s2",
+   "start": 54.567,
+   "end": 56.167,
+   "ko": "리신이 또 기가 막히게 봐주네?",
+   "en": "Lee Sin is covering for me perfectly again?",
+   "terms": [
+    "Lee Sin"
+   ]
+  },
+  {
+   "stretch": "s2",
+   "start": 79.167,
+   "end": 79.7,
+   "ko": "누군데 이거!",
+   "en": "Who is this?!",
+   "terms": []
+  },
+  {
+   "stretch": "s2",
+   "start": 81.433,
+   "end": 82.333,
+   "ko": "아 나 뺄 수가 없긴 해!",
+   "en": "Ah, I really can't back off!",
+   "terms": []
+  },
+  {
+   "stretch": "s2",
+   "start": 117.967,
+   "end": 120.4,
+   "ko": "이러면 다시.. 바텀 가고!",
+   "en": "In that case... back to bot!",
+   "terms": [
+    "bot"
+   ]
+  },
+  {
+   "stretch": "s2",
+   "start": 120.4,
+   "end": 121.233,
+   "ko": "궁이 없어서",
+   "en": "Since I don't have ult,",
+   "terms": [
+    "ult"
+   ]
+  },
+  {
+   "stretch": "s2",
+   "start": 121.233,
+   "end": 123.767,
+   "ko": "딱히 한타에서 할 만한 게 없기 때문에!",
+   "en": "there's not much to do in teamfights!",
+   "terms": [
+    "teamfight"
+   ]
+  },
+  {
+   "stretch": "s2",
+   "start": 125.867,
+   "end": 126.933,
+   "ko": "제발 반절 교환만 해줘!",
+   "en": "Please, just trade half for half!",
+   "terms": []
+  },
+  {
+   "stretch": "s2",
+   "start": 126.933,
+   "end": 128.3,
+   "ko": "오케이! 야 리신 잡은 거 좋다!",
+   "en": "Okay! Nice, catching Lee Sin is great!",
+   "terms": [
+    "Lee Sin"
+   ]
+  },
+  {
+   "stretch": "s2",
+   "start": 129.767,
+   "end": 131.633,
+   "ko": "바텀을 꽤나 많이 밀긴 해서..!",
+   "en": "We did push bot quite a lot..!",
+   "terms": [
+    "bot"
+   ]
+  },
+  {
+   "stretch": "s2",
+   "start": 131.633,
+   "end": 132.233,
+   "ko": "나쁘진 않아!",
+   "en": "Not bad!",
+   "terms": []
+  },
+  {
+   "stretch": "s2",
+   "start": 140.867,
+   "end": 141.633,
+   "ko": "아 나 못 빼는데?",
+   "en": "Ah, I can't back off?",
+   "terms": []
+  },
+  {
+   "stretch": "s2",
+   "start": 167.067,
+   "end": 167.467,
+   "ko": "해봐?",
+   "en": "Should I try it?",
+   "terms": []
+  },
+  {
+   "stretch": "s2",
+   "start": 167.467,
+   "end": 168.233,
+   "ko": "케틀 오지 않나?",
+   "en": "Isn't Caitlyn coming?",
+   "terms": [
+    "Caitlyn"
+   ]
+  },
+  {
+   "stretch": "s2",
+   "start": 168.233,
+   "end": 169.467,
+   "ko": "위치를 놓치긴 했는데!",
+   "en": "I did lose track of their position, though!",
+   "terms": []
+  }
+ ]
+}

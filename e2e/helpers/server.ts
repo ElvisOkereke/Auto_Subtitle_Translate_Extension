@@ -2,11 +2,14 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { AddressInfo } from 'node:net';
-import { FIXTURES } from './paths';
+import { CACHE, FIXTURES } from './paths';
 
 const TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
   '.wav': 'audio/wav',
+  '.webm': 'video/webm',
+  '.json': 'application/json',
+  '.png': 'image/png',
   '.js': 'text/javascript',
   '.css': 'text/css',
 };
@@ -26,6 +29,28 @@ export interface FixtureServer {
   /** Artificial latency for mock translation responses, in ms. */
   setTranslationDelay: (ms: number) => void;
   close: () => Promise<void>;
+}
+
+function serveStream(req: http.IncomingMessage, res: http.ServerResponse, file: string): void {
+  if (!fs.existsSync(file)) {
+    res.statusCode = 404;
+    res.end('missing video fixture - run `npm run fixtures:video`');
+    return;
+  }
+  const size = fs.statSync(file).size;
+  res.setHeader('content-type', TYPES[path.extname(file)] ?? 'application/octet-stream');
+  res.setHeader('accept-ranges', 'bytes');
+  const range = req.headers.range?.match(/bytes=(\d*)-(\d*)/);
+  let start = 0;
+  let end = size - 1;
+  if (range) {
+    start = range[1] ? Number(range[1]) : 0;
+    end = range[2] ? Math.min(Number(range[2]), size - 1) : size - 1;
+    res.statusCode = 206;
+    res.setHeader('content-range', `bytes ${start}-${end}/${size}`);
+  }
+  res.setHeader('content-length', String(end - start + 1));
+  fs.createReadStream(file, { start, end }).pipe(res);
 }
 
 function readJson(req: http.IncomingMessage): Promise<any> {
@@ -82,9 +107,16 @@ export async function startFixtureServer(): Promise<FixtureServer> {
       });
       return;
     }
+    if (urlPath.startsWith('/videos/')) {
+      // Large, gitignored video fixtures (npm run fixtures:video): stream with Range support.
+      serveStream(req, res, path.join(CACHE, 'videos', path.basename(urlPath)));
+      return;
+    }
     const file = urlPath.startsWith('/audio/')
       ? path.join(FIXTURES, 'audio', path.basename(urlPath))
-      : path.join(FIXTURES, 'pages', path.basename(urlPath) || 'index.html');
+      : urlPath.startsWith('/subtitles/')
+        ? path.join(FIXTURES, 'subtitles', path.basename(urlPath))
+        : path.join(FIXTURES, 'pages', path.basename(urlPath) || 'index.html');
     if (!fs.existsSync(file)) {
       res.statusCode = 404;
       res.end('not found');

@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>Video subtitles fixture</title>
+<style>
+  body { margin: 0; background: #0f0f0f; color: #f1f1f1; font-family: sans-serif; }
+  #page { padding: 24px; }
+  /* Mirrors YouTube's player DOM so selectors/behaviour match the real site. */
+  #movie_player { position: relative; width: 1280px; height: 720px; background: #000; }
+  .html5-video-container, .html5-main-video { width: 100%; height: 100%; }
+  .html5-main-video { display: block; object-fit: contain; }
+  #page-text { margin-top: 24px; font-size: 22px; width: 600px; }
+</style>
+</head>
+<body>
+<div id="page">
+  <div id="movie_player" class="html5-video-player">
+    <div class="html5-video-container">
+      <video class="html5-main-video" muted playsinline></video>
+    </div>
+  </div>
+  <p id="page-text">자막이 아닌 일반 페이지 텍스트입니다</p>
+</div>
+<script>
+  // ?v=<videoId>&stretch=s1|s2 - plays e2e/.cache/videos/_zIrbXw-SVs.<stretch>.webm
+  // through MediaSource in 1 MB slices, like YouTube's MSE player.
+  const video = document.querySelector('video');
+  const player = document.getElementById('movie_player');
+  const SLICE = 1 << 20;
+  let loadToken = 0;
+
+  async function feed(ms, url, mime, token) {
+    const sb = ms.addSourceBuffer(mime);
+    const size = Number((await fetch(url, { method: 'HEAD' })).headers.get('content-length'));
+    for (let start = 0; start < size; start += SLICE) {
+      if (token !== loadToken) return;
+      const end = Math.min(start + SLICE, size) - 1;
+      const buf = await (await fetch(url, { headers: { Range: `bytes=${start}-${end}` } })).arrayBuffer();
+      if (token !== loadToken) return;
+      sb.appendBuffer(buf);
+      await new Promise(r => sb.addEventListener('updateend', r, { once: true }));
+    }
+  }
+
+  // One SourceBuffer per track, fed in 1 MB slices - the way YouTube's player works.
+  async function load(stretch) {
+    const token = ++loadToken;
+    const base = `/videos/_zIrbXw-SVs.${stretch}`;
+    const ms = new MediaSource();
+    video.src = URL.createObjectURL(ms);
+    await new Promise(r => ms.addEventListener('sourceopen', r, { once: true }));
+    await Promise.all([
+      feed(ms, `${base}.video.webm`, 'video/webm; codecs="vp9"', token),
+      feed(ms, `${base}.audio.webm`, 'audio/webm; codecs="opus"', token),
+    ]);
+    if (token === loadToken && ms.readyState === 'open') ms.endOfStream();
+  }
+
+  window.__fixture = {
+    video,
+    navigate(v, stretch) {
+      history.pushState({}, '', `?v=${encodeURIComponent(v)}&stretch=${encodeURIComponent(stretch)}`);
+      load(stretch);
+      document.dispatchEvent(new Event('yt-navigate-finish'));
+    },
+    setAd(on) {
+      player.classList.toggle('ad-showing', on);
+    },
+  };
+
+  const params = new URLSearchParams(location.search);
+  load(params.get('stretch') || 's1');
+</script>
+</body>
+</html>
