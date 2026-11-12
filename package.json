@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "Browser extension for auto-generating and translating subtitles",
   "dependencies": {
+    "@anthropic-ai/sdk": "^1.8.0",
     "@huggingface/transformers": "^3.0.0"
   },
   "scripts": {
@@ -28,7 +29,6 @@
     "e2e:judge": "cross-env-shell E2E_JUDGE=1 playwright test --project=judge"
   },
   "devDependencies": {
-    "@anthropic-ai/sdk": "^1.8.0",
     "@playwright/test": "^1.56.1",
     "@types/chrome": "^0.0.268",
     "@types/jest": "^29.5.14",

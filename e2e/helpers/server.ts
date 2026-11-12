@@ -16,12 +16,17 @@ const TYPES: Record<string, string> = {
 };
 
 export interface TranslationCall {
-  provider: 'deepl' | 'google';
+  provider: 'deepl' | 'google' | 'anthropic';
   text: string;
   target: string;
   source?: string;
   authorization?: string;
   context?: string;
+  /** Anthropic mock only. */
+  model?: string;
+  system?: string;
+  xApiKey?: string;
+  kind?: 'translate' | 'topic';
 }
 
 export interface FixtureServer {
@@ -30,6 +35,8 @@ export interface FixtureServer {
   translationCalls: TranslationCall[];
   /** Artificial latency for mock translation responses, in ms. */
   setTranslationDelay: (ms: number) => void;
+  /** Make the mock Anthropic API fail with this HTTP status (null = succeed). */
+  setAnthropicFailure: (status: number | null) => void;
   close: () => Promise<void>;
 }
 
@@ -77,12 +84,64 @@ function readJson(req: http.IncomingMessage): Promise<any> {
 export async function startFixtureServer(): Promise<FixtureServer> {
   const translationCalls: TranslationCall[] = [];
   let translationDelay = 0;
+  let anthropicFailure: number | null = null;
+
+  // Mock Anthropic Messages API: "[CLAUDE] <line>" per requested line id, a
+  // glossary entry for 뽀삐, and a League topic for topic requests.
+  const handleAnthropic = (req: http.IncomingMessage, res: http.ServerResponse, body: any) => {
+    const system = (body.system ?? []).map((b: any) => b.text ?? '').join('\n');
+    const user = (body.messages ?? [])
+      .flatMap((m: any) => (Array.isArray(m.content) ? m.content : [{ text: m.content }]))
+      .map((b: any) => b.text ?? '')
+      .join('\n');
+    const kind = system.includes('topicKey') ? 'topic' : 'translate';
+    translationCalls.push({
+      provider: 'anthropic',
+      kind,
+      text: user,
+      target: '',
+      model: body.model,
+      system,
+      authorization: req.headers.authorization,
+      xApiKey: req.headers['x-api-key'] as string | undefined,
+    });
+    if (anthropicFailure) {
+      res.statusCode = anthropicFailure;
+      res.end(JSON.stringify({ type: 'error', error: { type: 'rate_limit_error', message: 'mock failure' } }));
+      return;
+    }
+    let reply: unknown;
+    if (kind === 'topic') {
+      reply = { topic: 'League of Legends solo queue stream', topicKey: 'League of Legends', glossary: [{ source: '렙차', target: 'level gap' }] };
+    } else {
+      const lines = [...user.matchAll(/<line id="([^"]+)">[\s\S]*?text: (.*)/g)].map(m => ({ id: m[1], text: m[2].trim() }));
+      reply = {
+        translations: lines.map(l => ({ id: l.id, text: `[CLAUDE] ${l.text}` })),
+        glossary: lines.some(l => l.text.includes('뽀삐')) ? [{ source: '뽀삐', target: 'Poppy', note: 'champion' }] : [],
+      };
+    }
+    res.end(
+      JSON.stringify({
+        id: 'msg_mock',
+        type: 'message',
+        role: 'assistant',
+        model: body.model,
+        content: [{ type: 'text', text: JSON.stringify(reply) }],
+        stop_reason: 'end_turn',
+        stop_sequence: null,
+        usage: { input_tokens: 1000, output_tokens: 50, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
+      })
+    );
+  };
 
   const handleMock = async (req: http.IncomingMessage, res: http.ServerResponse, urlPath: string) => {
     const body = await readJson(req);
     if (translationDelay) await new Promise(r => setTimeout(r, translationDelay));
     res.setHeader('content-type', 'application/json');
-    if (urlPath === '/mock/deepl') {
+    if (urlPath === '/mock/anthropic/v1/messages') {
+      await new Promise(r => setTimeout(r, 400)); // Claude is slower than DeepL: lets tests see fast-then-best
+      handleAnthropic(req, res, body);
+    } else if (urlPath === '/mock/deepl') {
       const text: string = body.text?.[0] ?? '';
       translationCalls.push({
         provider: 'deepl',
@@ -157,6 +216,7 @@ export async function startFixtureServer(): Promise<FixtureServer> {
     url: `http://127.0.0.1:${port}`,
     translationCalls,
     setTranslationDelay: ms => (translationDelay = ms),
+    setAnthropicFailure: status => (anthropicFailure = status),
     close: () =>
       new Promise(resolve => {
         server.closeAllConnections();
