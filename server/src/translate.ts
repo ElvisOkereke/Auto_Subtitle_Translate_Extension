@@ -18,8 +18,16 @@ const MAX_TEXT = 500;
 const MAX_NEIGHBOURS = 4;
 const MAX_GLOSSARY = 200;
 const MAX_FIELD = 2000;
-/** Translation requests one account may have in flight (bounds how far concurrent requests can overshoot the budget). */
-export const MAX_IN_FLIGHT_PER_ACCOUNT = 4;
+/**
+ * Requests one account may have in flight, per tier (bounds how far concurrent
+ * requests can overshoot the budget). Matches the extension: 4 Claude lanes,
+ * 4 fast lanes plus Screen Translate.
+ */
+export const MAX_IN_FLIGHT = { claude: 4, fast: 6 } as const;
+/** Server-side Claude timeout: long Opus replies take longer than the extension's BYOK default. */
+const SERVER_CLAUDE_TIMEOUT_MS = 60_000;
+/** Rough tokens per character of a JSON request (for charging failed calls). */
+const TOKENS_PER_CHAR = 1 / 3;
 
 class BadRequest extends Error {}
 
@@ -79,40 +87,56 @@ export interface ProxyDeps {
   config: ServerConfig;
   repo: Repo;
   clock: () => number;
-  monthOf: (t: number) => string;
+  periodOf: (account: Account, now: number) => string;
   status: (account: Account) => { active: boolean; exhausted: boolean };
   fetch?: typeof fetch;
 }
 
 export function mountTranslate(app: Hono<AuthEnv>, requireAccount: MiddlewareHandler<AuthEnv>, deps: ProxyDeps): void {
   const { config, repo } = deps;
-  const inFlight = new Map<number, number>();
+  const inFlight = new Map<string, number>();
   // Reject oversized bodies while reading them, not after buffering.
   const limitBody = bodyLimit({ maxSize: MAX_BODY_BYTES, onError: c => c.json({ error: 'bad_request', message: 'request too large' }, 413) });
 
-  const claudeFor = (account: Account, requested: unknown): ClaudeEngine => {
+  const modelFor = (account: Account, requested: unknown): ClaudeModel => {
     const plan = isPaidPlan(account.plan) ? PLANS[account.plan] : PLANS.standard;
-    const model = plan.models.includes(requested as ClaudeModel) ? (requested as ClaudeModel) : plan.bestModel;
+    return plan.models.includes(requested as ClaudeModel) ? (requested as ClaudeModel) : plan.bestModel;
+  };
+  const claudeFor = (account: Account, requested: unknown): ClaudeEngine => {
+    const model = modelFor(account, requested);
     const auth = config.anthropic.authToken
       ? { kind: 'bearer' as const, token: config.anthropic.authToken }
       : { kind: 'x-api-key' as const, token: config.anthropic.apiKey ?? '' };
-    return new ClaudeEngine({ model, baseURL: config.anthropic.baseURL, auth, ...(deps.fetch ? { fetch: deps.fetch } : {}) });
+    return new ClaudeEngine({ model, baseURL: config.anthropic.baseURL, auth, timeoutMs: SERVER_CLAUDE_TIMEOUT_MS, ...(deps.fetch ? { fetch: deps.fetch } : {}) });
   };
   const deepl = () => new DeepLEngine({ apiKey: config.deepl.apiKey, endpoint: config.deepl.endpoint, ...(deps.fetch ? { fetch: deps.fetch } : {}) });
 
+  const record = (account: Account, costUsdValue: number, claudeRequests: number, fastChars: number) => {
+    try {
+      repo.addUsage(account.id, deps.periodOf(account, deps.clock()), { costUsd: costUsdValue, claudeRequests, fastChars });
+    } catch (error) {
+      console.error('Usage not recorded:', (error as Error).message);
+    }
+  };
   const meterClaude = (account: Account, usage: Usage | undefined) => {
-    if (usage) repo.addUsage(account.id, deps.monthOf(deps.clock()), { costUsd: costUsd(usage), claudeRequests: 1, fastChars: 0 });
+    if (usage) record(account, costUsd(usage), 1, 0);
+  };
+  /** A Claude call that failed may still have been billed: charge an estimate of its input. */
+  const chargeFailedClaude = (account: Account, model: ClaudeModel, body: unknown) => {
+    const inputTokens = Math.ceil(JSON.stringify(body ?? '').length * TOKENS_PER_CHAR);
+    record(account, costUsd({ model, inputTokens, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }), 1, 0);
   };
 
   /** Subscription + budget gate, then the handler; validation and upstream errors map to 400/502. */
-  const guarded = (handler: (c: Context<AuthEnv>, account: Account, body: any) => Promise<Response>) => async (c: Context<AuthEnv>) => {
+  const guarded = (tier: 'claude' | 'fast', handler: (c: Context<AuthEnv>, account: Account, body: any) => Promise<Response>) => async (c: Context<AuthEnv>) => {
     const account = c.get('account');
     const status = deps.status(account);
     if (!status.active) return c.json({ error: 'not_subscribed', message: 'Subscribe to use the hosted translation.' }, 402);
     if (status.exhausted) return c.json({ error: 'budget_exhausted', message: "This month's translation allowance is used up." }, 402);
-    const running = inFlight.get(account.id) ?? 0;
-    if (running >= MAX_IN_FLIGHT_PER_ACCOUNT) return c.json({ error: 'rate_limited', message: 'Too many translations at once.' }, 429);
-    inFlight.set(account.id, running + 1);
+    const lane = `${account.id}:${tier}`;
+    const running = inFlight.get(lane) ?? 0;
+    if (running >= MAX_IN_FLIGHT[tier]) return c.json({ error: 'rate_limited', message: 'Too many translations at once.' }, 429);
+    inFlight.set(lane, running + 1);
     try {
       return await handler(c, account, await readBody(c));
     } catch (error) {
@@ -121,9 +145,9 @@ export function mountTranslate(app: Hono<AuthEnv>, requireAccount: MiddlewareHan
       console.warn('Upstream translation failed:', upstreamStatus ?? '', error instanceof Error ? error.message : error);
       return c.json({ error: 'upstream', message: 'Translation service error, try again.', upstreamStatus: upstreamStatus ?? null }, 502);
     } finally {
-      const left = (inFlight.get(account.id) ?? 1) - 1;
-      if (left > 0) inFlight.set(account.id, left);
-      else inFlight.delete(account.id);
+      const left = (inFlight.get(lane) ?? 1) - 1;
+      if (left > 0) inFlight.set(lane, left);
+      else inFlight.delete(lane);
     }
   };
 
@@ -131,14 +155,14 @@ export function mountTranslate(app: Hono<AuthEnv>, requireAccount: MiddlewareHan
     '/v1/translate/fast',
     limitBody,
     requireAccount,
-    guarded(async (c, account, body) => {
+    guarded('fast', async (c, account, body) => {
       const text = str(body?.text, MAX_TEXT, 'text');
       const result = await deepl().translateOne(text, lang(body?.sourceLang, 'sourceLang'), lang(body?.targetLang, 'targetLang'), {
         previousLines: strList(body?.previousLines, MAX_NEIGHBOURS, MAX_TEXT, 'previousLines'),
         nextLines: strList(body?.nextLines, MAX_NEIGHBOURS, MAX_TEXT, 'nextLines'),
       });
       // DeepL bills the translated text only (context is free).
-      repo.addUsage(account.id, deps.monthOf(deps.clock()), { costUsd: text.length * DEEPL_USD_PER_CHAR, claudeRequests: 0, fastChars: text.length });
+      record(account, text.length * DEEPL_USD_PER_CHAR, 0, text.length);
       return c.json({ text: result.text });
     })
   );
@@ -147,7 +171,7 @@ export function mountTranslate(app: Hono<AuthEnv>, requireAccount: MiddlewareHan
     '/v1/translate/batch',
     limitBody,
     requireAccount,
-    guarded(async (c, account, body) => {
+    guarded('claude', async (c, account, body) => {
       const req = {
         sourceLang: lang(body?.sourceLang, 'sourceLang'),
         targetLang: lang(body?.targetLang, 'targetLang'),
@@ -156,7 +180,12 @@ export function mountTranslate(app: Hono<AuthEnv>, requireAccount: MiddlewareHan
         topic: body?.topic === null || body?.topic === undefined ? null : str(body.topic, 300, 'topic'),
         glossary: glossary(body?.glossary),
       };
-      const result = await claudeFor(account, body?.model).translateBatch(req);
+      const result = await claudeFor(account, body?.model)
+        .translateBatch(req)
+        .catch(error => {
+          chargeFailedClaude(account, modelFor(account, body?.model), req);
+          throw error;
+        });
       meterClaude(account, result.usage);
       return c.json({ translations: result.translations, glossaryUpdates: result.glossaryUpdates });
     })
@@ -166,13 +195,14 @@ export function mountTranslate(app: Hono<AuthEnv>, requireAccount: MiddlewareHan
     '/v1/translate/topic',
     limitBody,
     requireAccount,
-    guarded(async (c, account, body) => {
-      const result = await claudeFor(account, body?.model).summarizeTopic(
-        video(body?.video),
-        strList(body?.firstLines, MAX_LINES, MAX_TEXT, 'firstLines'),
-        lang(body?.sourceLang, 'sourceLang'),
-        lang(body?.targetLang, 'targetLang')
-      );
+    guarded('claude', async (c, account, body) => {
+      const args = [video(body?.video), strList(body?.firstLines, MAX_LINES, MAX_TEXT, 'firstLines'), lang(body?.sourceLang, 'sourceLang'), lang(body?.targetLang, 'targetLang')] as const;
+      const result = await claudeFor(account, body?.model)
+        .summarizeTopic(...args)
+        .catch(error => {
+          chargeFailedClaude(account, modelFor(account, body?.model), args);
+          throw error;
+        });
       meterClaude(account, result.usage);
       return c.json({ topic: result.topic, topicKey: result.topicKey, glossary: result.glossary });
     })

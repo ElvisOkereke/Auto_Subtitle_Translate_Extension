@@ -13,7 +13,7 @@ automated runs in a real browser (details: [performance.md](performance.md)).
   Claude-quality translation) and **Pro $24.99/month** (Opus, ≈ 4.5–6.5 hours);
   every request is metered against a monthly budget so costs can't run away.
 - Bring-your-own-keys still works for heavy watchers.
-- Ready to deploy on Google Cloud Run (Docker image + one-command deploy script).
+- Ready to deploy on Google Cloud (Docker image on a small VM with HTTPS, one-command deploy script).
 
 ## 2026-11-12 — Context-aware translation: Claude knows what you're watching
 

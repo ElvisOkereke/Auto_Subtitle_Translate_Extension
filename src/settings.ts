@@ -1,7 +1,17 @@
 import { ExtensionSettings } from './types';
 
-/** The hosted translation service (subscriptions). Placeholder until deployed - see server/README.md. */
-export const DEFAULT_SERVER_URL = 'https://api.autosubtitle.app';
+/**
+ * The hosted translation service (subscriptions). `.invalid` (reserved, never
+ * resolves) until it is deployed - set it then (server/README.md). While it is
+ * the placeholder, the account section and Subscription options stay hidden.
+ */
+export const DEFAULT_SERVER_URL = 'https://proxy.invalid';
+
+/** The hosted service URL, or null while none is configured (dev override wins). */
+export function hostedServiceUrl(devOverride?: string): string | null {
+  if (devOverride) return devOverride;
+  return DEFAULT_SERVER_URL.endsWith('.invalid') ? null : DEFAULT_SERVER_URL;
+}
 
 export const DEFAULT_SETTINGS: ExtensionSettings = {
   sourceLanguage: 'auto',

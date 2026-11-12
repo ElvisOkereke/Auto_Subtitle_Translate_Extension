@@ -2,7 +2,7 @@
 
 import { ExtensionMessage, CaptureResponse, APIError } from './types';
 import { apiService, getEndpointOverrides } from './services/apiService';
-import { DEFAULT_SERVER_URL, DEFAULT_SETTINGS, getSecrets, getSettings, migrateSecretsFromSync, saveSettings, setSecrets } from './settings';
+import { DEFAULT_SETTINGS, getSecrets, getSettings, hostedServiceUrl, migrateSecretsFromSync, saveSettings, setSecrets } from './settings';
 import { ProxyClient, proxyClaude, proxyFast } from './translation/engines/proxy';
 import { JobPriority } from './utils/priorityRunner';
 import { LineTranslateRequest, StorageUsageMeter, TranslationService } from './translation/translationService';
@@ -24,7 +24,7 @@ const translation = new TranslationService({
   makeClaude: cfg => (cfg.via === 'proxy' ? proxyClaude(new ProxyClient({ baseURL: cfg.baseURL, token: cfg.auth.token }), cfg.model) : new ClaudeEngine(cfg)),
   makeFast: (provider, apiKey, endpoint) =>
     provider === 'subscription'
-      ? proxyFast(new ProxyClient({ baseURL: endpoint ?? DEFAULT_SERVER_URL, token: apiKey }))
+      ? proxyFast(new ProxyClient({ baseURL: endpoint ?? 'https://proxy.invalid', token: apiKey }))
       : provider === 'deepl'
         ? new DeepLEngine({ apiKey, endpoint })
         : new GoogleEngine({ apiKey, endpoint }),
@@ -354,7 +354,8 @@ class SubtitleService {
   /** The hosted service (subscription): sign-in, status, sign-out, Stripe Checkout/Portal. */
   private async handleAccount(message: ExtensionMessage): Promise<unknown> {
     const overrides = await getEndpointOverrides();
-    const baseURL = overrides.server ?? DEFAULT_SERVER_URL;
+    const baseURL = hostedServiceUrl(overrides.server);
+    if (!baseURL) return message.type === 'ACCOUNT_STATUS' ? { success: true, available: false } : { success: false, error: 'The hosted translation service is not available in this build.' };
     const { accountToken } = await getSecrets();
     const client = new ProxyClient({ baseURL, token: accountToken || undefined });
     const m = message as ExtensionMessage & { email?: string; code?: string; plan?: 'standard' | 'pro' };
@@ -373,8 +374,8 @@ class SubtitleService {
           await setSecrets({ accountToken: '' });
           return { success: true };
         case 'ACCOUNT_STATUS':
-          if (!accountToken) return { success: true, signedIn: false };
-          return { success: true, signedIn: true, account: await client.me() };
+          if (!accountToken) return { success: true, available: true, signedIn: false };
+          return { success: true, available: true, signedIn: true, account: await client.me() };
         case 'BILLING_OPEN': {
           const url = m.plan ? await client.checkout(m.plan) : await client.portal();
           // Only open Stripe pages (or a loopback test server).

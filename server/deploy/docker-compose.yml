@@ -1,0 +1,24 @@
+# Runs on the VM created by gce.sh: the proxy (SQLite on the persistent disk at
+# /mnt/disks/data) behind Caddy, which terminates HTTPS for $DOMAIN.
+services:
+  proxy:
+    image: ${IMAGE}
+    restart: unless-stopped
+    env_file: /etc/ast-proxy/env        # written from Secret Manager by the startup script
+    environment:
+      DB_PATH: /data/app.db
+      PORT: "8080"
+      TRUST_PROXY_HOPS: "1"             # Caddy appends the client address to X-Forwarded-For
+    volumes:
+      - /mnt/disks/data:/data
+    stop_grace_period: 20s              # SIGTERM -> graceful shutdown closes the database
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    environment:
+      DOMAIN: ${DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - /mnt/disks/data/caddy:/data     # TLS certificates survive restarts
+    depends_on: [proxy]

@@ -1,7 +1,7 @@
 // apiService.ts - single-line translation with the configured fast engine
 // (DeepL or Google). Used by Screen Translate and as the fast tier; the HTTP
 // details live in src/translation/engines/.
-import { DEFAULT_SERVER_URL, getSecrets } from '../settings';
+import { getSecrets, hostedServiceUrl } from '../settings';
 import { ProxyClient, proxyFast } from '../translation/engines/proxy';
 import { DeepLEngine } from '../translation/engines/deepl';
 import { GoogleEngine } from '../translation/engines/google';
@@ -50,7 +50,9 @@ export async function fastEngine(): Promise<FastEngine> {
     getEndpointOverrides(),
   ]);
   if (settings.translationProvider === 'subscription') {
-    return proxyFast(new ProxyClient({ baseURL: overrides.server ?? DEFAULT_SERVER_URL, token: secrets.accountToken }));
+    const baseURL = hostedServiceUrl(overrides.server);
+    if (!baseURL) throw new Error('The hosted translation service is not available in this build.');
+    return proxyFast(new ProxyClient({ baseURL, token: secrets.accountToken }));
   }
   return settings.translationProvider === 'deepl'
     ? new DeepLEngine({ apiKey: secrets.deeplApiKey, endpoint: overrides.deepl })

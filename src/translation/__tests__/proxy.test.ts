@@ -68,4 +68,39 @@ describe('ProxyClient', () => {
     const client = new ProxyClient({ baseURL: 'http://127.0.0.1:9', token: 't', fetch: (async () => Promise.reject(new TypeError('Failed to fetch'))) as typeof fetch });
     await expect(client.me()).rejects.toMatchObject({ status: 0, code: 'network' });
   });
+
+  it('trims requests to the server limits (text 500 chars, 4 neighbours each, video fields)', async () => {
+    const f = fakeFetch(() => ({ json: { translations: [], glossaryUpdates: [] } }));
+    const client = new ProxyClient({ baseURL: 'http://127.0.0.1:9', token: 't', fetch: f.fn });
+    const long = 'x'.repeat(800);
+    await client.translateBatch(
+      {
+        sourceLang: 'ko',
+        targetLang: 'en',
+        lines: [{ id: 'L1', text: long, previous: [long, 'a', 'b', 'c', 'd', 'e'], next: ['n'] }],
+        video: { ...video, url: 'https://x.example/' + 'p'.repeat(3000), description: 'd'.repeat(5000) },
+        topic: 't'.repeat(400),
+        glossary: Array.from({ length: 250 }, (_, i) => ({ source: `s${i}`, target: 't' })),
+      },
+      'claude-sonnet-5-5'
+    );
+    const body = f.calls[0].body;
+    expect(body.lines[0].text).toHaveLength(500);
+    expect(body.lines[0].previous).toEqual(['b', 'c', 'd', 'e']); // the 4 nearest
+    expect(body.video.url.length).toBeLessThanOrEqual(2000);
+    expect(body.video.description.length).toBeLessThanOrEqual(2000);
+    expect(body.topic.length).toBeLessThanOrEqual(300);
+    expect(body.glossary).toHaveLength(200);
+  });
+
+  it('long text (e.g. a Screen Translate paragraph) is split into chunks of at most 500 characters and joined', async () => {
+    const f = fakeFetch((_p, body) => ({ json: { text: `T${body.text.length}` } }));
+    const client = new ProxyClient({ baseURL: 'http://127.0.0.1:9', token: 't', fetch: f.fn });
+    const sentence = 'This is a sentence of about forty chars. ';
+    const text = sentence.repeat(30); // ~1200 chars
+    const result = await client.translateOne(text.trim(), 'en', 'fr');
+    expect(f.calls.length).toBeGreaterThanOrEqual(3);
+    expect(f.calls.every(c => c.body.text.length <= 500)).toBe(true);
+    expect(result.text.split(' ').length).toBe(f.calls.length);
+  });
 });

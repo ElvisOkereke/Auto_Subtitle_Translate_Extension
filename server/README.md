@@ -41,7 +41,7 @@ Errors: `401 unauthorized`, `402 not_subscribed | budget_exhausted`,
 | `RESEND_API_KEY`, `MAIL_FROM` | for login email | without them codes stay in memory (dev only) |
 | `ADMIN_TOKEN` | to use `/v1/admin/plan` | empty = endpoint disabled |
 | `PUBLIC_URL` | yes | https URL of this server (Stripe return pages) |
-| `TRUST_PROXY_HOPS` | yes behind a proxy | `1` on Cloud Run; client IPs for rate limits |
+| `TRUST_PROXY_HOPS` | yes behind a proxy | `1` behind Caddy (set by the deploy); client IPs for rate limits |
 | `DB_PATH`, `PORT` | | default `app.db`, `8080` |
 | `DEV_OUTBOX=1` | dev/test only | serves `/dev/outbox` — never in production |
 
@@ -53,29 +53,41 @@ curl -X POST "$PUBLIC_URL/v1/admin/plan" -H "x-admin-token: $ADMIN_TOKEN" -H 'co
   -d '{"email":"friend@example.com","plan":"pro"}'
 ```
 
-## Deploy (Google Cloud Run) — checklist
+## Deploy (Google Compute Engine VM) — checklist
 
-1. **Stripe** (test mode first): create a product with two monthly prices
-   ($9.99 standard, $24.99 pro); note the price ids. Enable the Customer Portal.
-   Add a webhook endpoint `https://<your domain>/v1/stripe/webhook` with events
+One small VM (e2-small) with a persistent disk for SQLite, the proxy container
+behind Caddy (automatic HTTPS), secrets from Secret Manager. (Not Cloud Run: its
+Cloud Storage volumes don't lock files and can lose concurrent SQLite writes, and
+a rollout can briefly run two writers.)
+
+1. **Stripe** (test mode first): one product with two monthly prices ($9.99
+   standard, $24.99 pro); note the price ids. Enable the Customer Portal with plan
+   switching (upgrades go through the portal; a second checkout is refused). Add a
+   webhook endpoint `https://<domain>/v1/stripe/webhook` with events
    `checkout.session.completed`, `checkout.session.async_payment_succeeded`,
    `checkout.session.async_payment_failed`, `customer.subscription.created`,
    `customer.subscription.updated`, `customer.subscription.deleted`,
    `invoice.payment_failed`; note the signing secret.
 2. **Resend**: verify the sending domain; create an API key.
-3. **Anthropic / DeepL**: service API keys (DeepL API Pro for the per-character price).
+3. **Anthropic / DeepL**: service API keys (DeepL API Pro for per-character pricing).
 4. **Secrets** (Secret Manager): `ast-anthropic-key`, `ast-deepl-key`,
    `ast-stripe-secret`, `ast-stripe-webhook`, `ast-stripe-price-standard`,
-   `ast-stripe-price-pro`, `ast-resend-key`, `ast-admin-token` — e.g.
-   `printf %s "$VALUE" | gcloud secrets create ast-deepl-key --data-file=-`,
-   and grant the Cloud Run service account `roles/secretmanager.secretAccessor`.
-5. **Deploy**: `PROJECT=… REGION=… PUBLIC_URL=https://… server/deploy/cloudrun.sh`
-   (one instance, SQLite on a Cloud Storage volume at `/data`). Map your domain
-   to the service.
-6. **Extension**: set `SERVER_URL` in `src/settings.ts` (`DEFAULT_SERVER_URL`)
-   to the public URL and rebuild/publish.
+   `ast-stripe-price-pro`, `ast-resend-key`, `ast-mail-from`, `ast-admin-token`
+   (32+ random characters) — e.g.
+   `printf %s "$VALUE" | gcloud secrets create ast-deepl-key --data-file=-`.
+   Grant the VM's service account (default compute SA)
+   `roles/secretmanager.secretAccessor` and `roles/artifactregistry.reader`.
+5. **Deploy**: `PROJECT=… ZONE=us-central1-a DOMAIN=api.example.com server/deploy/gce.sh`,
+   then point the domain's A record at the printed IP (Caddy fetches the
+   certificate). Re-run the script to roll out a new build.
+6. **Extension**: set `DEFAULT_SERVER_URL` in `src/settings.ts` to
+   `https://<domain>` — while it is `https://proxy.invalid` the account section
+   and Subscription options stay hidden — then rebuild and publish.
 7. **Check**: sign in from the popup, subscribe with a Stripe test card
    (4242 4242 4242 4242), translate a video, see usage in the popup.
+8. **Backups**: snapshot the data disk on a schedule
+   (`gcloud compute resource-policies create snapshot-schedule …`).
 
-Scaling past one instance: move the repository (`src/db.ts`) to Postgres
-(Cloud SQL) and the rate-limit/in-flight counters to the database or Redis.
+Behind an extra load balancer in front of Caddy, set `TRUST_PROXY_HOPS=2`.
+Scaling past one VM: move the repository (`src/db.ts`) to Postgres (Cloud SQL)
+and the in-flight counters to the database or Redis.

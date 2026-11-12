@@ -160,5 +160,29 @@ describe('popup translation engine settings', () => {
     expect(el('claudeStatus').textContent).toMatch(/401/);
     expect(el('claudeStatus').textContent).toMatch(/invalid x-api-key/);
   });
-});
 
+  it('the account section and subscription options stay hidden until the hosted service is configured', async () => {
+    const chromeMock = await loadPopup();
+    chromeMock.runtime.sendMessage.mockImplementation(async (msg: any) => (msg.type === 'ACCOUNT_STATUS' ? { success: true, available: false } : { success: true }));
+    jest.isolateModules(() => require('../popup'));
+    document.dispatchEvent(new Event('DOMContentLoaded'));
+    await new Promise(r => setTimeout(r, 20));
+    expect(el('accountSection').classList.contains('hidden')).toBe(true);
+    expect([...el<HTMLSelectElement>('claudeAccess').options].filter(o => !o.hidden).map(o => o.value)).not.toContain('subscription');
+  });
+
+  it('an active subscriber sees Manage subscription only (no second checkout)', async () => {
+    const chromeMock = await loadPopup();
+    chromeMock.runtime.sendMessage.mockImplementation(async (msg: any) =>
+      msg.type === 'ACCOUNT_STATUS'
+        ? { success: true, available: true, signedIn: true, account: { email: 'a@b.co', plan: 'standard', active: true, usageUsd: 1, budgetUsd: 6, warn: false, exhausted: false } }
+        : { success: true }
+    );
+    jest.isolateModules(() => require('../popup'));
+    document.dispatchEvent(new Event('DOMContentLoaded'));
+    await new Promise(r => setTimeout(r, 20));
+    expect(el('accountManage').classList.contains('hidden')).toBe(false);
+    expect(el('accountSubscribeStandard').classList.contains('hidden')).toBe(true);
+    expect(el('accountSubscribePro').classList.contains('hidden')).toBe(true);
+  });
+});

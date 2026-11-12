@@ -9,6 +9,10 @@ export interface Account {
   plan: Plan;
   subscriptionStatus: string | null;
   stripeCustomerId: string | null;
+  /** The one Stripe subscription this account follows (events for others are ignored). */
+  stripeSubscriptionId: string | null;
+  /** Start of the current billing period (ms); budgets run per period. Null = calendar month (manual plans). */
+  periodStart: number | null;
 }
 
 export interface Usage {
@@ -69,6 +73,8 @@ function toAccount(row: any): Account | null {
     plan: row.plan,
     subscriptionStatus: row.subscription_status ?? null,
     stripeCustomerId: row.stripe_customer_id ?? null,
+    stripeSubscriptionId: row.stripe_subscription_id ?? null,
+    periodStart: row.period_start === null || row.period_start === undefined ? null : Number(row.period_start),
   };
 }
 
@@ -78,10 +84,11 @@ export class Repo {
   constructor(path: string) {
     this.db = new DatabaseSync(path);
     this.db.exec('PRAGMA foreign_keys = ON');
+    this.db.exec('PRAGMA busy_timeout = 5000'); // wait on locks (e.g. the admin CLI) instead of failing
     if (path !== ':memory:') this.db.exec('PRAGMA journal_mode = WAL');
     for (const statement of SCHEMA) this.db.exec(statement);
     // Columns added after the first schema (existing databases get them here).
-    for (const column of ['stripe_event_at INTEGER']) {
+    for (const column of ['stripe_event_at INTEGER', 'stripe_subscription_id TEXT', 'period_start INTEGER']) {
       try {
         this.db.exec(`ALTER TABLE accounts ADD COLUMN ${column}`);
       } catch {
@@ -101,6 +108,15 @@ export class Repo {
       this.db.exec('ROLLBACK');
       throw error;
     }
+  }
+
+  busyTimeoutMs(): number {
+    const row: any = this.db.prepare('PRAGMA busy_timeout').get();
+    return Number(row?.timeout ?? row?.busy_timeout ?? Object.values(row ?? {})[0] ?? 0);
+  }
+
+  setSubscription(accountId: number, subscriptionId: string | null, periodStart: number | null): void {
+    this.db.prepare('UPDATE accounts SET stripe_subscription_id = ?, period_start = ? WHERE id = ?').run(subscriptionId, periodStart, accountId);
   }
 
   /** Creation time (Stripe `event.created`, seconds) of the last billing event applied to an account. */

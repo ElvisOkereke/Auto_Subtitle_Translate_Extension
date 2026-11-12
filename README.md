@@ -62,7 +62,7 @@ different channels agree (or immediately when you correct them).
 | OCR: PaddleOCR PP-OCRv5 (ONNX Runtime Web, WebGPU → wasm fallback) in a worker inside a hidden extension iframe; saved timelines live in that extension-origin iframe | `src/ocr/` |
 | Live captions: tab capture → offscreen VAD → Whisper (transformers.js) worker | `src/offscreen.ts`, `src/whisper.worker.ts` |
 | Translation engine layer: fast tier (DeepL / Google) and best tier (Claude with video context, topic summary, glossary, batching), browser-independent engines | `src/translation/`, `src/background.ts` |
-| Hosted service for subscribers: email-code accounts, Stripe billing, translation proxy with per-plan monthly budgets (Docker / Cloud Run) | `server/` — see [server/README.md](server/README.md), pricing in [docs/pricing.md](docs/pricing.md) |
+| Hosted service for subscribers: email-code accounts, Stripe billing, translation proxy with per-plan budgets (Docker on a Compute Engine VM) | `server/` — see [server/README.md](server/README.md), pricing in [docs/pricing.md](docs/pricing.md) |
 | Popup | `popup.html`, `src/popup.ts` |
 
 Design docs and decision records: `docs/superpowers/`. Benchmarks:

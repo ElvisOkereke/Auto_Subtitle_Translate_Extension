@@ -13,9 +13,39 @@ export interface StripeLike {
   checkout: { sessions: { create(params: Stripe.Checkout.SessionCreateParams): Promise<{ url: string | null }> } };
   billingPortal: { sessions: { create(params: Stripe.BillingPortal.SessionCreateParams): Promise<{ url: string }> } };
   webhooks: { constructEvent(payload: string, header: string, secret: string): Stripe.Event };
+  subscriptions: { retrieve(id: string): Promise<Stripe.Subscription> };
+}
+
+/** Subscription states during which the account already has (or owes for) a subscription. */
+const LIVE_STATUSES = new Set(['active', 'trialing', 'past_due', 'unpaid']);
+/** Subscription states that end it. */
+const ENDED_STATUSES = new Set(['canceled', 'incomplete_expired']);
+
+/** The subscription id an event is about (shapes differ by event type and API version). */
+function subscriptionIdOf(event: Stripe.Event): string | null {
+  const obj = event.data.object as any;
+  if (event.type.startsWith('customer.subscription.')) return typeof obj.id === 'string' ? obj.id : null;
+  const id = obj.subscription ?? obj.parent?.subscription_details?.subscription ?? null;
+  return typeof id === 'string' ? id : (id?.id ?? null);
+}
+
+/** Current billing period start (ms) of a subscription (newer API versions keep it on the item). */
+function periodStartOf(sub: Stripe.Subscription | null): number | null {
+  const item: any = sub?.items?.data?.[0];
+  const seconds = item?.current_period_start ?? (sub as any)?.current_period_start;
+  return typeof seconds === 'number' ? seconds * 1000 : null;
 }
 
 const ADMIN_PLANS: Plan[] = ['free', 'standard', 'pro'];
+const HANDLED = new Set([
+  'checkout.session.completed',
+  'checkout.session.async_payment_succeeded',
+  'checkout.session.async_payment_failed',
+  'customer.subscription.created',
+  'customer.subscription.updated',
+  'customer.subscription.deleted',
+  'invoice.payment_failed',
+]);
 
 function sameSecret(given: string, expected: string): boolean {
   if (!expected) return false; // admin disabled without a configured token
@@ -36,6 +66,10 @@ export function mountBilling(app: Hono<AuthEnv>, requireAccount: MiddlewareHandl
     const plan = body?.plan;
     if (!isPaidPlan(plan) || !config.stripe.prices[plan]) return c.json({ error: 'bad_request', message: 'Choose standard or pro.' }, 400);
     const account: Account = c.get('account');
+    // One subscription per account: changes and upgrades go through the Customer Portal.
+    if (account.stripeCustomerId && LIVE_STATUSES.has(account.subscriptionStatus ?? '')) {
+      return c.json({ error: 'already_subscribed', message: 'You already have a subscription - change it under "Manage subscription".' }, 409);
+    }
     const session = await deps.stripe.checkout.sessions.create({
       mode: 'subscription',
       line_items: [{ price: config.stripe.prices[plan], quantity: 1 }],
@@ -69,12 +103,16 @@ export function mountBilling(app: Hono<AuthEnv>, requireAccount: MiddlewareHandl
     } catch {
       return c.json({ error: 'bad_signature', message: 'Invalid Stripe signature.' }, 400);
     }
-    // Record the event and apply it in one transaction: a failure rolls both back,
-    // so Stripe's retry is processed instead of being skipped as a duplicate.
+    // Act on Stripe's current state of the subscription, not the event payload:
+    // events arrive in any order, and some (e.g. a failed proration invoice) don't
+    // change the subscription at all. Then record the event and apply it in one
+    // transaction, so a failure means Stripe's retry gets processed.
     try {
+      const subscriptionId = subscriptionIdOf(event);
+      const current = subscriptionId && HANDLED.has(event.type) ? await deps.stripe.subscriptions.retrieve(subscriptionId) : null;
       const applied = repo.transaction(() => {
         if (!repo.recordStripeEvent(event.id)) return false;
-        applyEvent(event);
+        applyEvent(event, subscriptionId, current);
         return true;
       });
       return c.json(applied ? { ok: true } : { ok: true, duplicate: true });
@@ -84,57 +122,37 @@ export function mountBilling(app: Hono<AuthEnv>, requireAccount: MiddlewareHandl
     }
   });
 
-  /** Applies one billing event to its account, ignoring events older than the last one applied. */
-  function applyEvent(event: Stripe.Event): void {
+  /** Applies one billing event to its account using the subscription's current state. */
+  function applyEvent(event: Stripe.Event, subscriptionId: string | null, current: Stripe.Subscription | null): void {
     const obj = event.data.object as any;
-    const created = typeof event.created === 'number' ? event.created : null;
-    const fresh = (account: Account) => {
-      const last = repo.stripeEventAt(account.id);
-      return created === null || last === null || created >= last;
-    };
-    const stamp = (account: Account) => {
-      if (created !== null) repo.setStripeEventAt(account.id, created);
-    };
-    const accountOfCustomer = () => (typeof obj.customer === 'string' ? repo.accountByCustomer(obj.customer) : null);
     const customerId = typeof obj.customer === 'string' ? obj.customer : null;
 
-    switch (event.type) {
-      case 'checkout.session.completed':
-      case 'checkout.session.async_payment_succeeded':
-      case 'checkout.session.async_payment_failed': {
-        const account = repo.accountById(Number(obj.client_reference_id));
-        const plan = obj.metadata?.plan;
-        if (!account || !isPaidPlan(plan) || !fresh(account)) return;
-        const paid = event.type !== 'checkout.session.async_payment_failed' && (obj.payment_status === 'paid' || obj.payment_status === 'no_payment_required');
-        if (paid) repo.setPlan(account.id, plan, 'active', customerId);
-        else if (!isActive(account.subscriptionStatus)) repo.setPlan(account.id, account.plan, 'incomplete', customerId); // payment pending/failed: no access yet
-        stamp(account);
-        return;
+    if (event.type.startsWith('checkout.session.')) {
+      const account = repo.accountById(Number(obj.client_reference_id));
+      const plan = obj.metadata?.plan;
+      if (!account || !isPaidPlan(plan)) return;
+      const paid = event.type !== 'checkout.session.async_payment_failed' && (obj.payment_status === 'paid' || obj.payment_status === 'no_payment_required');
+      if (paid) {
+        repo.setPlan(account.id, plan, current?.status ?? 'active', customerId);
+        repo.setSubscription(account.id, subscriptionId, periodStartOf(current));
+      } else if (!isActive(account.subscriptionStatus)) {
+        repo.setPlan(account.id, account.plan, 'incomplete', customerId); // payment pending/failed: no access yet
       }
-      case 'customer.subscription.created':
-      case 'customer.subscription.updated': {
-        const account = accountOfCustomer();
-        const plan = planOfPrice(obj.items?.data?.[0]?.price?.id);
-        if (!account || !plan || !fresh(account)) return;
-        repo.setPlan(account.id, plan, String(obj.status));
-        stamp(account);
-        return;
-      }
-      case 'customer.subscription.deleted': {
-        const account = accountOfCustomer();
-        if (!account || !fresh(account)) return;
-        repo.setPlan(account.id, 'free', 'canceled');
-        stamp(account);
-        return;
-      }
-      case 'invoice.payment_failed': {
-        const account = accountOfCustomer();
-        if (!account || !fresh(account)) return;
-        repo.setPlan(account.id, account.plan, 'past_due');
-        stamp(account);
-        return;
-      }
+      return;
     }
+
+    // customer.subscription.* and invoice.payment_failed
+    const account = customerId ? repo.accountByCustomer(customerId) : null;
+    if (!account || !current) return;
+    if (account.stripeSubscriptionId && account.stripeSubscriptionId !== current.id) return; // another subscription: not ours to follow
+    if (ENDED_STATUSES.has(current.status)) {
+      repo.setPlan(account.id, 'free', current.status);
+      repo.setSubscription(account.id, current.id, null);
+      return;
+    }
+    const plan = planOfPrice((current.items?.data?.[0] as any)?.price?.id) ?? account.plan;
+    repo.setPlan(account.id, plan, current.status);
+    repo.setSubscription(account.id, current.id, periodStartOf(current));
   }
 
   app.post('/v1/admin/plan', async c => {

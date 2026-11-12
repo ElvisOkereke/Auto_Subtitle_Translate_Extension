@@ -4,6 +4,53 @@
 import type { ClaudeModel, GlossaryEntry, TopicResult, TranslateBatchRequest, TranslateBatchResult, VideoContext } from '../types';
 import type { SingleLineOptions } from './deepl';
 
+// The server's request limits (server/src/translate.ts); requests are trimmed to
+// them here so a long line never turns into a 400.
+const LIMITS = { text: 500, neighbours: 4, lines: 16, glossary: 200, title: 300, field: 2000, topic: 300 };
+const clip = (s: string, n: number) => (s.length > n ? s.slice(0, n) : s);
+
+function trimVideo(v: VideoContext): VideoContext {
+  return {
+    videoId: v.videoId === null ? null : clip(v.videoId, LIMITS.title),
+    url: clip(v.url, LIMITS.field),
+    title: clip(v.title, LIMITS.title),
+    channel: clip(v.channel, LIMITS.title),
+    description: clip(v.description, LIMITS.field),
+  };
+}
+
+function trimBatch(req: TranslateBatchRequest): TranslateBatchRequest {
+  return {
+    ...req,
+    lines: req.lines.slice(0, LIMITS.lines).map(l => ({
+      id: l.id,
+      text: clip(l.text, LIMITS.text),
+      previous: l.previous.slice(-LIMITS.neighbours).map(t => clip(t, LIMITS.text)),
+      next: l.next.slice(0, LIMITS.neighbours).map(t => clip(t, LIMITS.text)),
+    })),
+    video: trimVideo(req.video),
+    topic: req.topic === null ? null : clip(req.topic, LIMITS.topic),
+    glossary: req.glossary
+      .slice(0, LIMITS.glossary)
+      .map(g => ({ source: clip(g.source, 40), target: clip(g.target, 80), ...(g.note ? { note: clip(g.note, 40) } : {}) })),
+  };
+}
+
+/** Splits text into pieces of at most `max` characters, at sentence or word boundaries where possible. */
+export function splitText(text: string, max = LIMITS.text): string[] {
+  const pieces: string[] = [];
+  let rest = text.trim();
+  while (rest.length > max) {
+    const window = rest.slice(0, max);
+    const cut = Math.max(window.lastIndexOf('. '), window.lastIndexOf('! '), window.lastIndexOf('? '), window.lastIndexOf('\n'));
+    const at = cut > max / 2 ? cut + 1 : window.lastIndexOf(' ') > max / 2 ? window.lastIndexOf(' ') : max;
+    pieces.push(rest.slice(0, at).trim());
+    rest = rest.slice(at).trim();
+  }
+  if (rest) pieces.push(rest);
+  return pieces;
+}
+
 export class ProxyError extends Error {
   constructor(
     message: string,
@@ -73,21 +120,23 @@ export class ProxyClient {
   }
 
   translateBatch(req: TranslateBatchRequest, model: ClaudeModel): Promise<TranslateBatchResult> {
-    return this.request('POST', '/v1/translate/batch', { ...req, model });
+    return this.request('POST', '/v1/translate/batch', { ...trimBatch(req), model });
   }
 
   summarizeTopic(video: VideoContext, firstLines: string[], sourceLang: string, targetLang: string, model: ClaudeModel): Promise<TopicResult> {
-    return this.request('POST', '/v1/translate/topic', { video, firstLines, sourceLang, targetLang, model });
+    const lines = firstLines.slice(0, LIMITS.lines).map(t => clip(t, LIMITS.text));
+    return this.request('POST', '/v1/translate/topic', { video: trimVideo(video), firstLines: lines, sourceLang, targetLang, model });
   }
 
-  translateOne(text: string, sourceLang: string, targetLang: string, options: SingleLineOptions = {}): Promise<{ text: string }> {
-    return this.request('POST', '/v1/translate/fast', {
-      text,
-      sourceLang,
-      targetLang,
-      previousLines: options.previousLines ?? [],
-      nextLines: options.nextLines ?? [],
-    });
+  async translateOne(text: string, sourceLang: string, targetLang: string, options: SingleLineOptions = {}): Promise<{ text: string }> {
+    const previousLines = (options.previousLines ?? []).slice(-LIMITS.neighbours).map(t => clip(t, LIMITS.text));
+    const nextLines = (options.nextLines ?? []).slice(0, LIMITS.neighbours).map(t => clip(t, LIMITS.text));
+    const pieces = splitText(text);
+    const out: string[] = [];
+    for (const piece of pieces) {
+      out.push((await this.request<{ text: string }>('POST', '/v1/translate/fast', { text: piece, sourceLang, targetLang, previousLines, nextLines })).text);
+    }
+    return { text: out.join(' ') };
   }
 }
 

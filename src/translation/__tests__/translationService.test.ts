@@ -59,7 +59,7 @@ function fakes(opts: { settings?: Partial<typeof DEFAULT_SETTINGS>; secrets?: Re
   const deps: TranslationServiceDeps = {
     settings: async () => ({ ...DEFAULT_SETTINGS, translationProvider: 'deepl', ...opts.settings }),
     secrets: async () => ({ deeplApiKey: 'k:fx', googleTranslateApiKey: '', anthropicApiKey: 'sk-ant', claudeGatewayToken: '', accountToken: '', ...opts.secrets }),
-    overrides: async () => ({}),
+    overrides: async () => ({ server: 'http://127.0.0.1:9' }), // a hosted service is configured (dev override)
     glossary: new GlossaryStore(area),
     usage: new StorageUsageMeter(area),
     makeClaude: cfg => {
@@ -332,5 +332,21 @@ describe('TranslationService', () => {
     f.now.t += 6 * 60_000;
     expect((await f.service.translateLine(request({ text: 'c' }))).engine).toBe('claude');
   });
-});
 
+  it('a proxy bad_request (400) or rate_limited (429) does not switch Claude off', async () => {
+    const f = fakes({ settings: { claudeAccess: 'subscription' }, secrets: { accountToken: 'acct-token' } });
+    await f.service.translateLine(request({ text: 'warm-up' }));
+    f.setClaudeFailure(Object.assign(new Error('bad'), { status: 400, code: 'bad_request' }));
+    await f.service.translateLine(request({ text: 'a' }));
+    f.setClaudeFailure(Object.assign(new Error('busy'), { status: 429, code: 'rate_limited' }));
+    await f.service.translateLine(request({ text: 'b' }));
+    f.setClaudeFailure(null);
+    expect((await f.service.translateLine(request({ text: 'c' }))).engine).toBe('claude'); // no config error, no cooldown
+  });
+
+  it('subscription access is unavailable while no hosted service is configured', async () => {
+    const f = fakes({ settings: { claudeAccess: 'subscription' }, secrets: { accountToken: 'acct-token' } });
+    (f.service as any).deps.overrides = async () => ({}); // no dev server, placeholder default
+    expect(await f.service.plan()).toEqual({ fast: true, best: false });
+  });
+});

@@ -48,7 +48,7 @@ is my call and is marked as such.
 
 - Production deployment and real billing: needs the user's Stripe, Anthropic,
   DeepL, email-provider and Google Cloud accounts. Delivered: a deployable
-  container + Cloud Run deploy script + a step-by-step checklist; everything
+  container + Compute Engine deploy script + a step-by-step checklist; everything
   verified locally (Stripe test-mode flows simulated with signed webhook
   payloads, mocks for Anthropic/DeepL/email).
 - Teams, invoices UI, refunds UI (Stripe dashboard covers them).
@@ -71,10 +71,10 @@ is my call and is marked as such.
   repository module (swappable for Postgres later), `stripe` SDK for Checkout,
   Portal and webhook signature verification. Email via Resend's HTTP API
   (`RESEND_API_KEY`), with a dev/test outbox instead when unset.
-- **Hosting:** Docker image, `server/deploy/cloudrun.sh` for Google Cloud Run
-  (the user deployed to GCP before). SQLite on Cloud Run needs a single
-  instance with a mounted volume (Cloud Storage FUSE / Filestore) — documented;
-  Postgres (Cloud SQL) is the scale-up path behind the repository interface.
+- **Hosting:** Docker image on one Compute Engine VM with a persistent disk
+  (SQLite), Caddy for HTTPS, `server/deploy/gce.sh` (revised after the final
+  review: Cloud Run's Cloud Storage volumes can't hold SQLite safely). Postgres
+  (Cloud SQL) is the scale-up path behind the repository interface.
 - **Auth:** `POST /v1/auth/start {email}` → code emailed (10 min, 5 attempts,
   per-email and per-IP rate limits); `POST /v1/auth/verify {email, code}` →
   `{token}`; `Authorization: Bearer <token>` on every other call; tokens

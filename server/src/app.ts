@@ -1,6 +1,7 @@
 // The hosted proxy's HTTP API (Hono). createApp takes every dependency so tests
 // run it in-process (app.request) with fakes.
 import { Hono } from 'hono';
+import { bodyLimit } from 'hono/body-limit';
 import { Auth, AuthEnv, clientIp, validEmail } from './auth';
 import type { ServerConfig } from './config';
 import type { Account, Repo } from './db';
@@ -24,9 +25,16 @@ export interface AppDeps {
 
 export const monthOf = (t: number) => new Date(t).toISOString().slice(0, 7);
 
-/** What an account may spend this month and has spent. */
+/**
+ * Usage bucket: the Stripe billing period the account is in (so a subscription
+ * started on the 31st doesn't get a second budget on the 1st), or the calendar
+ * month for plans set by hand.
+ */
+export const periodOf = (account: Account, now: number) => (account.periodStart ? `p${new Date(account.periodStart).toISOString().slice(0, 10)}` : monthOf(now));
+
+/** What an account may spend this period and has spent. */
 export function accountStatus(repo: Repo, account: Account, now: number) {
-  const month = monthOf(now);
+  const month = periodOf(account, now);
   const active = isPaidPlan(account.plan) && isActive(account.subscriptionStatus);
   const budgetUsd = active && isPaidPlan(account.plan) ? PLANS[account.plan].budgetUsd : 0;
   const usageUsd = repo.usageFor(account.id, month).costUsd;
@@ -55,6 +63,12 @@ export function createApp(deps: AppDeps): Hono<AuthEnv> {
   const auth = new Auth(repo, mailer, clock);
   const requireAccount = auth.requireAccount();
   const app = new Hono<AuthEnv>();
+
+  // Every body is limited while it is read: 64 KB, 1 MB for Stripe webhooks.
+  const tooLarge = (c: any) => c.json({ error: 'bad_request', message: 'request too large' }, 413);
+  const smallBodies = bodyLimit({ maxSize: 64 * 1024, onError: tooLarge });
+  const webhookBodies = bodyLimit({ maxSize: 1024 * 1024, onError: tooLarge });
+  app.use('*', (c, next) => (c.req.path === '/v1/stripe/webhook' ? webhookBodies(c, next) : smallBodies(c, next)));
 
   app.get('/health', c => c.json({ ok: true }));
 
@@ -92,7 +106,7 @@ export function createApp(deps: AppDeps): Hono<AuthEnv> {
   const stripe = deps.stripe !== undefined ? deps.stripe : config.stripe.secretKey ? (new Stripe(config.stripe.secretKey) as unknown as StripeLike) : null;
   mountBilling(app, requireAccount, { config, repo, stripe });
 
-  mountTranslate(app, requireAccount, { config, repo, clock, monthOf, status: account => accountStatus(repo, account, clock()), fetch: deps.fetch });
+  mountTranslate(app, requireAccount, { config, repo, clock, periodOf, status: account => accountStatus(repo, account, clock()), fetch: deps.fetch });
 
   if (config.devOutbox) {
     // Dev/test only: read the codes that would have been emailed.

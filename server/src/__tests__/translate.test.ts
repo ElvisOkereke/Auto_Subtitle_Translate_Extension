@@ -150,14 +150,25 @@ describe('translation proxy', () => {
     expect((await call('/v1/translate/batch', batch())).status).toBe(402);
   });
 
-  it('more than 4 requests in flight per account are refused with 429 (bounds budget overshoot)', async () => {
+  it('Claude and fast requests have their own in-flight caps (4 and 6, matching the extension), refused with 429 beyond', async () => {
     const held = setupHeld();
-    const inFlight = Array.from({ length: 4 }, () => held.call('/v1/translate/batch', batch()));
+    const claude = Array.from({ length: 4 }, () => held.call('/v1/translate/batch', batch()));
+    const fast = Array.from({ length: 6 }, () => held.call('/v1/translate/fast', { text: '안녕', sourceLang: 'ko', targetLang: 'en' }));
     await new Promise(r => setTimeout(r, 20));
     expect((await held.call('/v1/translate/batch', batch())).status).toBe(429);
+    expect((await held.call('/v1/translate/fast', { text: '안녕', sourceLang: 'ko', targetLang: 'en' })).status).toBe(429);
     held.release();
-    expect((await Promise.all(inFlight)).every(r => r.status === 200)).toBe(true);
+    expect((await Promise.all([...claude, ...fast])).every(r => r.status === 200)).toBe(true);
     expect((await held.call('/v1/translate/batch', batch())).status).toBe(200);
+  });
+
+  it('a failed Claude call still charges an estimate of its input cost', async () => {
+    const { deps, account, app, token } = setup('standard');
+    const failing = createApp({ ...deps, fetch: (async () => new Response(JSON.stringify({ type: 'error', error: { type: 'overloaded_error', message: 'busy' } }), { status: 529 })) as typeof fetch });
+    void app;
+    const res = await failing.request('/v1/translate/batch', { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` }, body: JSON.stringify(batch(8)) });
+    expect(res.status).toBe(502);
+    expect(deps.repo.usageFor(account.id, '2026-11').costUsd).toBeGreaterThan(0);
   });
 
   it('a body over 64 KB is refused before it is read in full', async () => {

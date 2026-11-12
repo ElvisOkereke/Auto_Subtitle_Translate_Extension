@@ -3,7 +3,7 @@
 // glossary) tiers, Claude batching by priority, fallback to the fast engine,
 // usage metering. Dependencies are injected so the rules are unit-tested.
 import { ExtensionSettings } from '../types';
-import { DEFAULT_SERVER_URL, type Secrets } from '../settings';
+import { hostedServiceUrl, type Secrets } from '../settings';
 import type { EndpointOverrides } from '../services/apiService';
 import { PriorityRunner } from '../utils/priorityRunner';
 import { ClaudeBatcher } from './claudeBatcher';
@@ -165,8 +165,9 @@ export class TranslationService {
   /** Claude engine config from settings, or null when Claude access isn't set up. */
   private claudeConfig(settings: ExtensionSettings, secrets: Secrets, overrides: EndpointOverrides): ClaudeConfig | null {
     if (settings.claudeAccess === 'subscription') {
-      if (!secrets.accountToken) return null;
-      return { model: settings.claudeModel, baseURL: overrides.server ?? DEFAULT_SERVER_URL, auth: { kind: 'bearer', token: secrets.accountToken }, via: 'proxy' };
+      const baseURL = hostedServiceUrl(overrides.server);
+      if (!secrets.accountToken || !baseURL) return null;
+      return { model: settings.claudeModel, baseURL, auth: { kind: 'bearer', token: secrets.accountToken }, via: 'proxy' };
     }
     if (settings.claudeAccess === 'gateway') {
       const baseURL = validateGatewayUrl(settings.claudeGatewayUrl ?? '');
@@ -194,8 +195,9 @@ export class TranslationService {
       return { success: true, translatedText: req.text, quality: 'fast' };
     }
     const provider = settings.translationProvider === 'deepl' || settings.translationProvider === 'subscription' ? settings.translationProvider : 'google';
-    const fastKey = provider === 'deepl' ? secrets.deeplApiKey : provider === 'subscription' ? secrets.accountToken : secrets.googleTranslateApiKey;
-    const fastEndpoint = provider === 'subscription' ? (overrides.server ?? DEFAULT_SERVER_URL) : overrides[provider];
+    const hosted = hostedServiceUrl(overrides.server);
+    const fastKey = provider === 'deepl' ? secrets.deeplApiKey : provider === 'subscription' ? (hosted ? secrets.accountToken : '') : secrets.googleTranslateApiKey;
+    const fastEndpoint = provider === 'subscription' ? (hosted ?? undefined) : overrides[provider];
     const fast = async (): Promise<LineTranslateResponse> => {
       const engine = this.deps.makeFast(provider, fastKey, fastEndpoint);
       const result = await this.runner.run(
@@ -236,8 +238,13 @@ export class TranslationService {
         claudeError = 'Claude returned no translation for this line';
       } catch (error) {
         const status = statusOf(error);
+        const code = (error as { code?: unknown })?.code;
         claudeError = `Claude: ${errorMessage(error)}`;
-        if (isConfigError(status)) this.brokenConfig = cfgSignature;
+        // The hosted service's bad_request (a request it won't take) and rate_limited
+        // (too many at once) are about one request, not the settings: no lockout.
+        if (code === 'bad_request' || code === 'rate_limited') {
+          // fall back for this line only
+        } else if (isConfigError(status)) this.brokenConfig = cfgSignature;
         // 402 from the hosted service: not subscribed / allowance used up - check again in a while.
         else this.coolUntil = this.now() + (status === 402 ? PAYMENT_COOLDOWN_MS : COOLDOWN_MS);
         void this.report({ status, message: errorMessage(error), at: this.now() });

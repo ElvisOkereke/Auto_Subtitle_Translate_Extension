@@ -1,0 +1,5 @@
+# gcloud builds submit . --config server/deploy/cloudbuild.yaml --substitutions _IMAGE=<registry>/ast-proxy:<tag>
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args: ['build', '-f', 'server/Dockerfile', '-t', '${_IMAGE}', '.']
+images: ['${_IMAGE}']

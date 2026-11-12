@@ -180,8 +180,17 @@ class PopupController {
 
   async refreshAccount(): Promise<void> {
     const r = await chrome.runtime.sendMessage({ type: 'ACCOUNT_STATUS' }).catch(() => null);
+    this.setHostedAvailable(r?.available === true);
     this.renderAccount(r?.signedIn ? r.account : null);
     if (r && !r.success && r.error) this.setAccountStatus(r.error);
+  }
+
+  /** Hides the account section and Subscription options while no hosted service is configured. */
+  private setHostedAvailable(available: boolean) {
+    document.getElementById('accountSection')?.classList.toggle('hidden', !available);
+    for (const select of [this.elements.claudeAccess, this.elements.translationProvider]) {
+      for (const option of select.options) if (option.value === 'subscription') option.hidden = !available;
+    }
   }
 
   private renderAccount(account: AccountView | null) {
@@ -196,7 +205,8 @@ class PopupController {
       e.accountUsageBar.classList.toggle('hidden', !account.active);
       e.accountUsageBar.value = account.budgetUsd ? Math.min(1, account.usageUsd / account.budgetUsd) : 0;
       e.accountSubscribeStandard.classList.toggle('hidden', account.active);
-      e.accountSubscribePro.classList.toggle('hidden', account.active && account.plan === 'pro');
+      // One subscription per account: upgrades/changes go through Manage subscription.
+      e.accountSubscribePro.classList.toggle('hidden', account.active);
       e.accountManage.classList.toggle('hidden', !account.active);
       if (!account.active) this.setAccountStatus('Subscribe to translate with the hosted service (no API keys needed).');
       else if (account.exhausted) this.setAccountStatus("This month's allowance is used up - upgrade, or use your own keys until next month.");
