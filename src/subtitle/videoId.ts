@@ -1,4 +1,11 @@
-/** YouTube video id from a page URL (watch, youtu.be, shorts) or the fixture page's ?v=. */
+const isYouTubeHost = (host: string) => host === 'youtube.com' || host.endsWith('.youtube.com');
+
+/**
+ * Key for a video's saved box and subtitle timeline.
+ * YouTube (watch, youtu.be, shorts): the bare video id, shared across YouTube's hosts.
+ * Any other site with ?v=: scoped to that page (origin + path), so a site can't
+ * read or poison what was saved for a YouTube video by reusing its id.
+ */
 export function videoIdFrom(url: string): string | null {
   let u: URL;
   try {
@@ -7,7 +14,10 @@ export function videoIdFrom(url: string): string | null {
     return null;
   }
   if (u.hostname === 'youtu.be') return u.pathname.slice(1).split('/')[0] || null;
-  const shorts = u.pathname.match(/^\/shorts\/([\w-]+)/);
-  if (shorts) return shorts[1];
-  return u.searchParams.get('v');
+  const v = u.searchParams.get('v');
+  if (isYouTubeHost(u.hostname)) {
+    const shorts = u.pathname.match(/^\/shorts\/([\w-]+)/);
+    return shorts ? shorts[1] : v;
+  }
+  return v ? `${u.origin}${u.pathname}?v=${encodeURIComponent(v)}` : null;
 }

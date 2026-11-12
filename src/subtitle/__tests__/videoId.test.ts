@@ -10,8 +10,15 @@ describe('videoIdFrom', () => {
   it('reads shorts URLs', () => {
     expect(videoIdFrom('https://www.youtube.com/shorts/abcDEF12345')).toBe('abcDEF12345');
   });
-  it('reads the fixture page ?v= parameter', () => {
-    expect(videoIdFrom('http://127.0.0.1:5000/video-subs.html?v=otherVideo01&stretch=s2')).toBe('otherVideo01');
+  it('scopes ids from other sites to that site (no reuse of saved YouTube boxes or lines)', () => {
+    expect(videoIdFrom('http://127.0.0.1:5000/video-subs.html?v=otherVideo01&stretch=s2')).toBe('http://127.0.0.1:5000/video-subs.html?v=otherVideo01');
+    expect(videoIdFrom('https://evil.example/watch?v=_zIrbXw-SVs')).toBe('https://evil.example/watch?v=_zIrbXw-SVs');
+    expect(videoIdFrom('https://youtube.com.evil.example/watch?v=_zIrbXw-SVs')).not.toBe('_zIrbXw-SVs');
+    expect(videoIdFrom('https://evil.example/shorts/abcDEF12345')).not.toBe('abcDEF12345');
+  });
+  it('accepts YouTube hosts and subdomains', () => {
+    expect(videoIdFrom('https://m.youtube.com/watch?v=_zIrbXw-SVs')).toBe('_zIrbXw-SVs');
+    expect(videoIdFrom('https://youtube.com/watch?v=_zIrbXw-SVs')).toBe('_zIrbXw-SVs');
   });
   it('returns null for pages without a video id', () => {
     expect(videoIdFrom('https://www.youtube.com/feed/subscriptions')).toBeNull();

@@ -121,7 +121,7 @@ test('navigation switches videos and restores the stored box', async ({ context,
   await expect(page.locator('.ast-subtitle-overlay')).toBeVisible();
 
   await page.evaluate(() => (window as any).__fixture.navigate('otherVideo01', 's2'));
-  await expect.poll(async () => (await stats(page)).videoId).toBe('otherVideo01');
+  await expect.poll(async () => (await stats(page)).videoId).toMatch(/\/video-subs\.html\?v=otherVideo01$/); // site-scoped id
   expect((await stats(page)).state).toBe('stopped'); // no box stored for this video
   await expect(page.locator('.ast-subtitle-overlay')).toHaveCount(0);
 
@@ -185,8 +185,10 @@ test('drawing a new box discards lines read with the old one', async ({ context,
   const page = await context.newPage();
   await openFixture(page, fixtureURL);
   // Lines saved from an earlier box (e.g. one drawn over the wrong region).
+  const { videoId } = await stats(page);
+  expect(videoId).toBeTruthy();
   await astTest(page, 'timeline.save', {
-    videoId: '_zIrbXw-SVs',
+    videoId,
     lines: [{ start: 0, end: 600, source: '엉뚱한 영역', translation: 'STALE LINE', quality: 'fast' }],
   });
   await startViaPopup(page, openPopup);
