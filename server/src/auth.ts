@@ -1,6 +1,7 @@
 // Email + one-time code sign-in and bearer sessions. Codes and tokens are only
 // ever stored as SHA-256 hashes; attempts and sends are rate-limited.
 import { createHash, randomBytes, randomInt, timingSafeEqual } from 'node:crypto';
+import { isIPv4 } from 'node:net';
 import type { Context, MiddlewareHandler } from 'hono';
 import type { Account, Repo } from './db';
 import type { Mailer } from './mailer';
@@ -23,8 +24,9 @@ const FAILURE_LIMIT = { perEmailIp: 10, perIp: 30, windowMs: 60 * 60_000 };
 const EMAIL_FAILURE_SOFT_LIMIT = 10;
 
 /** Rate-limit key for an address: IPv6 grouped by /64 (one subscriber's prefix). */
-function ipKey(ip: string): string {
-  if (!ip.includes(':')) return ip;
+function ipKey(raw: string): string {
+  const ip = raw.trim().replace(/^::ffff:/i, ''); // IPv4-mapped IPv6 = the IPv4 client
+  if (isIPv4(ip) || !ip.includes(':')) return ip;
   const [head, tail = ''] = ip.split('::');
   const left = head ? head.split(':') : [];
   const right = tail ? tail.split(':') : [];
@@ -33,7 +35,8 @@ function ipKey(ip: string): string {
 }
 export const SESSION_TTL_MS = 90 * 24 * 3600_000;
 const IP_LIMIT = { count: 20, windowMs: 60 * 60_000 };
-const EMAIL_RE = /^[^\s@]{1,64}@[^\s@]{1,190}\.[^\s@]{2,63}$/;
+// No whitespace, '@' extras or '|' (rate-limit keys use it as a separator).
+const EMAIL_RE = /^[^\s@|]{1,64}@[^\s@|]{1,190}\.[^\s@|]{2,63}$/;
 
 export const sha256 = (s: string) => createHash('sha256').update(s).digest('hex');
 const codeHash = (email: string, code: string) => sha256(`${email}:${code}`);
@@ -54,7 +57,7 @@ export function clientIp(c: Context, trustProxyHops: number): string {
     if (entry) return ipKey(entry);
   }
   const socket = (c.env as { incoming?: { socket?: { remoteAddress?: string } } } | undefined)?.incoming?.socket?.remoteAddress;
-  return socket ? ipKey(socket.replace(/^::ffff:/, '')) : 'local';
+  return socket ? ipKey(socket) : 'local';
 }
 
 export type AuthEnv = { Variables: { account: Account; tokenHash: string } };
@@ -89,7 +92,7 @@ export class Auth {
     const email = emailRaw.trim().toLowerCase();
     const since = this.clock() - FAILURE_LIMIT.windowMs;
     if (
-      this.repo.countRateEvents(`fail:${email}|${ip}`, since) >= FAILURE_LIMIT.perEmailIp ||
+      this.repo.countRateEvents(`failpair:${email}|${ip}`, since) >= FAILURE_LIMIT.perEmailIp ||
       this.repo.countRateEvents(`failip:${ip}`, since) >= FAILURE_LIMIT.perIp
     ) {
       return 'locked';
@@ -100,10 +103,10 @@ export class Auth {
     const given = Buffer.from(codeHash(email, String(code)), 'hex');
     if (expected.length !== given.length || !timingSafeEqual(expected, given)) {
       this.repo.markCodeAttempt(stored.id);
-      this.repo.addRateEvent(`fail:${email}|${ip}`, this.clock());
+      this.repo.addRateEvent(`failpair:${email}|${ip}`, this.clock());
       this.repo.addRateEvent(`failip:${ip}`, this.clock());
-      this.repo.addRateEvent(`fail:${email}`, this.clock());
-      if (this.repo.countRateEvents(`fail:${email}`, since) > EMAIL_FAILURE_SOFT_LIMIT) this.repo.markCodeUsed(stored.id);
+      this.repo.addRateEvent(`failemail:${email}`, this.clock());
+      if (this.repo.countRateEvents(`failemail:${email}`, since) > EMAIL_FAILURE_SOFT_LIMIT) this.repo.markCodeUsed(stored.id);
       return null;
     }
     this.repo.markCodeUsed(stored.id);

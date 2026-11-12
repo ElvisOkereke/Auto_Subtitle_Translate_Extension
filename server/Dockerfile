@@ -12,10 +12,10 @@ RUN npm run server:build
 
 FROM node:22-slim
 WORKDIR /app
+# TRUST_PROXY_HOPS is set by the deployment that sits behind a proxy (cloudrun.sh), not baked in.
 ENV NODE_ENV=production \
     PORT=8080 \
-    DB_PATH=/data/app.db \
-    TRUST_PROXY_HOPS=1
+    DB_PATH=/data/app.db
 COPY --from=build /repo/server/dist ./
 RUN mkdir -p /data && chown node:node /data
 USER node

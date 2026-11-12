@@ -184,6 +184,16 @@ describe('accounts', () => {
     expect(clientIp(ctx('2001:db8:1:2::1'), 1)).toBe(clientIp(ctx('2001:db8:1:2:ffff::9'), 1));
     expect(clientIp(ctx('2001:db8:1:3::1'), 1)).not.toBe(clientIp(ctx('2001:db8:1:2::1'), 1));
     expect(clientIp(ctx('203.0.113.5'), 1)).toBe('203.0.113.5');
+    // IPv4-mapped IPv6 is the same client as plain IPv4.
+    expect(clientIp(ctx('::ffff:203.0.113.5'), 1)).toBe('203.0.113.5');
+    expect(clientIp(ctx('::FFFF:203.0.113.5'), 1)).toBe('203.0.113.5');
+  });
+
+  it('emails with key delimiters are rejected (rate-limit keys cannot collide)', async () => {
+    const { validEmail } = require('../auth');
+    expect(validEmail('v@example.com|198.51.100.1')).toBe(false);
+    expect(validEmail('a|b@example.com')).toBe(false);
+    expect(validEmail('fan@example.com')).toBe(true);
   });
 
   it('TRUST_PROXY_HOPS must be a non-negative integer', () => {
