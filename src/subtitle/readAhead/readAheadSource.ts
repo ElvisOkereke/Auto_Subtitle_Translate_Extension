@@ -17,7 +17,17 @@ export interface ReadAheadSource {
 
 export const READ_AHEAD_FPS = 8;
 
+/**
+ * Frames arrive from the page's main world over window.postMessage, which the
+ * page itself can also post to (any handshake secret would be visible to it
+ * too). Page-injected frames can only show text the page could draw anyway, so
+ * the defence is to bound them to what real playback produces: frames must lie
+ * inside the player's buffered range near the playhead, and at most one frame
+ * per 1/READ_AHEAD_FPS slot is accepted - capping OCR and translation work.
+ */
 export class MseReadAhead implements ReadAheadSource {
+  private readonly seenSlots = new Set<number>();
+  private lastResetAt = -Infinity;
   private onFrame: ReadAheadFrame | null = null;
   private onReset: (() => void) | null = null;
   private latest = -Infinity;
@@ -26,15 +36,36 @@ export class MseReadAhead implements ReadAheadSource {
     if (event.source !== window) return;
     const msg = event.data;
     if (msg?.astTapReset) {
+      // Real resets follow seeks; rate-limit so a page can't keep re-opening slots.
+      if (performance.now() - this.lastResetAt < 2000) return;
+      this.lastResetAt = performance.now();
       this.latest = -Infinity;
+      this.seenSlots.clear();
       this.onReset?.();
     } else if (msg?.astTapFrame && msg.bitmap instanceof ImageBitmap) {
+      if (typeof msg.t !== 'number' || !this.plausible(msg.t)) {
+        msg.bitmap.close();
+        return;
+      }
       this.latest = Math.max(this.latest, msg.t);
       this.deliver(msg.bitmap, msg.t);
     }
   };
 
   constructor(private readonly video: HTMLVideoElement, private box: NormalizedBox) {}
+
+  /** Inside the buffered range (playhead - 1 s .. buffered end + 1 s) and the first frame of its slot. */
+  private plausible(t: number): boolean {
+    const b = this.video.buffered;
+    let bufferedEnd = -Infinity;
+    for (let i = 0; i < b.length; i++) bufferedEnd = Math.max(bufferedEnd, b.end(i));
+    if (t < this.video.currentTime - 1 || t > bufferedEnd + 1) return false;
+    const slot = Math.floor(t * READ_AHEAD_FPS);
+    if (this.seenSlots.has(slot)) return false;
+    this.seenSlots.add(slot);
+    if (this.seenSlots.size > 20_000) this.seenSlots.clear(); // bounded memory on very long sessions
+    return true;
+  }
 
   get lead(): number {
     return this.latest === -Infinity ? 0 : Math.max(0, this.latest - this.video.currentTime);
@@ -49,6 +80,7 @@ export class MseReadAhead implements ReadAheadSource {
 
   restart(): void {
     this.latest = -Infinity;
+    this.seenSlots.clear();
     this.post({ astTap: 'start', box: this.box, fps: READ_AHEAD_FPS });
   }
 

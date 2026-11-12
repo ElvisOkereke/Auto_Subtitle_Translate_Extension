@@ -39,6 +39,7 @@ export type SubtitleModeState = 'loading' | 'running' | 'paused-ad' | 'stopped';
 const MIN_CONFIDENCE = 0.5;
 const RECHECK_MS = 750; // re-read a displayed line if nothing triggered a read for this long
 const SAVE_EVERY_MS = 10_000;
+const MAX_READ_AHEAD_QUEUE = 32;
 
 export class SubtitleMode {
   state: SubtitleModeState = 'loading';
@@ -288,6 +289,7 @@ export class SubtitleMode {
     this.raTo = t;
     const event = this.raTracker.push(sig, t);
     if (event) {
+      if (this.raQueue.length >= MAX_READ_AHEAD_QUEUE) this.raQueue.shift()?.crop.close(); // bounded (frames come from the page's world)
       this.raQueue.push({ t: event.since, crop });
       void this.pumpReadAhead();
     } else {
