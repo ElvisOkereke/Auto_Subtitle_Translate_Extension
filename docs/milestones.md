@@ -4,6 +4,17 @@ Wins worth sharing, newest first. Each has the headline, the proof (a number
 or what was shown working), and where the evidence lives. Numbers come from
 automated runs in a real browser (details: [performance.md](performance.md)).
 
+## 2026-11-12 — Subscriptions: translation that works out of the box
+
+- Sign in with your email (one-time code) and subscribe — no API keys needed.
+  The hosted service runs the same context-aware engine with the project's own
+  keys; Stripe handles payment, or a plan can be granted by hand.
+- Priced from measured costs: **Standard $9.99/month** (≈ 3–5 hours of
+  Claude-quality translation) and **Pro $24.99/month** (Opus, ≈ 4.5–6.5 hours);
+  every request is metered against a monthly budget so costs can't run away.
+- Bring-your-own-keys still works for heavy watchers.
+- Ready to deploy on Google Cloud Run (Docker image + one-command deploy script).
+
 ## 2026-11-12 — Context-aware translation: Claude knows what you're watching
 
 - Subtitles are translated **fast then best**: DeepL appears instantly, then

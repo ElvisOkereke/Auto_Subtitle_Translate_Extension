@@ -1,7 +1,8 @@
 # Pricing analysis — hosted translation subscription
 
 What it costs us to translate an hour of video through the hosted proxy, and
-what the subscription must cost to cover that. Inputs are measured
+what the subscription must cost to cover that. The prices and budgets below are
+enforced by `server/src/plans.ts`. Inputs are measured
 (`docs/performance.md`, automated runs) or list prices as of 2026-11; change
 the budgets in `server/src/plans.ts` if prices move.
 

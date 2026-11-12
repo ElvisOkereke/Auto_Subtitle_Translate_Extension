@@ -48,6 +48,15 @@ Look at screenshots the E2E tests write (`test.info().outputPath(...)`) when cha
 - `npm run build` wipes and rebuilds `dist/` — don't rebuild while a Playwright run is using it.
 - Playwright wipes `e2e/.results/` at the start of every run; keep anything durable elsewhere.
 
+## Hosted service (`server/`)
+
+Node 22 + Hono + `node:sqlite` + Stripe, reusing `src/translation/` engines.
+`npm run server:test` (Jest project `server`, Node env), `npm run server:build`
+(esbuild → `server/dist/`). E2E fixture `proxy` (`e2e/helpers/proxy.ts`) starts
+the real server in the Playwright worker with mock upstreams, dev outbox and a
+fake Stripe, and points the extension at it via `devEndpointOverrides.server`.
+Deploy steps: `server/README.md`.
+
 ## Performance
 
 `npm run perf:stt` benchmarks Whisper model/device/precision choices

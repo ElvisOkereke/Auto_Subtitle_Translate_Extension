@@ -15,8 +15,9 @@ Speech recognition and OCR run **locally in your browser** (no key, no server).
 Translation is **fast then best**: DeepL (or Google) puts a translation up
 immediately, then Claude replaces it with a context-aware one that knows what
 the video is about (title, channel, description) and keeps names and jargon
-consistent with a learned glossary. Bring your own keys: a DeepL/Google key and
-an Anthropic API key — or any Anthropic-compatible gateway (base URL + token).
+consistent with a learned glossary. Either **bring your own keys** (a
+DeepL/Google key and an Anthropic API key, or any Anthropic-compatible gateway)
+or **sign in and subscribe** to use the hosted service with no keys at all.
 
 ## Install (developer build)
 
@@ -61,6 +62,7 @@ different channels agree (or immediately when you correct them).
 | OCR: PaddleOCR PP-OCRv5 (ONNX Runtime Web, WebGPU → wasm fallback) in a worker inside a hidden extension iframe; saved timelines live in that extension-origin iframe | `src/ocr/` |
 | Live captions: tab capture → offscreen VAD → Whisper (transformers.js) worker | `src/offscreen.ts`, `src/whisper.worker.ts` |
 | Translation engine layer: fast tier (DeepL / Google) and best tier (Claude with video context, topic summary, glossary, batching), browser-independent engines | `src/translation/`, `src/background.ts` |
+| Hosted service for subscribers: email-code accounts, Stripe billing, translation proxy with per-plan monthly budgets (Docker / Cloud Run) | `server/` — see [server/README.md](server/README.md), pricing in [docs/pricing.md](docs/pricing.md) |
 | Popup | `popup.html`, `src/popup.ts` |
 
 Design docs and decision records: `docs/superpowers/`. Benchmarks:
@@ -79,7 +81,8 @@ npm run verify           # types + lint + unit + e2e (ui, captions, subtitles) +
 
 | Command | What |
 |---|---|
-| `npm test` | Jest unit tests |
+| `npm test` | Jest unit tests (extension + server) |
+| `npm run server:test` / `npm run server:dev` | Hosted service tests / local server (login codes at `/dev/outbox`) |
 | `npm run test:e2e` | Browser tests: popup, Screen Translate, live captions, subtitle mode (OCR, overlay, live path, read-ahead) |
 | `npm run test:live` | Real DeepL (`DEEPL_API_KEY` in `.env`) and real Claude through a local relay (`ANTHROPIC_AUTH_TOKEN`/`ANTHROPIC_BASE_URL` or `ANTHROPIC_API_KEY` in the environment; `CLAUDE_MODEL` to pick the model) |
 | `npm run e2e:youtube` | Subtitle mode on real YouTube (installed Chrome, opt-in) |
