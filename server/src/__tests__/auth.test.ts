@@ -158,6 +158,34 @@ describe('accounts', () => {
     expect((await post(app, '/v1/auth/verify', { email: 'last@example.com', code: real }, attacker)).status).toBe(429);
   });
 
+  it('across many IPs, after 10 failed guesses on one email every further wrong guess burns the code', async () => {
+    const now = { t: Date.UTC(2026, 10, 12, 12) };
+    const mailer = new OutboxMailer();
+    const app = createApp(testDeps({ mailer, clock: () => now.t, config: { ...testDeps().config, trustProxyHops: 1 } }));
+    const code = () => mailer.sent.filter(m => m.to === 'v@example.com').at(-1)!.text.match(/(\d{6})/)![1];
+    let ip = 0;
+    const guess = (c: string) => post(app, '/v1/auth/verify', { email: 'v@example.com', code: c }, { 'x-forwarded-for': `198.51.100.${++ip}` });
+    for (let round = 0; round < 3; round++) {
+      now.t += 16 * 60_000;
+      await post(app, '/v1/auth/start', { email: 'v@example.com' });
+      const wrong = code() === '000000' ? '111111' : '000000';
+      for (let i = 0; i < 4; i++) await guess(wrong); // 12 failures in total, each from a new IP
+    }
+    now.t += 16 * 60_000;
+    await post(app, '/v1/auth/start', { email: 'v@example.com' });
+    const right = code();
+    expect((await guess(right === '000000' ? '111111' : '000000')).status).toBe(400); // one wrong guess...
+    expect((await guess(right)).status).toBe(400); // ...burned the code
+  });
+
+  it('IPv6 clients are rate limited per /64', () => {
+    const { clientIp } = require('../auth');
+    const ctx = (xff: string) => ({ req: { header: () => xff }, env: undefined }) as any;
+    expect(clientIp(ctx('2001:db8:1:2::1'), 1)).toBe(clientIp(ctx('2001:db8:1:2:ffff::9'), 1));
+    expect(clientIp(ctx('2001:db8:1:3::1'), 1)).not.toBe(clientIp(ctx('2001:db8:1:2::1'), 1));
+    expect(clientIp(ctx('203.0.113.5'), 1)).toBe('203.0.113.5');
+  });
+
   it('TRUST_PROXY_HOPS must be a non-negative integer', () => {
     const { loadConfig } = require('../config');
     expect(loadConfig({ TRUST_PROXY_HOPS: '1' }).trustProxyHops).toBe(1);

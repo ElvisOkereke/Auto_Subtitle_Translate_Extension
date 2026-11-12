@@ -15,6 +15,22 @@ const EMAIL_LIMIT = { count: 3, windowMs: 15 * 60_000 };
  * send limit (3 per 15 min) x 5 attempts per code.
  */
 const FAILURE_LIMIT = { perEmailIp: 10, perIp: 30, windowMs: 60 * 60_000 };
+/**
+ * Failures on one email from any IPs: past this, every further wrong guess burns
+ * the code, so a distributed guesser gets one try per new code (and new codes
+ * are limited to 3 per 15 minutes).
+ */
+const EMAIL_FAILURE_SOFT_LIMIT = 10;
+
+/** Rate-limit key for an address: IPv6 grouped by /64 (one subscriber's prefix). */
+function ipKey(ip: string): string {
+  if (!ip.includes(':')) return ip;
+  const [head, tail = ''] = ip.split('::');
+  const left = head ? head.split(':') : [];
+  const right = tail ? tail.split(':') : [];
+  const groups = [...left, ...Array(Math.max(0, 8 - left.length - right.length)).fill('0'), ...right];
+  return `${groups.slice(0, 4).map(g => (g || '0').toLowerCase().replace(/^0+(?=.)/, '')).join(':')}::/64`;
+}
 export const SESSION_TTL_MS = 90 * 24 * 3600_000;
 const IP_LIMIT = { count: 20, windowMs: 60 * 60_000 };
 const EMAIL_RE = /^[^\s@]{1,64}@[^\s@]{1,190}\.[^\s@]{2,63}$/;
@@ -35,9 +51,10 @@ export function clientIp(c: Context, trustProxyHops: number): string {
   if (trustProxyHops > 0) {
     const entries = (c.req.header('x-forwarded-for') ?? '').split(',').map(s => s.trim()).filter(Boolean);
     const entry = entries[entries.length - trustProxyHops];
-    if (entry) return entry;
+    if (entry) return ipKey(entry);
   }
-  return (c.env as { incoming?: { socket?: { remoteAddress?: string } } } | undefined)?.incoming?.socket?.remoteAddress ?? 'local';
+  const socket = (c.env as { incoming?: { socket?: { remoteAddress?: string } } } | undefined)?.incoming?.socket?.remoteAddress;
+  return socket ? ipKey(socket.replace(/^::ffff:/, '')) : 'local';
 }
 
 export type AuthEnv = { Variables: { account: Account; tokenHash: string } };
@@ -85,6 +102,8 @@ export class Auth {
       this.repo.markCodeAttempt(stored.id);
       this.repo.addRateEvent(`fail:${email}|${ip}`, this.clock());
       this.repo.addRateEvent(`failip:${ip}`, this.clock());
+      this.repo.addRateEvent(`fail:${email}`, this.clock());
+      if (this.repo.countRateEvents(`fail:${email}`, since) > EMAIL_FAILURE_SOFT_LIMIT) this.repo.markCodeUsed(stored.id);
       return null;
     }
     this.repo.markCodeUsed(stored.id);
