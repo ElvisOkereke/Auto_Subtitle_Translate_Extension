@@ -122,23 +122,47 @@ describe('accounts', () => {
     expect((await post(direct, '/v1/auth/start', { email: 'w99@example.com' }, { 'x-forwarded-for': '10.1.9.9' })).status).toBe(429);
   });
 
-  it('an email is locked after 10 failed codes in an hour, even across new codes', async () => {
-    const { app, lastCode, now } = setup();
+  it('guessing from one IP locks only that IP: the real user with the right code still signs in', async () => {
+    const now = { t: Date.UTC(2026, 10, 12, 12) };
+    const mailer = new OutboxMailer();
+    const app = createApp(testDeps({ mailer, clock: () => now.t, config: { ...testDeps().config, trustProxyHops: 1 } }));
+    const code = () => mailer.sent.filter(m => m.to === 'victim@example.com').at(-1)!.text.match(/(\d{6})/)![1];
+    const attacker = { 'x-forwarded-for': '198.51.100.66' };
+    const user = { 'x-forwarded-for': '203.0.113.5' };
     let failures = 0;
     for (let round = 0; round < 4 && failures < 10; round++) {
-      now.t += 16 * 60_000; // past the per-email send limit window
-      await post(app, '/v1/auth/start', { email: 'victim@example.com' });
-      const code = lastCode('victim@example.com');
-      const wrong = code === '000000' ? '111111' : '000000';
-      for (let i = 0; i < 4 && failures < 10; i++, failures++) await post(app, '/v1/auth/verify', { email: 'victim@example.com', code: wrong });
+      now.t += 16 * 60_000;
+      await post(app, '/v1/auth/start', { email: 'victim@example.com' }, attacker);
+      const wrong = code() === '000000' ? '111111' : '000000';
+      for (let i = 0; i < 4 && failures < 10; i++, failures++) await post(app, '/v1/auth/verify', { email: 'victim@example.com', code: wrong }, attacker);
     }
     now.t += 16 * 60_000;
-    await post(app, '/v1/auth/start', { email: 'victim@example.com' });
-    const res = await post(app, '/v1/auth/verify', { email: 'victim@example.com', code: lastCode('victim@example.com') });
-    expect(res.status).toBe(429); // the right code is refused while locked
-    now.t += 61 * 60_000;
-    await post(app, '/v1/auth/start', { email: 'victim@example.com' });
-    expect((await post(app, '/v1/auth/verify', { email: 'victim@example.com', code: lastCode('victim@example.com') })).status).toBe(200);
+    await post(app, '/v1/auth/start', { email: 'victim@example.com' }, user);
+    // The attacker's IP is locked even with the right code...
+    expect((await post(app, '/v1/auth/verify', { email: 'victim@example.com', code: code() }, attacker)).status).toBe(429);
+    // ...the user (another IP) signs in with it.
+    expect((await post(app, '/v1/auth/verify', { email: 'victim@example.com', code: code() }, user)).status).toBe(200);
+  });
+
+  it('one IP guessing across many emails is locked after 30 failures in an hour', async () => {
+    const now = { t: Date.UTC(2026, 10, 12, 12) };
+    const mailer = new OutboxMailer();
+    const app = createApp(testDeps({ mailer, clock: () => now.t, config: { ...testDeps().config, trustProxyHops: 1 } }));
+    const attacker = { 'x-forwarded-for': '198.51.100.66' };
+    for (let i = 0; i < 30; i++) {
+      await post(app, '/v1/auth/start', { email: `t${i}@example.com` }, { 'x-forwarded-for': `203.0.113.${i}` });
+      await post(app, '/v1/auth/verify', { email: `t${i}@example.com`, code: '000000' }, attacker);
+    }
+    await post(app, '/v1/auth/start', { email: 'last@example.com' }, { 'x-forwarded-for': '203.0.113.200' });
+    const real = mailer.sent.at(-1)!.text.match(/(\d{6})/)![1];
+    expect((await post(app, '/v1/auth/verify', { email: 'last@example.com', code: real }, attacker)).status).toBe(429);
+  });
+
+  it('TRUST_PROXY_HOPS must be a non-negative integer', () => {
+    const { loadConfig } = require('../config');
+    expect(loadConfig({ TRUST_PROXY_HOPS: '1' }).trustProxyHops).toBe(1);
+    expect(() => loadConfig({ TRUST_PROXY_HOPS: '-1' })).toThrow(/TRUST_PROXY_HOPS/);
+    expect(() => loadConfig({ TRUST_PROXY_HOPS: 'one' })).toThrow(/TRUST_PROXY_HOPS/);
   });
 
   it('sessions expire after 90 days, and signout-all revokes every session', async () => {

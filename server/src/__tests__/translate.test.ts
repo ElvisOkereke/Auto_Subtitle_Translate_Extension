@@ -124,9 +124,11 @@ describe('translation proxy', () => {
       batch(1, { lines: [{ id: 'L0', text: 'ok', previous: ['1', '2', '3', '4', '5'], next: [] }] }),
       batch(1, { sourceLang: 42 }),
       'not json',
-      JSON.stringify(batch(1, { video: { ...video, description: 'd'.repeat(70_000) } })),
+      JSON.stringify(batch(1, { video: { ...video, description: 'd'.repeat(5_000) } })),
     ];
     for (const body of bad) expect((await call('/v1/translate/batch', body)).status).toBe(400);
+    // Over the 64 KB body limit: 413 (refused while reading, see the dedicated test).
+    expect((await call('/v1/translate/batch', JSON.stringify(batch(1, { video: { ...video, description: 'd'.repeat(70_000) } })))).status).toBe(413);
     expect((await call('/v1/translate/fast', { text: 'x'.repeat(501), sourceLang: 'ko', targetLang: 'en' })).status).toBe(400);
     expect(up.calls).toHaveLength(0);
   });
@@ -147,4 +149,47 @@ describe('translation proxy', () => {
     deps.repo.setPlan(account.id, 'standard', 'canceled');
     expect((await call('/v1/translate/batch', batch())).status).toBe(402);
   });
+
+  it('more than 4 requests in flight per account are refused with 429 (bounds budget overshoot)', async () => {
+    const held = setupHeld();
+    const inFlight = Array.from({ length: 4 }, () => held.call('/v1/translate/batch', batch()));
+    await new Promise(r => setTimeout(r, 20));
+    expect((await held.call('/v1/translate/batch', batch())).status).toBe(429);
+    held.release();
+    expect((await Promise.all(inFlight)).every(r => r.status === 200)).toBe(true);
+    expect((await held.call('/v1/translate/batch', batch())).status).toBe(200);
+  });
+
+  it('a body over 64 KB is refused before it is read in full', async () => {
+    const { app, token, up } = setup('pro');
+    const huge = 'x'.repeat(70 * 1024);
+    const res = await app.request('/v1/translate/batch', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${token}`, 'content-length': String(huge.length) },
+      body: huge,
+    });
+    expect(res.status).toBe(413);
+    expect(up.calls).toHaveLength(0);
+  });
 });
+
+/** A pro account whose upstream calls wait until release() (to hold requests in flight). */
+function setupHeld() {
+  const now = { t: Date.UTC(2026, 10, 12, 12) };
+  const up = fakeUpstreams();
+  let release!: () => void;
+  const gate = new Promise<void>(r => (release = r));
+  const held = (async (i: RequestInfo | URL, init?: RequestInit) => {
+    await gate;
+    return up.fetchImpl(i, init);
+  }) as typeof fetch;
+  const deps = testDeps({ clock: () => now.t, fetch: held });
+  const app = createApp(deps);
+  const account = deps.repo.upsertAccount('held@example.com');
+  deps.repo.setPlan(account.id, 'pro', 'active', 'cus_h');
+  deps.repo.addSession(require('../auth').sha256('held-token'), account.id);
+  const call = (path: string, body: unknown) =>
+    app.request(path, { method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer held-token' }, body: JSON.stringify(body) });
+  return { call, release: () => release() };
+}
+

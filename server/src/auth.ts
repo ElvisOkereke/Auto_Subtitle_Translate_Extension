@@ -8,8 +8,13 @@ import type { Mailer } from './mailer';
 export const CODE_TTL_MS = 10 * 60_000;
 export const MAX_CODE_ATTEMPTS = 5;
 const EMAIL_LIMIT = { count: 3, windowMs: 15 * 60_000 };
-/** Wrong codes per email across all its codes before sign-in is locked for the window. */
-const FAILURE_LIMIT = { count: 10, windowMs: 60 * 60_000 };
+/**
+ * Wrong codes per (email, IP) and per IP before that IP is locked out for the
+ * window. Only the guessing IP is locked: the real user, elsewhere, still signs
+ * in with the right code. Total guesses per email stay bounded by the code
+ * send limit (3 per 15 min) x 5 attempts per code.
+ */
+const FAILURE_LIMIT = { perEmailIp: 10, perIp: 30, windowMs: 60 * 60_000 };
 export const SESSION_TTL_MS = 90 * 24 * 3600_000;
 const IP_LIMIT = { count: 20, windowMs: 60 * 60_000 };
 const EMAIL_RE = /^[^\s@]{1,64}@[^\s@]{1,190}\.[^\s@]{2,63}$/;
@@ -63,16 +68,23 @@ export class Auth {
   }
 
   /** A new session token; null for a wrong/expired/used/exhausted code; 'locked' after too many failures. */
-  verify(emailRaw: string, code: string): string | null | 'locked' {
+  verify(emailRaw: string, code: string, ip: string): string | null | 'locked' {
     const email = emailRaw.trim().toLowerCase();
-    if (this.repo.countRateEvents(`fail:${email}`, this.clock() - FAILURE_LIMIT.windowMs) >= FAILURE_LIMIT.count) return 'locked';
+    const since = this.clock() - FAILURE_LIMIT.windowMs;
+    if (
+      this.repo.countRateEvents(`fail:${email}|${ip}`, since) >= FAILURE_LIMIT.perEmailIp ||
+      this.repo.countRateEvents(`failip:${ip}`, since) >= FAILURE_LIMIT.perIp
+    ) {
+      return 'locked';
+    }
     const stored = this.repo.latestCode(email);
     if (!stored || stored.used || stored.attempts >= MAX_CODE_ATTEMPTS || this.clock() > stored.expiresAt) return null;
     const expected = Buffer.from(stored.codeHash, 'hex');
     const given = Buffer.from(codeHash(email, String(code)), 'hex');
     if (expected.length !== given.length || !timingSafeEqual(expected, given)) {
       this.repo.markCodeAttempt(stored.id);
-      this.repo.addRateEvent(`fail:${email}`, this.clock());
+      this.repo.addRateEvent(`fail:${email}|${ip}`, this.clock());
+      this.repo.addRateEvent(`failip:${ip}`, this.clock());
       return null;
     }
     this.repo.markCodeUsed(stored.id);

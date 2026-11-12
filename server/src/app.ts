@@ -71,7 +71,7 @@ export function createApp(deps: AppDeps): Hono<AuthEnv> {
     if (!validEmail(body?.email) || !/^\d{6}$/.test(String(body?.code ?? ''))) {
       return c.json({ error: 'bad_request', message: 'Enter the 6-digit code from the email.' }, 400);
     }
-    const token = auth.verify(body.email, String(body.code));
+    const token = auth.verify(body.email, String(body.code), clientIp(c, config.trustProxyHops));
     if (token === 'locked') return c.json({ error: 'rate_limited', message: 'Too many wrong codes. Try again in an hour.' }, 429);
     if (!token) return c.json({ error: 'invalid_code', message: 'That code is wrong or expired. Request a new one.' }, 400);
     return c.json({ token });

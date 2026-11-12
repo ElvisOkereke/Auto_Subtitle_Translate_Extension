@@ -16,6 +16,12 @@ export interface ServerConfig {
   trustProxyHops: number;
 }
 
+function proxyHops(value: string | undefined): number {
+  const n = Number(value ?? 0);
+  if (!Number.isInteger(n) || n < 0) throw new Error(`TRUST_PROXY_HOPS must be a non-negative integer, got "${value}"`);
+  return n;
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv): ServerConfig {
   return {
     port: Number(env.PORT ?? 8080),
@@ -35,6 +41,6 @@ export function loadConfig(env: NodeJS.ProcessEnv): ServerConfig {
     },
     mail: { resendApiKey: env.RESEND_API_KEY || undefined, from: env.MAIL_FROM ?? 'Auto Subtitle Translator <login@example.com>' },
     devOutbox: env.DEV_OUTBOX === '1',
-    trustProxyHops: Number(env.TRUST_PROXY_HOPS ?? 0),
+    trustProxyHops: proxyHops(env.TRUST_PROXY_HOPS),
   };
 }

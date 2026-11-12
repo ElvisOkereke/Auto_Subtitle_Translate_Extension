@@ -2,6 +2,7 @@
 // with the service's keys, behind subscription gating, request validation,
 // per-account metering and a monthly cost budget.
 import type { Context, Hono, MiddlewareHandler } from 'hono';
+import { bodyLimit } from 'hono/body-limit';
 import { ClaudeEngine } from '../../src/translation/engines/claude';
 import { DeepLEngine } from '../../src/translation/engines/deepl';
 import { costUsd } from '../../src/translation/costs';
@@ -17,6 +18,8 @@ const MAX_TEXT = 500;
 const MAX_NEIGHBOURS = 4;
 const MAX_GLOSSARY = 200;
 const MAX_FIELD = 2000;
+/** Translation requests one account may have in flight (bounds how far concurrent requests can overshoot the budget). */
+export const MAX_IN_FLIGHT_PER_ACCOUNT = 4;
 
 class BadRequest extends Error {}
 
@@ -83,6 +86,9 @@ export interface ProxyDeps {
 
 export function mountTranslate(app: Hono<AuthEnv>, requireAccount: MiddlewareHandler<AuthEnv>, deps: ProxyDeps): void {
   const { config, repo } = deps;
+  const inFlight = new Map<number, number>();
+  // Reject oversized bodies while reading them, not after buffering.
+  const limitBody = bodyLimit({ maxSize: MAX_BODY_BYTES, onError: c => c.json({ error: 'bad_request', message: 'request too large' }, 413) });
 
   const claudeFor = (account: Account, requested: unknown): ClaudeEngine => {
     const plan = isPaidPlan(account.plan) ? PLANS[account.plan] : PLANS.standard;
@@ -104,6 +110,9 @@ export function mountTranslate(app: Hono<AuthEnv>, requireAccount: MiddlewareHan
     const status = deps.status(account);
     if (!status.active) return c.json({ error: 'not_subscribed', message: 'Subscribe to use the hosted translation.' }, 402);
     if (status.exhausted) return c.json({ error: 'budget_exhausted', message: "This month's translation allowance is used up." }, 402);
+    const running = inFlight.get(account.id) ?? 0;
+    if (running >= MAX_IN_FLIGHT_PER_ACCOUNT) return c.json({ error: 'rate_limited', message: 'Too many translations at once.' }, 429);
+    inFlight.set(account.id, running + 1);
     try {
       return await handler(c, account, await readBody(c));
     } catch (error) {
@@ -111,11 +120,16 @@ export function mountTranslate(app: Hono<AuthEnv>, requireAccount: MiddlewareHan
       const upstreamStatus = (error as { status?: number })?.status;
       console.warn('Upstream translation failed:', upstreamStatus ?? '', error instanceof Error ? error.message : error);
       return c.json({ error: 'upstream', message: 'Translation service error, try again.', upstreamStatus: upstreamStatus ?? null }, 502);
+    } finally {
+      const left = (inFlight.get(account.id) ?? 1) - 1;
+      if (left > 0) inFlight.set(account.id, left);
+      else inFlight.delete(account.id);
     }
   };
 
   app.post(
     '/v1/translate/fast',
+    limitBody,
     requireAccount,
     guarded(async (c, account, body) => {
       const text = str(body?.text, MAX_TEXT, 'text');
@@ -131,6 +145,7 @@ export function mountTranslate(app: Hono<AuthEnv>, requireAccount: MiddlewareHan
 
   app.post(
     '/v1/translate/batch',
+    limitBody,
     requireAccount,
     guarded(async (c, account, body) => {
       const req = {
@@ -149,6 +164,7 @@ export function mountTranslate(app: Hono<AuthEnv>, requireAccount: MiddlewareHan
 
   app.post(
     '/v1/translate/topic',
+    limitBody,
     requireAccount,
     guarded(async (c, account, body) => {
       const result = await claudeFor(account, body?.model).summarizeTopic(
