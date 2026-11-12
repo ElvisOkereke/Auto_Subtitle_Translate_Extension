@@ -224,6 +224,15 @@ describe('SubtitleMode', () => {
       expect(h.mode.timeline.at(10.2)).toMatchObject({ translation: `CLAUDE ${text(1)}`, quality: 'better' });
     });
 
+    it('a Claude answer identical to the fast text still counts as the better version', async () => {
+      const h = (current = await harness({ readAhead: false, plan: { fast: true, best: true } }));
+      (h.mode as any).deps.translate = async (req: any) => ({ success: true, translatedText: 'same', quality: req.tier === 'best' ? 'better' : 'fast' });
+      await liveLine(h, SIG(200), 10, text(1));
+      const line = h.mode.timeline.toJSON()[0];
+      expect(line.quality).toBe('better');
+      expect(h.mode.betterAt.has(line.start)).toBe(true);
+    });
+
     it('best only shows nothing until Claude answers', async () => {
       const h = (current = await harness({ readAhead: false, plan: { fast: false, best: true }, holdBest: true }));
       await liveLine(h, SIG(200), 10, text(1));
@@ -243,6 +252,27 @@ describe('SubtitleMode', () => {
       await flush();
       expect(h.mode.timeline.toJSON()[0].translation).toBe(`EN ${text(1)}`); // (stop closed the line at the last frame)
       expect(document.querySelector('.ast-subtitle-overlay')).toBeNull();
+    });
+
+    it('a read-ahead line due within 10 s goes out with live priority (not held for a batch)', async () => {
+      const h = (current = await harness({ plan: { fast: false, best: true } }));
+      (h.video as any).currentTime = 100;
+      const priorities = () => (h as any).priorities as string[];
+      (h as any).priorities = [];
+      const orig = (h.mode as any).deps.translate;
+      (h.mode as any).deps.translate = (req: any) => {
+        (h as any).priorities.push(`${req.text}:${req.priority}`);
+        return orig(req);
+      };
+      // Read ahead: a change at 102 s (due in 2 s) and one at 130 s (due in 30 s).
+      for (const [k, t0] of [[1, 102], [2, 130]] as const) {
+        h.raFrame(crop(k), SIG(k % 2 ? 200 : 0), t0 - 0.25);
+        h.raFrame(crop(k), SIG(k % 2 ? 200 : 0), t0);
+        h.raFrame(crop(k), SIG(k % 2 ? 200 : 0), t0 + 0.125);
+      }
+      await flush();
+      expect(priorities()).toContain(`${text(1)}:live`);
+      expect(priorities()).toContain(`${text(2)}:readahead`);
     });
 
     it('a glossary correction re-translates matching lines and swaps the one on screen once', async () => {

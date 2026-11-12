@@ -66,6 +66,9 @@ async function startMode(video: HTMLVideoElement, videoId: string, box: Normaliz
     const { devSubtitle } = await chrome.storage.local.get('devSubtitle');
     const readAhead = devSubtitle?.readAhead === false ? null : new MseReadAhead(video, box);
     const plan = await chrome.runtime.sendMessage({ type: 'GET_TRANSLATION_PLAN' }).catch(() => null);
+    const videoContext = readVideoContext(document, location.href);
+    // Start the topic summary now so the first lines already get it.
+    if (plan?.best) void chrome.runtime.sendMessage({ type: 'PREPARE_TRANSLATION', video: videoContext, sourceLang: lang }).catch(() => undefined);
     return SubtitleMode.start({
       video,
       videoId,
@@ -77,7 +80,7 @@ async function startMode(video: HTMLVideoElement, videoId: string, box: Normaliz
         store: client.timelineStorage(),
         readAhead,
         plan: plan && typeof plan.fast === 'boolean' ? plan : { fast: true, best: false },
-        video: readVideoContext(document, location.href),
+        video: videoContext,
       },
     });
   });

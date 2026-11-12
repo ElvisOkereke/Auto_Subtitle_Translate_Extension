@@ -1,7 +1,7 @@
 // DeepL engine: one request per line, neighbouring lines as DeepL `context`.
 import { APIError } from '../../types';
 import type { TranslateBatchRequest, TranslateBatchResult, TranslationEngine } from '../types';
-import { callFetch, retryRequest, toDeepLSource, toDeepLTarget, withTimeout } from './http';
+import { BATCH_CONCURRENCY, callFetch, mapLimit, retryRequest, toDeepLSource, toDeepLTarget, withTimeout } from './http';
 
 const DEEPL_FREE_ENDPOINT = 'https://api-free.deepl.com/v2/translate';
 const DEEPL_PRO_ENDPOINT = 'https://api.deepl.com/v2/translate';
@@ -17,12 +17,10 @@ export class DeepLEngine implements TranslationEngine {
   constructor(private readonly cfg: { apiKey: string; endpoint?: string; fetch?: typeof fetch }) {}
 
   async translateBatch(req: TranslateBatchRequest): Promise<TranslateBatchResult> {
-    const translations = await Promise.all(
-      req.lines.map(async l => ({
-        id: l.id,
-        text: (await this.translateOne(l.text, req.sourceLang, req.targetLang, { previousLines: l.previous, nextLines: l.next })).text,
-      }))
-    );
+    const translations = await mapLimit(req.lines, BATCH_CONCURRENCY, async l => ({
+      id: l.id,
+      text: (await this.translateOne(l.text, req.sourceLang, req.targetLang, { previousLines: l.previous, nextLines: l.next })).text,
+    }));
     return { translations, glossaryUpdates: [] };
   }
 

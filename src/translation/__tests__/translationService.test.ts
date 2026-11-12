@@ -39,15 +39,19 @@ interface Fakes {
   claudeConfigs: any[];
   setClaudeFailure(e: Error | null): void;
   setClaudeDrop(ids: boolean): void;
+  /** Drop this many lines from replies, once each (model skipping ids). */
+  dropOnce(texts: string[]): void;
 }
 
-function fakes(opts: { settings?: Partial<typeof DEFAULT_SETTINGS>; secrets?: Record<string, string> } = {}): Fakes {
+function fakes(opts: { settings?: Partial<typeof DEFAULT_SETTINGS>; secrets?: Record<string, string>; topicMs?: number; claudeMs?: number } = {}): Fakes {
   const area = memoryArea();
   const f = { claudeBatches: [], topicCalls: 0, fastCalls: [], area, claudeConfigs: [] } as unknown as Fakes;
   let failure: Error | null = null;
   let drop = false;
+  let dropTexts = new Set<string>();
   f.setClaudeFailure = e => (failure = e);
   f.setClaudeDrop = d => (drop = d);
+  f.dropOnce = texts => (dropTexts = new Set(texts));
   const deps: TranslationServiceDeps = {
     settings: async () => ({ ...DEFAULT_SETTINGS, translationProvider: 'deepl', ...opts.settings }),
     secrets: async () => ({ deeplApiKey: 'k:fx', googleTranslateApiKey: '', anthropicApiKey: 'sk-ant', claudeGatewayToken: '', ...opts.secrets }),
@@ -59,16 +63,19 @@ function fakes(opts: { settings?: Partial<typeof DEFAULT_SETTINGS>; secrets?: Re
       return {
         async translateBatch(req) {
           f.claudeBatches.push(structuredClone(req));
+          if (opts.claudeMs) await new Promise(r => setTimeout(r, opts.claudeMs));
           if (failure) throw failure;
           return {
-            translations: drop ? [] : req.lines.map(l => ({ id: l.id, text: `CLAUDE(${l.text})` })),
+            translations: drop
+              ? []
+              : req.lines.filter(l => !dropTexts.delete(l.text)).map(l => ({ id: l.id, text: `CLAUDE(${l.text})` })),
             glossaryUpdates: req.lines.some(l => l.text.includes('뽀삐')) ? [{ source: '뽀삐', target: 'Poppy' }] : [],
             usage: { model: cfg.model, inputTokens: 1000, outputTokens: 50, cacheReadTokens: 0, cacheWriteTokens: 0 },
           };
         },
         async summarizeTopic() {
           f.topicCalls++;
-          await new Promise(r => setTimeout(r, 20));
+          await new Promise(r => setTimeout(r, opts.topicMs ?? 20));
           return { topic: 'League of Legends stream', topicKey: 'league-of-legends', glossary: [{ source: '렙차', target: 'level gap' }] };
         },
       };
@@ -80,6 +87,7 @@ function fakes(opts: { settings?: Partial<typeof DEFAULT_SETTINGS>; secrets?: Re
       },
     }),
     batch: { maxLines: 8, windowMs: 20 },
+    topicWaitMs: 100,
   };
   f.service = new TranslationService(deps);
   return f;
@@ -180,4 +188,47 @@ describe('TranslationService', () => {
     expect(await f.service.translateLine(request())).toMatchObject({ success: true, translatedText: '뽀삐 나왔네' });
     expect(f.claudeBatches).toHaveLength(0);
   });
+
+  it('a slow topic summary does not hold lines back; later lines get the topic', async () => {
+    const f = fakes({ topicMs: 400 });
+    const t0 = Date.now();
+    const first = await f.service.translateLine(request());
+    expect(Date.now() - t0).toBeLessThan(300); // waited at most topicWaitMs (100 ms), not 400
+    expect(first.engine).toBe('claude');
+    expect(f.claudeBatches[0].topic).toBeNull();
+    await new Promise(r => setTimeout(r, 400));
+    await f.service.translateLine(request({ text: '렙차' }));
+    expect(f.claudeBatches[1].topic).toBe('League of Legends stream');
+    expect(f.topicCalls).toBe(1);
+  });
+
+  it('fast-tier lines are not queued behind slow Claude requests', async () => {
+    const f = fakes({ claudeMs: 300 });
+    await f.service.translateLine(request({ text: 'warm-up' }));
+    const claude = Array.from({ length: 6 }, (_, i) => f.service.translateLine(request({ text: `live ${i}` })));
+    const t0 = Date.now();
+    const fast = await f.service.translateLine(request({ tier: 'fast', text: '빠른 줄' }));
+    expect(fast.engine).toBe('deepl');
+    expect(Date.now() - t0).toBeLessThan(100);
+    await Promise.all(claude);
+  });
+
+  it('prepare() summarises the topic from the page before any line arrives', async () => {
+    const f = fakes();
+    await f.service.prepare(video, 'ko');
+    expect(f.topicCalls).toBe(1);
+    await f.service.translateLine(request());
+    expect(f.topicCalls).toBe(1);
+    expect(f.claudeBatches[0].topic).toBe('League of Legends stream');
+  });
+
+  it('a line Claude skipped in a batch is retried once on its own', async () => {
+    const f = fakes();
+    await f.service.translateLine(request({ text: 'warm-up' }));
+    f.dropOnce(['b']);
+    const results = await Promise.all(['a', 'b', 'c'].map(t => f.service.translateLine(request({ text: t, priority: 'readahead' }))));
+    expect(results.map(r => r.translatedText)).toEqual(['CLAUDE(a)', 'CLAUDE(b)', 'CLAUDE(c)']);
+    expect(f.claudeBatches[f.claudeBatches.length - 1].lines.map(l => l.text)).toEqual(['b']);
+  });
 });
+

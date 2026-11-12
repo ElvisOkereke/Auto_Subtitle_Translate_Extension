@@ -53,6 +53,7 @@ const RECHECK_MS = 750; // re-read a displayed line if nothing triggered a read 
 const SAVE_EVERY_MS = 10_000;
 const MAX_READ_AHEAD_QUEUE = 32;
 const MAX_OPEN_LINE_S = 8; // a saved line with no end is closed after this long
+const IMMINENT_S = 10; // read-ahead lines due sooner than this are translated like live ones (no batching)
 const NO_VIDEO: VideoContext = { videoId: null, url: '', title: '', channel: '', description: '' };
 
 export class SubtitleMode {
@@ -422,6 +423,7 @@ export class SubtitleMode {
   /** Requests every tier the plan asks for; the timeline keeps the best translation. */
   private translate(line: TimelineLine, priority: 'live' | 'readahead'): void {
     this.translateCalls++;
+    if (priority === 'readahead' && line.start - this.video.currentTime < IMMINENT_S) priority = 'live';
     const plan = this.deps.plan ?? { fast: true, best: false };
     if (plan.fast) void this.requestTier(line, 'fast', priority);
     if (plan.best) void this.requestTier(line, 'best', priority);
@@ -447,8 +449,9 @@ export class SubtitleMode {
       return;
     }
     const before = line.translation;
+    const beforeQuality = line.quality;
     this.timeline.setTranslation(line.start, response.translatedText, response.quality ?? (tier === 'best' ? 'better' : 'fast'));
-    if (line.translation === before) return; // not better than what we have (or identical)
+    if (line.translation === before && line.quality === beforeQuality) return; // not better than what we have
     if (!this.translatedAt.has(line.start)) this.translatedAt.set(line.start, this.video.currentTime);
     if (line.quality === 'better' && !this.betterAt.has(line.start)) this.betterAt.set(line.start, this.video.currentTime);
     if (this.current === line && this.state === 'running') {

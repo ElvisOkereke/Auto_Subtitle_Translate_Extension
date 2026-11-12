@@ -56,3 +56,20 @@ export const toGoogleCode = (code: string) => GOOGLE_CODES[code.toLowerCase()] |
 
 /** Call fetch without binding it to an object (Chrome throws "Illegal invocation" otherwise). */
 export const callFetch = (f: typeof fetch | undefined, input: string, init: RequestInit) => (f ?? fetch)(input, init);
+
+/** Maps with at most `limit` calls in flight, keeping the input order. */
+export async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const i = next++;
+      results[i] = await fn(items[i]);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
+
+/** Per-line engines translate batches with this many requests in flight. */
+export const BATCH_CONCURRENCY = 4;

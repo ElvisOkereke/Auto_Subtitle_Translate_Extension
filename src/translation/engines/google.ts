@@ -1,7 +1,7 @@
 // Google Cloud Translation engine (v2): one request per line (no context support).
 import { APIError } from '../../types';
 import type { TranslateBatchRequest, TranslateBatchResult, TranslationEngine } from '../types';
-import { callFetch, retryRequest, toGoogleCode, withTimeout } from './http';
+import { BATCH_CONCURRENCY, callFetch, mapLimit, retryRequest, toGoogleCode, withTimeout } from './http';
 
 const GOOGLE_TRANSLATE_ENDPOINT = 'https://translation.googleapis.com/language/translate/v2';
 
@@ -11,9 +11,10 @@ export class GoogleEngine implements TranslationEngine {
   constructor(private readonly cfg: { apiKey: string; endpoint?: string; fetch?: typeof fetch }) {}
 
   async translateBatch(req: TranslateBatchRequest): Promise<TranslateBatchResult> {
-    const translations = await Promise.all(
-      req.lines.map(async l => ({ id: l.id, text: (await this.translateOne(l.text, req.sourceLang, req.targetLang)).text }))
-    );
+    const translations = await mapLimit(req.lines, BATCH_CONCURRENCY, async l => ({
+      id: l.id,
+      text: (await this.translateOne(l.text, req.sourceLang, req.targetLang)).text,
+    }));
     return { translations, glossaryUpdates: [] };
   }
 

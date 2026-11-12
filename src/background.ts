@@ -33,6 +33,7 @@ const HANDLED_MESSAGE_TYPES = new Set<string>([
   'TRANSLATE_TEXT',
   'TRANSLATE_SUBTITLE_LINE',
   'GET_TRANSLATION_PLAN',
+  'PREPARE_TRANSLATION',
   'GET_GLOSSARY',
   'EDIT_GLOSSARY_ENTRY',
   'TRANSCRIPTION_RESULT',
@@ -122,6 +123,13 @@ class SubtitleService {
 
         case 'GET_TRANSLATION_PLAN':
           return await translation.plan();
+
+        case 'PREPARE_TRANSLATION': {
+          // Identity from the sender URL (as for subtitle lines), context text from the page.
+          const video = sender.tab && sender.url ? { ...(message.video ?? NO_VIDEO), url: sender.url, videoId: videoIdFrom(sender.url) } : (message.video ?? NO_VIDEO);
+          void translation.prepare(video, String(message.sourceLang ?? 'auto'));
+          return { success: true };
+        }
 
         case 'GET_GLOSSARY': {
           const videoKey = await this.videoKeyOfTab(message.tabId);

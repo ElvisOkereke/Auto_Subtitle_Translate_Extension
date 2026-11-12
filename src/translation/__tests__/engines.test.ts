@@ -130,6 +130,23 @@ describe('DeepLEngine', () => {
     expect(first.body).toMatchObject({ source_lang: 'ZH', target_lang: 'EN-US', context: '아 귀찮다\n렙차' });
   });
 
+  it('translateBatch keeps at most 4 requests in flight (DeepL rate-limits bursts)', async () => {
+    let inFlight = 0;
+    let peak = 0;
+    const fn = (async (_u: RequestInfo | URL, init?: RequestInit) => {
+      inFlight++;
+      peak = Math.max(peak, inFlight);
+      await new Promise(r => setTimeout(r, 5));
+      inFlight--;
+      const body = JSON.parse(String(init?.body));
+      return new Response(JSON.stringify({ translations: [{ text: `EN(${body.text[0]})` }] }), { status: 200 });
+    }) as typeof fetch;
+    const lines = Array.from({ length: 12 }, (_, i) => ({ id: `L${i}`, text: `t${i}`, previous: [], next: [] }));
+    const result = await new DeepLEngine({ apiKey: 'k:fx', fetch: fn }).translateBatch(req({ lines }));
+    expect(result.translations.map(t => t.id)).toEqual(lines.map(l => l.id));
+    expect(peak).toBeLessThanOrEqual(4);
+  });
+
   it('uses an endpoint override when given (dev mock)', async () => {
     const f = fakeFetch(deeplOk);
     await new DeepLEngine({ apiKey: 'pro-key', endpoint: 'http://127.0.0.1:9/mock/deepl', fetch: f.fn }).translateBatch(req());

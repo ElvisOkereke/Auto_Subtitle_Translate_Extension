@@ -102,9 +102,11 @@ export interface TranslationServiceDeps {
   makeClaude(cfg: ClaudeConfig): ClaudeLike;
   makeFast(provider: 'deepl' | 'google', apiKey: string, endpoint?: string): FastLike;
   batch?: { maxLines: number; windowMs: number };
-  /** At most 4 requests in flight; live lines first. */
-  runner?: PriorityRunner;
+  /** How long a line waits for the video's topic summary before going without it (ms). */
+  topicWaitMs?: number;
 }
+
+const TOPIC_WAIT_MS = 1500;
 
 interface BatchContext {
   sourceLang: string;
@@ -115,7 +117,10 @@ interface BatchContext {
 }
 
 export class TranslationService {
-  private readonly runner: PriorityRunner;
+  /** Fast engine: at most 4 requests in flight, live lines first. */
+  private readonly runner = new PriorityRunner(4);
+  /** Claude has its own lanes, so slow Claude calls never delay fast translations. */
+  private readonly claudeRunner = new PriorityRunner(4);
   private readonly batcher: ClaudeBatcher;
   private readonly batchContexts = new Map<string, BatchContext>();
   private readonly topics = new Map<string, Promise<void>>();
@@ -123,7 +128,6 @@ export class TranslationService {
   private authWarned = false;
 
   constructor(private readonly deps: TranslationServiceDeps) {
-    this.runner = deps.runner ?? new PriorityRunner(4);
     const { maxLines, windowMs } = deps.batch ?? { maxLines: 8, windowMs: 150 };
     this.batcher = new ClaudeBatcher({ maxLines, windowMs, run: (key, lines, priority) => this.runClaudeBatch(key, lines, priority) });
   }
@@ -197,14 +201,26 @@ export class TranslationService {
     }
   }
 
+  /** Subtitle mode started: summarise the video's topic from the page now, before the first line. */
+  async prepare(video: VideoContext, sourceLang: string): Promise<void> {
+    const [settings, secrets, overrides] = await Promise.all([this.deps.settings(), this.deps.secrets(), this.deps.overrides()]);
+    const cfg = this.claudeConfig(settings, secrets, overrides);
+    if (!cfg || settings.translationEngineMode === 'fast') return;
+    const req: LineTranslateRequest = { tier: 'best', text: '', sourceLang, previousLines: [], nextLines: [], priority: 'readahead', video };
+    await this.ensureTopic(video.videoId ?? video.url, req, settings.targetLanguage, this.deps.makeClaude(cfg));
+  }
+
   private async translateWithClaude(req: LineTranslateRequest, targetLang: string, cfg: ClaudeConfig): Promise<string | null> {
     const claude = this.deps.makeClaude(cfg);
     const videoKey = req.video.videoId ?? req.video.url;
-    await this.ensureTopic(videoKey, req, targetLang, claude);
+    // The topic (and its starting glossary) improves every batch, but the first
+    // lines must not wait seconds for it: give it a short head start only.
+    await Promise.race([this.ensureTopic(videoKey, req, targetLang, claude), new Promise(r => setTimeout(r, this.deps.topicWaitMs ?? TOPIC_WAIT_MS))]);
     const key = JSON.stringify([videoKey, req.sourceLang, targetLang, cfg.model, cfg.baseURL]);
     this.batchContexts.set(key, { sourceLang: req.sourceLang, targetLang, video: req.video, videoKey, claude });
-    const line: LineRequest = { id: `L${++this.lineSeq}`, text: req.text, previous: req.previousLines, next: req.nextLines };
-    return this.batcher.add(key, line, req.priority);
+    const line = (): LineRequest => ({ id: `L${++this.lineSeq}`, text: req.text, previous: req.previousLines, next: req.nextLines });
+    // Models occasionally skip a line in a batch: ask once more for it alone.
+    return (await this.batcher.add(key, line(), req.priority)) ?? this.batcher.add(key, line(), 'live');
   }
 
   /** Once per video: what it is about + a starting glossary (failures don't block translation). */
@@ -215,8 +231,8 @@ export class TranslationService {
         if (await this.deps.glossary.getVideoMeta(videoKey)) return;
         let topic: TopicResult;
         try {
-          topic = await this.runner.run(
-            () => claude.summarizeTopic(req.video, [...req.previousLines, req.text, ...req.nextLines], req.sourceLang, targetLang),
+          topic = await this.claudeRunner.run(
+            () => claude.summarizeTopic(req.video, [...req.previousLines, req.text, ...req.nextLines].filter(Boolean), req.sourceLang, targetLang),
             req.priority
           );
         } catch (error) {
@@ -236,7 +252,7 @@ export class TranslationService {
   private async runClaudeBatch(key: string, lines: LineRequest[], priority: 'live' | 'readahead'): Promise<Map<string, string>> {
     const ctx = this.batchContexts.get(key)!;
     const [meta, glossary] = await Promise.all([this.deps.glossary.getVideoMeta(ctx.videoKey), this.deps.glossary.effective(ctx.videoKey)]);
-    const result = await this.runner.run(
+    const result = await this.claudeRunner.run(
       () => ctx.claude.translateBatch({ sourceLang: ctx.sourceLang, targetLang: ctx.targetLang, lines, video: ctx.video, topic: meta?.topic || null, glossary }),
       priority
     );
