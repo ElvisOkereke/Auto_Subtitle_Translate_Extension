@@ -349,4 +349,19 @@ describe('TranslationService', () => {
     (f.service as any).deps.overrides = async () => ({}); // no dev server, placeholder default
     expect(await f.service.plan()).toEqual({ fast: true, best: false });
   });
+
+  it('a live line waits less for a slow topic summary than a read-ahead line does', async () => {
+    const f = fakes({ topicMs: 2000 });
+    (f.service as any).deps.topicWaitMs = undefined; // product defaults
+    const t0 = Date.now();
+    await f.service.translateLine(request({ priority: 'live' }));
+    const live = Date.now() - t0;
+    expect(live).toBeLessThan(900); // <= 0.5 s head start for the topic
+    const g = fakes({ topicMs: 2000 });
+    (g.service as any).deps.topicWaitMs = undefined;
+    const t1 = Date.now();
+    await g.service.translateLine(request({ priority: 'readahead' }));
+    expect(Date.now() - t1).toBeGreaterThanOrEqual(1400); // read-ahead lines are early anyway: 1.5 s for the topic
+  });
 });
+

@@ -101,7 +101,7 @@ Claude through the test relay, read-ahead on, Chromium.
 | Engine | Judge score (0–1) | Key League terms | Names consistent | Claude version before the line appears | Cost / line | Cost / hour of this video |
 |---|---|---|---|---|---|---|
 | DeepL only (before) | 0.48–0.50 | 9 / 11 | — | — | DeepL quota | DeepL quota |
-| **Claude Opus 5.5 (default)** | **0.91–0.93** | **10–11 / 11** | yes | **93%** (the first two lines, 1.4 s and 2.9 s after play, are late) | $0.0059–0.0061 | **$3.40–3.52** |
+| **Claude Opus 5.5 (default)** | **0.91–0.93** | **10–11 / 11** | yes | **90–93%** of all lines, **100% after the first 8 s** (the first 2–3 lines arrive while OCR and Claude warm up) | $0.0059–0.0061 | **$3.40–3.52** |
 | Claude Sonnet 5.5 | 0.72 | 10 / 11 | yes | 90% | $0.0027 | $1.56 |
 | Claude Haiku 5.5 | 0.45 | 8 / 11 | no (learned 탑 → "Top lane") | 97% | $0.00009 | $0.05 |
 

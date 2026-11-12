@@ -118,7 +118,8 @@ export interface TranslationServiceDeps {
   clock?: () => number;
 }
 
-const TOPIC_WAIT_MS = 1500;
+/** How long a line waits for the topic summary: lines due now wait less (read-ahead lines are early anyway). */
+const TOPIC_WAIT_MS = { live: 500, readahead: 1500 } as const;
 /** After a 429/5xx/timeout, Claude is left alone this long (fast tier carries on). */
 const COOLDOWN_MS = 30_000;
 const PAYMENT_COOLDOWN_MS = 10 * 60_000;
@@ -292,7 +293,7 @@ export class TranslationService {
     const videoKey = req.video.videoId ?? req.video.url;
     // The topic (and its starting glossary) improves every batch, but the first
     // lines must not wait seconds for it: give it a short head start only.
-    await Promise.race([this.ensureTopic(videoKey, req, targetLang, claude), new Promise(r => setTimeout(r, this.deps.topicWaitMs ?? TOPIC_WAIT_MS))]);
+    await Promise.race([this.ensureTopic(videoKey, req, targetLang, claude), new Promise(r => setTimeout(r, this.deps.topicWaitMs ?? TOPIC_WAIT_MS[req.priority]))]);
     const key = JSON.stringify([videoKey, req.sourceLang, targetLang, cfg.model, cfg.baseURL]);
     this.batchContexts.delete(key); // re-insert: most recent last
     this.batchContexts.set(key, { sourceLang: req.sourceLang, targetLang, video: req.video, videoKey, claude });
