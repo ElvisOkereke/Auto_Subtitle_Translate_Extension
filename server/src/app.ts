@@ -6,11 +6,14 @@ import type { ServerConfig } from './config';
 import type { Account, Repo } from './db';
 import { Mailer, OutboxMailer, ResendMailer } from './mailer';
 import { BUDGET_WARN_SHARE, PLANS, isActive, isPaidPlan } from './plans';
+import { mountTranslate } from './translate';
 
 export interface AppDeps {
   config: ServerConfig;
   repo: Repo;
   mailer?: Mailer;
+  /** Upstream HTTP (Anthropic, DeepL); tests pass a fake. */
+  fetch?: typeof fetch;
   /** Time source (tests move it). */
   clock?: () => number;
 }
@@ -75,6 +78,8 @@ export function createApp(deps: AppDeps): Hono<AuthEnv> {
   });
 
   app.get('/v1/me', requireAccount, c => c.json(accountStatus(repo, c.get('account'), clock())));
+
+  mountTranslate(app, requireAccount, { config, repo, clock, monthOf, status: account => accountStatus(repo, account, clock()), fetch: deps.fetch });
 
   if (config.devOutbox) {
     // Dev/test only: read the codes that would have been emailed.
