@@ -23,6 +23,19 @@ function toDeepLTarget(code: string): string {
   return DEEPL_TARGET_OVERRIDES[code.toLowerCase()] || code.toUpperCase();
 }
 
+// Subtitle languages use script-qualified Chinese codes; providers name them differently.
+const GOOGLE_CODES: Record<string, string> = { 'zh-hans': 'zh-CN', 'zh-hant': 'zh-TW' };
+
+function toGoogleCode(code: string): string {
+  return GOOGLE_CODES[code.toLowerCase()] || code;
+}
+
+export interface TranslateOptions {
+  /** Neighbouring subtitle lines; DeepL receives them as `context` (not translated, not billed). */
+  previousLines?: string[];
+  nextLines?: string[];
+}
+
 function toDeepLSource(code: string): string {
   return code.toUpperCase();
 }
@@ -84,7 +97,8 @@ export class ApiService {
   async translateText(
     text: string,
     sourceLanguage: string,
-    targetLanguage: string
+    targetLanguage: string,
+    options: TranslateOptions = {}
   ): Promise<TranslationResult> {
     const settings = await this.getSettings();
 
@@ -93,16 +107,16 @@ export class ApiService {
         throw new APIError('No DeepL API key configured', 401);
       }
       return this.retryRequest(() =>
-        this.executeDeepLTranslate(settings, text, sourceLanguage, targetLanguage)
+        this.executeDeepLTranslate(settings, text, sourceLanguage, targetLanguage, options)
       );
     }
 
     if (!settings.googleTranslateApiKey) {
       throw new APIError('No Google Translate API key configured', 401);
     }
-    const body: Record<string, string> = { q: text, target: targetLanguage, format: 'text' };
+    const body: Record<string, string> = { q: text, target: toGoogleCode(targetLanguage), format: 'text' };
     if (sourceLanguage && sourceLanguage !== 'auto') {
-      body.source = sourceLanguage;
+      body.source = toGoogleCode(sourceLanguage);
     }
     return this.retryRequest(() => this.executeGoogleTranslate(settings, body));
   }
@@ -142,13 +156,18 @@ export class ApiService {
     settings: TranslationSettings,
     text: string,
     sourceLanguage: string,
-    targetLanguage: string
+    targetLanguage: string,
+    options: TranslateOptions = {}
   ): Promise<TranslationResult> {
     const apiKey = settings.deeplApiKey;
     const endpoint = apiKey.endsWith(':fx') ? settings.endpoints.deeplFree : settings.endpoints.deeplPro;
     const body: Record<string, unknown> = { text: [text], target_lang: toDeepLTarget(targetLanguage) };
     if (sourceLanguage && sourceLanguage !== 'auto') {
       body.source_lang = toDeepLSource(sourceLanguage);
+    }
+    const context = [...(options.previousLines ?? []), ...(options.nextLines ?? [])].join('\n');
+    if (context) {
+      body.context = context;
     }
 
     return this.withTimeout(async signal => {

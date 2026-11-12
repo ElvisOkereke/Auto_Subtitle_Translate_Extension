@@ -55,3 +55,34 @@ test.describe('Popup', () => {
     expect(errors).toEqual([]);
   });
 });
+
+test.describe('Subtitle line translation', () => {
+  test('background translates subtitle lines with neighbouring context', async ({ context, extensionId, configure, translationCalls }) => {
+    await configure({ translationProvider: 'deepl', deeplApiKey: 'k:fx', targetLanguage: 'en' });
+    const page = await context.newPage();
+    await page.goto(`chrome-extension://${extensionId}/popup.html`);
+    const response = await page.evaluate(() =>
+      chrome.runtime.sendMessage({
+        type: 'TRANSLATE_SUBTITLE_LINE',
+        text: '탑 카밀일 수도 있긴 한데',
+        sourceLang: 'ko',
+        previousLines: ['야이애나에다가 판테온'],
+        nextLines: ['웬만하면 탑 뽀삐겠지!'],
+        priority: 'live',
+      })
+    );
+    expect(response).toEqual({ success: true, translatedText: '[EN-US] 탑 카밀일 수도 있긴 한데', quality: 'fast' });
+    expect(translationCalls[0]).toMatchObject({ source: 'KO', target: 'EN-US', context: '야이애나에다가 판테온\n웬만하면 탑 뽀삐겠지!' });
+  });
+
+  test('a line already in the target language is returned without a request', async ({ context, extensionId, configure, translationCalls }) => {
+    await configure({ translationProvider: 'deepl', deeplApiKey: 'k:fx', targetLanguage: 'en' });
+    const page = await context.newPage();
+    await page.goto(`chrome-extension://${extensionId}/popup.html`);
+    const response = await page.evaluate(() =>
+      chrome.runtime.sendMessage({ type: 'TRANSLATE_SUBTITLE_LINE', text: 'hello', sourceLang: 'en', previousLines: [], nextLines: [] })
+    );
+    expect(response).toEqual({ success: true, translatedText: 'hello', quality: 'fast' });
+    expect(translationCalls).toEqual([]);
+  });
+});

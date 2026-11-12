@@ -3,6 +3,10 @@
 import { ExtensionMessage, CaptureResponse, APIError } from './types';
 import { apiService } from './services/apiService';
 import { DEFAULT_SETTINGS, getSettings } from './settings';
+import { PriorityRunner, JobPriority } from './utils/priorityRunner';
+
+// At most 4 translation requests in flight; lines on screen now go first.
+const subtitleTranslations = new PriorityRunner(4);
 
 const HANDLED_MESSAGE_TYPES = new Set<string>([
   'START_CAPTURE',
@@ -10,6 +14,7 @@ const HANDLED_MESSAGE_TYPES = new Set<string>([
   'GET_SETTINGS',
   'UPDATE_SETTINGS',
   'TRANSLATE_TEXT',
+  'TRANSLATE_SUBTITLE_LINE',
   'TRANSCRIPTION_RESULT',
   'TRANSCRIPTION_ERROR',
   'MODEL_LOADING_PROGRESS'
@@ -93,6 +98,9 @@ class SubtitleService {
 
         case 'TRANSLATE_TEXT':
           return await this.translateText(message.text, message.targetLang);
+
+        case 'TRANSLATE_SUBTITLE_LINE':
+          return await this.translateSubtitleLine(message);
 
         case 'TRANSCRIPTION_RESULT':
           await this.handleTranscriptionResult(message.text, message.timing);
@@ -276,6 +284,31 @@ class SubtitleService {
       await chrome.tabs.sendMessage(tabId, message);
     } catch (error) {
       // tab might be closed or navigating away; ignore
+    }
+  }
+
+  /** Subtitle-mode line: source language is the subtitle language, neighbours give context. */
+  async translateSubtitleLine(message: ExtensionMessage) {
+    const { text, sourceLang, previousLines = [], nextLines = [], priority = 'live' } = message as {
+      text: string;
+      sourceLang: string;
+      previousLines?: string[];
+      nextLines?: string[];
+      priority?: JobPriority;
+    } & ExtensionMessage;
+    try {
+      const { targetLanguage } = await getSettings();
+      if (sourceLang.split('-')[0] === targetLanguage.split('-')[0]) {
+        return { success: true, translatedText: text, quality: 'fast' };
+      }
+      const result = await subtitleTranslations.run(
+        () => apiService.translateText(text, sourceLang, targetLanguage, { previousLines, nextLines }),
+        priority
+      );
+      // Single engine until the translation-engine layer lands; every result is 'fast'.
+      return { success: true, translatedText: result.translatedText, quality: 'fast' };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
     }
   }
 

@@ -20,6 +20,7 @@ export interface TranslationCall {
   target: string;
   source?: string;
   authorization?: string;
+  context?: string;
 }
 
 export interface FixtureServer {
@@ -88,6 +89,7 @@ export async function startFixtureServer(): Promise<FixtureServer> {
         target: body.target_lang,
         source: body.source_lang,
         authorization: req.headers.authorization,
+        ...(body.context ? { context: body.context } : {}),
       });
       res.end(JSON.stringify({ translations: [{ text: `[${body.target_lang}] ${text}`, detected_source_language: 'FR' }] }));
     } else {

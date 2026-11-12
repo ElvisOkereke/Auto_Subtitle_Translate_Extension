@@ -192,3 +192,52 @@ describe('ApiService.translateText via DeepL', () => {
     expect(globalThis.fetch).not.toHaveBeenCalled();
   });
 });
+
+describe('ApiService.translateText with subtitle context', () => {
+  let apiService: ApiService;
+  const okDeepL = { ok: true, json: async () => ({ translations: [{ text: 'x' }] }) };
+  const okGoogle = { ok: true, json: async () => ({ data: { translations: [{ translatedText: 'x' }] } }) };
+
+  function useProvider(provider: 'deepl' | 'google') {
+    (globalThis as any).chrome = {
+      storage: {
+        sync: {
+          get: jest.fn().mockResolvedValue({ translationProvider: provider, deeplApiKey: 'k:fx', googleTranslateApiKey: 'g' }),
+        },
+      },
+    };
+  }
+
+  beforeEach(() => {
+    apiService = new ApiService();
+    (globalThis as any).fetch = jest.fn();
+  });
+
+  it('sends neighbouring lines to DeepL as context', async () => {
+    useProvider('deepl');
+    (globalThis.fetch as jest.Mock).mockResolvedValue(okDeepL);
+    await apiService.translateText('cur', 'ko', 'en', { previousLines: ['a'], nextLines: ['b'] });
+    const body = JSON.parse((globalThis.fetch as jest.Mock).mock.calls[0][1].body);
+    expect(body.context).toBe('a\nb');
+  });
+
+  it('omits context when there are no neighbouring lines', async () => {
+    useProvider('deepl');
+    (globalThis.fetch as jest.Mock).mockResolvedValue(okDeepL);
+    await apiService.translateText('cur', 'ko', 'en', { previousLines: [], nextLines: [] });
+    const body = JSON.parse((globalThis.fetch as jest.Mock).mock.calls[0][1].body);
+    expect('context' in body).toBe(false);
+  });
+
+  it('maps zh-Hans/zh-Hant to each provider\'s codes', async () => {
+    useProvider('deepl');
+    (globalThis.fetch as jest.Mock).mockResolvedValue(okDeepL);
+    await apiService.translateText('中文', 'zh-Hans', 'en');
+    expect(JSON.parse((globalThis.fetch as jest.Mock).mock.calls[0][1].body).source_lang).toBe('ZH-HANS');
+
+    useProvider('google');
+    (globalThis.fetch as jest.Mock).mockResolvedValue(okGoogle);
+    await apiService.translateText('中文', 'zh-Hant', 'en');
+    expect(JSON.parse((globalThis.fetch as jest.Mock).mock.calls[1][1].body).source).toBe('zh-TW');
+  });
+});
