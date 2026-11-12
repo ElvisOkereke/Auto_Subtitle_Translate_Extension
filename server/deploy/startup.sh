@@ -14,6 +14,8 @@ grep -q /mnt/disks/data /etc/fstab || echo "$DEV /mnt/disks/data ext4 discard,de
 mkdir -p /mnt/disks/data/caddy && chown 1000:1000 /mnt/disks/data
 
 command -v docker >/dev/null || { curl -fsSL https://get.docker.com | sh; }
+# Containers never need the VM's cloud credentials: block the metadata server for them.
+iptables -C DOCKER-USER -d 169.254.169.254 -j DROP 2>/dev/null || iptables -I DOCKER-USER -d 169.254.169.254 -j DROP
 REGION_HOST=$(md image | cut -d/ -f1)
 gcloud auth configure-docker "$REGION_HOST" --quiet
 

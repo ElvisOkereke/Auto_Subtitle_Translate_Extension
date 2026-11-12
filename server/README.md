@@ -75,8 +75,9 @@ a rollout can briefly run two writers.)
    `ast-stripe-price-pro`, `ast-resend-key`, `ast-mail-from`, `ast-admin-token`
    (32+ random characters) — e.g.
    `printf %s "$VALUE" | gcloud secrets create ast-deepl-key --data-file=-`.
-   Grant the VM's service account (default compute SA)
-   `roles/secretmanager.secretAccessor` and `roles/artifactregistry.reader`.
+   `gce.sh` creates a dedicated `ast-proxy` service account with read access to
+   just these secrets and the image repository; containers on the VM can't reach
+   the metadata server.
 5. **Deploy**: `PROJECT=… ZONE=us-central1-a DOMAIN=api.example.com server/deploy/gce.sh`,
    then point the domain's A record at the printed IP (Caddy fetches the
    certificate). Re-run the script to roll out a new build.

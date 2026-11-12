@@ -129,8 +129,12 @@ export function mountBilling(app: Hono<AuthEnv>, requireAccount: MiddlewareHandl
 
     if (event.type.startsWith('checkout.session.')) {
       const account = repo.accountById(Number(obj.client_reference_id));
-      const plan = obj.metadata?.plan;
-      if (!account || !isPaidPlan(plan)) return;
+      if (!account) return;
+      // Following a live subscription already: a checkout for another one is not applied.
+      if (account.stripeSubscriptionId && subscriptionId !== account.stripeSubscriptionId && LIVE_STATUSES.has(account.subscriptionStatus ?? '')) return;
+      // The plan is what the live subscription bills for; the session metadata only when there is none.
+      const plan = (current ? planOfPrice((current.items?.data?.[0] as any)?.price?.id) : null) ?? obj.metadata?.plan;
+      if (!isPaidPlan(plan)) return;
       const paid = event.type !== 'checkout.session.async_payment_failed' && (obj.payment_status === 'paid' || obj.payment_status === 'no_payment_required');
       if (paid) {
         repo.setPlan(account.id, plan, current?.status ?? 'active', customerId);

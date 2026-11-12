@@ -208,5 +208,22 @@ describe('billing', () => {
     expect((await webhook(event)).status).toBe(200);
     expect(deps.repo.accountById(account.id)?.plan).toBe('free');
   });
+
+  it('a paid checkout takes the plan from the live subscription, not the session metadata', async () => {
+    const { webhook, deps, account } = setup();
+    liveSub('sub_m', 'cus_m', 'price_std', 'active');
+    await webhook({ id: 'evt_m', type: 'checkout.session.completed', data: { object: { object: 'checkout.session', client_reference_id: String(account.id), customer: 'cus_m', payment_status: 'paid', subscription: 'sub_m', metadata: { plan: 'pro' } } } });
+    expect(deps.repo.accountById(account.id)).toMatchObject({ plan: 'standard', subscriptionStatus: 'active' });
+  });
+
+  it('a checkout for another subscription is ignored while the account follows a live one', async () => {
+    const { webhook, deps, account } = setup();
+    deps.repo.setPlan(account.id, 'standard', 'active', 'cus_9');
+    deps.repo.setSubscription(account.id, 'sub_main', null);
+    liveSub('sub_main', 'cus_9', 'price_std', 'active');
+    liveSub('sub_second', 'cus_9', 'price_pro', 'active');
+    await webhook({ id: 'evt_s2', type: 'checkout.session.completed', data: { object: { object: 'checkout.session', client_reference_id: String(account.id), customer: 'cus_9', payment_status: 'paid', subscription: 'sub_second', metadata: { plan: 'pro' } } } });
+    expect(deps.repo.accountById(account.id)).toMatchObject({ plan: 'standard', stripeSubscriptionId: 'sub_main' });
+  });
 });
 

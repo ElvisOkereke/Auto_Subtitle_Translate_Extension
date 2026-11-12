@@ -22,7 +22,17 @@ gcloud artifacts repositories describe ast --location "$REGION" >/dev/null 2>&1 
   gcloud artifacts repositories create ast --repository-format docker --location "$REGION"
 gcloud builds submit . --config server/deploy/cloudbuild.yaml --substitutions "_IMAGE=${IMAGE}"
 
-# 2. Static IP, persistent disk, firewall (first run only).
+# 2. A dedicated service account with only what the VM needs: read the ast-*
+#    secrets and pull the image (not the broad default compute account).
+SA="ast-proxy@${PROJECT}.iam.gserviceaccount.com"
+gcloud iam service-accounts describe "$SA" >/dev/null 2>&1 ||
+  gcloud iam service-accounts create ast-proxy --display-name "ast-proxy VM"
+for secret in ast-anthropic-key ast-deepl-key ast-stripe-secret ast-stripe-webhook ast-stripe-price-standard ast-stripe-price-pro ast-resend-key ast-mail-from ast-admin-token; do
+  gcloud secrets add-iam-policy-binding "$secret" --member "serviceAccount:${SA}" --role roles/secretmanager.secretAccessor >/dev/null
+done
+gcloud artifacts repositories add-iam-policy-binding ast --location "$REGION" --member "serviceAccount:${SA}" --role roles/artifactregistry.reader >/dev/null
+
+# 3. Static IP, persistent disk, firewall (first run only).
 gcloud compute addresses describe "$VM" --region "$REGION" >/dev/null 2>&1 ||
   gcloud compute addresses create "$VM" --region "$REGION"
 IP=$(gcloud compute addresses describe "$VM" --region "$REGION" --format 'value(address)')
@@ -31,7 +41,7 @@ gcloud compute disks describe "$DISK" --zone "$ZONE" >/dev/null 2>&1 ||
 gcloud compute firewall-rules describe ast-proxy-web >/dev/null 2>&1 ||
   gcloud compute firewall-rules create ast-proxy-web --allow tcp:80,tcp:443 --target-tags ast-proxy
 
-# 3. The VM: Debian + Docker; the startup script mounts the disk, writes the env
+# 4. The VM: Debian + Docker; the startup script mounts the disk, writes the env
 #    file from Secret Manager and (re)starts the stack with the current image.
 METADATA="image=${IMAGE},domain=${DOMAIN}"
 if gcloud compute instances describe "$VM" --zone "$ZONE" >/dev/null 2>&1; then
@@ -43,7 +53,7 @@ else
     --image-family debian-12 --image-project debian-cloud \
     --address "$IP" --tags ast-proxy \
     --disk "name=${DISK},device-name=data,mode=rw,auto-delete=no" \
-    --scopes cloud-platform \
+    --service-account "$SA" --scopes cloud-platform \
     --metadata "$METADATA" \
     --metadata-from-file startup-script=server/deploy/startup.sh,compose=server/deploy/docker-compose.yml,caddyfile=server/deploy/Caddyfile
 fi
