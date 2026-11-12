@@ -10,7 +10,7 @@ automated runs in a real browser (details: [performance.md](performance.md)).
   Claude replaces it with a translation that knows the video (title, channel,
   description) and keeps names consistent with a glossary it learns as it goes.
 - League of Legends test: translation quality judged **0.93 vs 0.50 for DeepL**;
-  champion names and slang right in **11/11** lines (DeepL 9/11); every name
+  champion names and slang right in **10–11 of 11** lines across runs (DeepL 9/11); every name
   spelled the same way throughout.
 - With read-ahead, **93% of lines already had Claude's version before they
   appeared** — on a stream that starts playing at 0:00. First line: 2.9 s
