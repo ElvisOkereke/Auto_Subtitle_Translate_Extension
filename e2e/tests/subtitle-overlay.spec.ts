@@ -61,3 +61,37 @@ test('overlay covers the drawn box and follows resize and fullscreen', async ({ 
   await astTest(page, 'overlay.clear');
   expect(await page.locator('.ast-subtitle-overlay').isVisible()).toBe(false);
 });
+
+test('saved subtitle timelines live in the extension, not the website', async ({ context, fixtureURL }) => {
+  const page = await context.newPage();
+  await page.goto(`${fixtureURL}/video-subs.html?v=_zIrbXw-SVs&stretch=s1`);
+  await astTest(page, 'timeline.save', { videoId: 'vidX', lines: [{ start: 1, end: 2, source: '하나', translation: 'One', quality: 'fast' }] });
+  expect(await astTest(page, 'timeline.load', { videoId: 'vidX' })).toEqual([{ start: 1, end: 2, source: '하나', translation: 'One', quality: 'fast' }]);
+  // The page's own origin must not hold (or be able to read) the subtitle database.
+  const pageDbs = await page.evaluate(async () => (await indexedDB.databases()).map(d => d.name));
+  expect(pageDbs).not.toContain('ast-subtitles');
+  await astTest(page, 'timeline.clear', {});
+  expect(await astTest(page, 'timeline.load', { videoId: 'vidX' })).toEqual([]);
+});
+
+test('a website embedding the OCR frame cannot use it', async ({ context, fixtureURL, extensionId }) => {
+  const page = await context.newPage();
+  await page.goto(`${fixtureURL}/video-subs.html?v=_zIrbXw-SVs&stretch=s1`);
+  await astTest(page, 'timeline.save', { videoId: 'secretVid', lines: [{ start: 1, end: 2, source: '비밀', translation: 'secret', quality: 'fast' }] });
+  // Hostile page script: embed the web-accessible frame and try to talk to it directly.
+  const reply = await page.evaluate(async id => {
+    const f = document.createElement('iframe');
+    f.src = `chrome-extension://${id}/ocr-frame.html`;
+    document.body.appendChild(f);
+    await new Promise(r => f.addEventListener('load', r, { once: true }));
+    const ch = new MessageChannel();
+    const got = new Promise(resolve => {
+      ch.port1.onmessage = e => resolve(e.data);
+      setTimeout(() => resolve('no reply'), 1500);
+    });
+    f.contentWindow!.postMessage({ type: 'ast-ocr-port', nonce: 'guess' }, '*', [ch.port2]);
+    ch.port1.postMessage({ type: 'timeline.load', id: 1, videoId: 'secretVid' });
+    return got;
+  }, extensionId);
+  expect(reply).toBe('no reply');
+});

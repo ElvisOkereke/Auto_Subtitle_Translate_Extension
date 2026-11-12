@@ -60,3 +60,17 @@ test('recognizes the Korean subtitles of stretch s1', async ({ context, fixtureU
   // Latency target applies to real Chrome with WebGPU (Playwright's Chromium lacks the D3D12 compiler).
   if (browserKind() === 'chrome') expect(report.medianMs).toBeLessThanOrEqual(250);
 });
+
+test('concurrent OCR requests all succeed and keep the GPU path', async ({ context, fixtureURL }) => {
+  const page = await context.newPage();
+  await page.goto(`${fixtureURL}/video-subs.html?v=_zIrbXw-SVs&stretch=s1`);
+  await astTest(page, 'ocr.preload', { lang: 'ko' });
+  const subs = crops.filter(c => c.stretch === 's1' && c.ko).slice(0, 6);
+  // Live and read-ahead reads can overlap; the worker must serialize them itself.
+  const results = await Promise.all(
+    subs.map(c => astTest<{ text: string; device: string }>(page, 'ocr', { bitmapUrl: `${fixtureURL}/crops/${c.file}`, lang: 'ko' }))
+  );
+  results.forEach((r, i) => expect(charErrorRate(subs[i].ko!, r.text).errors).toBeLessThanOrEqual(3));
+  const expectedDevice = browserKind() === 'chrome' ? 'webgpu' : 'wasm';
+  expect(results.map(r => r.device)).toEqual(subs.map(() => expectedDevice));
+});

@@ -15,4 +15,6 @@ export interface OcrResult {
   confidence: number;
   ms: number;
   tier: 'fast' | 'accurate';
+  /** Execution provider that produced the result ('webgpu' | 'wasm'). */
+  device?: string;
 }

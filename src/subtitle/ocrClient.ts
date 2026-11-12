@@ -2,6 +2,7 @@
 // iframe that hosts the OCR worker and talks to it over a MessageChannel;
 // ImageBitmaps are transferred, not copied.
 import type { OcrResult, SubtitleLanguage } from './types';
+import { Timeline, TimelineLine, TimelineStorage } from './timeline';
 
 const REQUEST_TIMEOUT_MS = 30_000;
 
@@ -33,11 +34,16 @@ export class OcrClient {
       iframe.addEventListener('error', () => reject(new Error('OCR frame failed to load')), { once: true });
       (document.body ?? document.documentElement).appendChild(iframe);
     });
+    // Prove to the frame that this channel comes from the extension's content
+    // script (web pages can't send runtime messages to us), then hand over the port.
+    const nonce = crypto.randomUUID();
+    const ack = await chrome.runtime.sendMessage({ type: 'AST_OCR_NONCE', nonce });
+    if (!ack?.ok) throw new Error('OCR frame did not accept the handshake');
     const channel = new MessageChannel();
     const attached = new Promise<void>(resolve => {
       channel.port1.onmessage = e => e.data?.type === 'attached' && resolve();
     });
-    iframe.contentWindow!.postMessage({ type: 'ast-ocr-port' }, new URL(src).origin, [channel.port2]);
+    iframe.contentWindow!.postMessage({ type: 'ast-ocr-port', nonce }, new URL(src).origin, [channel.port2]);
     await attached;
     return new OcrClient(iframe, channel.port1);
   }
@@ -55,12 +61,32 @@ export class OcrClient {
   }
 
   async recognize(crop: ImageBitmap, lang: SubtitleLanguage, tier: 'fast' | 'accurate' = 'fast'): Promise<OcrResult> {
-    const r = await this.request<{ text: string; confidence: number; ms: number }>({ type: 'recognize', bitmap: crop, lang }, [crop]);
-    return { text: r.text, confidence: r.confidence, ms: r.ms, tier };
+    const r = await this.request<{ text: string; confidence: number; ms: number; device: string }>({ type: 'recognize', bitmap: crop, lang }, [crop]);
+    return { text: r.text, confidence: r.confidence, ms: r.ms, tier, device: r.device };
   }
 
   async preload(lang: SubtitleLanguage): Promise<void> {
     await this.request({ type: 'preload', lang });
+  }
+
+  async loadTimelineLines(videoId: string): Promise<TimelineLine[]> {
+    return (await this.request<{ result: TimelineLine[] }>({ type: 'timeline.load', videoId })).result;
+  }
+
+  async saveTimelineLines(videoId: string, lines: TimelineLine[]): Promise<void> {
+    await this.request({ type: 'timeline.save', videoId, lines });
+  }
+
+  async clearTimelines(): Promise<void> {
+    await this.request({ type: 'timeline.clear' });
+  }
+
+  /** Timeline persistence in the extension origin (see ocrFrame.ts). */
+  timelineStorage(): TimelineStorage {
+    return {
+      load: async videoId => new Timeline(await this.loadTimelineLines(videoId)),
+      save: (videoId, timeline) => this.saveTimelineLines(videoId, timeline.toJSON()),
+    };
   }
 
   detach(): void {

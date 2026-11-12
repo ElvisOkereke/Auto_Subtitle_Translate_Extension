@@ -47,10 +47,17 @@ async function fetchModel(url: string): Promise<ArrayBuffer> {
   return response.arrayBuffer();
 }
 
+/** Failure to create a session on the chosen device: the host may retry on wasm. */
+class SessionCreateError extends Error {}
+
 async function createSession(url: string): Promise<ort.InferenceSession> {
   const model = new Uint8Array(await fetchModel(url));
-  // logSeverityLevel 3 = errors only (the exported models trigger harmless graph-cleanup warnings).
-  return ort.InferenceSession.create(model, { executionProviders: [device], graphOptimizationLevel: 'all', logSeverityLevel: 3 });
+  try {
+    // logSeverityLevel 3 = errors only (the exported models trigger harmless graph-cleanup warnings).
+    return await ort.InferenceSession.create(model, { executionProviders: [device], graphOptimizationLevel: 'all', logSeverityLevel: 3 });
+  } catch (error) {
+    throw new SessionCreateError(error instanceof Error ? error.message : String(error));
+  }
 }
 
 function getDet(lang: SubtitleLanguage) {
@@ -144,8 +151,15 @@ function init(forceDevice?: 'wasm'): Promise<void> {
   return ready;
 }
 
-ctx.onmessage = async (event: MessageEvent) => {
-  const msg = event.data;
+// ORT sessions can't run concurrently ("Session already started"), and live and
+// read-ahead reads can overlap: run every request strictly one after another.
+let chain: Promise<void> = Promise.resolve();
+
+ctx.onmessage = (event: MessageEvent) => {
+  chain = chain.then(() => handle(event.data));
+};
+
+async function handle(msg: any): Promise<void> {
   try {
     if (msg.type === 'init') {
       await init(msg.device);
@@ -163,7 +177,9 @@ ctx.onmessage = async (event: MessageEvent) => {
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    // A WebGPU session failure poisons this worker's ORT state; the host restarts us on wasm.
-    ctx.postMessage({ type: 'error', id: msg.id, message, loadFailedOn: device === 'webgpu' ? 'webgpu' : undefined });
+    // Only a failure to create a WebGPU session means the GPU path is unusable
+    // (it also poisons this worker's ORT state); the host then restarts us on wasm.
+    const gpuUnusable = error instanceof SessionCreateError && device === 'webgpu';
+    ctx.postMessage({ type: 'error', id: msg.id, message, loadFailedOn: gpuUnusable ? 'webgpu' : undefined });
   }
-};
+}

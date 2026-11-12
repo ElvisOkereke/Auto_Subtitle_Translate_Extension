@@ -84,8 +84,17 @@ function request<T>(req: IDBRequest<T>): Promise<T> {
   });
 }
 
-/** IndexedDB persistence, keyed by video id. */
-export class TimelineStore {
+/** Where SubtitleMode persists timelines (the content script talks to the extension-origin store). */
+export interface TimelineStorage {
+  load(videoId: string): Promise<Timeline>;
+  save(videoId: string, timeline: Timeline): Promise<void>;
+}
+
+/**
+ * IndexedDB persistence, keyed by video id. Runs in the extension's origin
+ * (the hidden OCR iframe) so the website can't read or alter saved subtitles.
+ */
+export class TimelineStore implements TimelineStorage {
   private constructor(private db: IDBDatabase) {}
 
   static async open(): Promise<TimelineStore> {
@@ -103,5 +112,10 @@ export class TimelineStore {
   async save(videoId: string, timeline: Timeline): Promise<void> {
     const tx = this.db.transaction(STORE, 'readwrite');
     await request(tx.objectStore(STORE).put(timeline.toJSON(), videoId));
+  }
+
+  async clear(): Promise<void> {
+    const tx = this.db.transaction(STORE, 'readwrite');
+    await request(tx.objectStore(STORE).clear());
   }
 }

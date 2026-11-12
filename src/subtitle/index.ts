@@ -3,7 +3,6 @@ import { OcrClient } from './ocrClient';
 import { installTestBridge } from './testBridge';
 import { SubtitleOverlay } from './overlay';
 import { SubtitleMode, TranslateRequest, TranslateResponse } from './subtitleMode';
-import { TimelineStore } from './timeline';
 import { boxToPage, contentRect, pageToBox, Rect } from './videoGeometry';
 import { videoIdFrom } from './videoId';
 import { MseReadAhead } from './readAhead/readAheadSource';
@@ -18,11 +17,6 @@ export function getOcr(): Promise<OcrClient> {
   return ocr;
 }
 
-let store: Promise<TimelineStore | null> | null = null;
-function getStore(): Promise<TimelineStore | null> {
-  store ??= TimelineStore.open().catch(() => null);
-  return store;
-}
 
 let mode: SubtitleMode | null = null;
 let starting: Promise<unknown> | null = null;
@@ -68,7 +62,7 @@ async function startMode(video: HTMLVideoElement, videoId: string, box: Normaliz
   await client.preload(lang); // first run downloads the OCR models
   const { devSubtitle } = await chrome.storage.local.get('devSubtitle');
   const readAhead = devSubtitle?.readAhead === false ? null : new MseReadAhead(video, box);
-  mode = await SubtitleMode.start({ video, videoId, box, lang, deps: { ocr: client, translate, store: await getStore(), readAhead } });
+  mode = await SubtitleMode.start({ video, videoId, box, lang, deps: { ocr: client, translate, store: client.timelineStorage(), readAhead } });
   enabled = true;
 }
 
@@ -170,6 +164,9 @@ installTestBridge({
   },
   ocr: async ({ bitmap, lang }) => (await getOcr()).recognize(bitmap, lang),
   'ocr.preload': async ({ lang }) => (await getOcr()).preload(lang),
+  'timeline.save': async ({ videoId, lines }) => (await getOcr()).saveTimelineLines(videoId, lines),
+  'timeline.load': async ({ videoId }) => (await getOcr()).loadTimelineLines(videoId),
+  'timeline.clear': async () => (await getOcr()).clearTimelines(),
   'mode.timeline': async () =>
     mode
       ? mode.timeline

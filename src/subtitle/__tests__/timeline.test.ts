@@ -62,4 +62,13 @@ describe('TimelineStore', () => {
     expect(loaded.at(1.5)).toEqual({ start: 1, end: 2, source: '하나', translation: 'One', quality: 'better' });
     expect((await store.load('other')).at(1.5)).toBeNull();
   });
+
+  it('clear() removes every saved timeline', async () => {
+    const store = await TimelineStore.open();
+    const tl = new Timeline();
+    tl.upsert({ start: 3, end: 4, source: '셋' });
+    await store.save('vid2', tl);
+    await store.clear();
+    expect((await store.load('vid2')).size).toBe(0);
+  });
 });

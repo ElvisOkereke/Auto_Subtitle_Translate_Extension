@@ -6,7 +6,7 @@
 import { FrameSampler, adShowing } from './frameSampler';
 import { LineTracker } from './lineTracker';
 import { SubtitleOverlay } from './overlay';
-import { Timeline, TimelineLine, TimelineStore } from './timeline';
+import { Timeline, TimelineLine, TimelineStorage } from './timeline';
 import { isSameLine } from './textSimilarity';
 import type { NormalizedBox, OcrResult, SubtitleLanguage } from './types';
 import type { ReadAheadSource } from './readAhead/readAheadSource';
@@ -29,7 +29,7 @@ export interface TranslateResponse {
 export interface SubtitleModeDeps {
   ocr: { recognize(crop: ImageBitmap, lang: SubtitleLanguage, tier?: 'fast' | 'accurate'): Promise<OcrResult> };
   translate(req: TranslateRequest): Promise<TranslateResponse>;
-  store: TimelineStore | null;
+  store: TimelineStorage | null;
   /** Future frames decoded from the player's buffer (null = live path only). */
   readAhead?: ReadAheadSource | null;
 }
