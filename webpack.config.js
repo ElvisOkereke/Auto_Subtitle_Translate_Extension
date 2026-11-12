@@ -46,7 +46,8 @@ module.exports = (env, argv) => {
       realTimeTranslate: './src/realTimeTranslate.ts',
       offscreen: './src/offscreen.ts',
       subtitle: './src/subtitle/index.ts',
-      ocrFrame: './src/ocr/ocrFrame.ts'
+      ocrFrame: './src/ocr/ocrFrame.ts',
+      mseTap: './src/subtitle/readAhead/mseTap.main.ts'
     },
     plugins: [
       new CopyWebpackPlugin({

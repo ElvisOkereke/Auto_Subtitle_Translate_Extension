@@ -1,6 +1,7 @@
 import { signatureDistance } from './frameSignature';
 
-export type LineEvent = { type: 'changed'; at: number };
+/** `at`: time of the frame that confirmed the change; `since`: first frame showing the new image. */
+export type LineEvent = { type: 'changed'; at: number; since: number };
 
 /**
  * Decides when the subtitle box shows a new image worth OCR-ing: the frame
@@ -14,6 +15,7 @@ export class LineTracker {
   private accepted: Uint8Array | null = null;
   private candidate: Uint8Array | null = null;
   private candidateFrames = 0;
+  private candidateSince = 0;
 
   constructor(opts: { changeThreshold?: number; stableFrames?: number } = {}) {
     this.changeThreshold = opts.changeThreshold ?? 0.06;
@@ -31,12 +33,13 @@ export class LineTracker {
     } else {
       this.candidate = sig;
       this.candidateFrames = 1;
+      this.candidateSince = videoTime;
     }
     if (this.candidateFrames >= this.stableFrames) {
       this.accepted = this.candidate;
       this.candidate = null;
       this.candidateFrames = 0;
-      return { type: 'changed', at: videoTime };
+      return { type: 'changed', at: videoTime, since: this.candidateSince };
     }
     return null;
   }

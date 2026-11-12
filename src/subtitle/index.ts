@@ -6,6 +6,7 @@ import { SubtitleMode, TranslateRequest, TranslateResponse } from './subtitleMod
 import { TimelineStore } from './timeline';
 import { boxToPage, contentRect, pageToBox, Rect } from './videoGeometry';
 import { videoIdFrom } from './videoId';
+import { MseReadAhead } from './readAhead/readAheadSource';
 import type { NormalizedBox, SubtitleLanguage } from './types';
 
 const MIN_BOX_WIDTH = 24;
@@ -65,7 +66,9 @@ async function startMode(video: HTMLVideoElement, videoId: string, box: Normaliz
   const lang = await subtitleLanguage();
   const client = await getOcr();
   await client.preload(lang); // first run downloads the OCR models
-  mode = await SubtitleMode.start({ video, videoId, box, lang, deps: { ocr: client, translate, store: await getStore() } });
+  const { devSubtitle } = await chrome.storage.local.get('devSubtitle');
+  const readAhead = devSubtitle?.readAhead === false ? null : new MseReadAhead(video, box);
+  mode = await SubtitleMode.start({ video, videoId, box, lang, deps: { ocr: client, translate, store: await getStore(), readAhead } });
   enabled = true;
 }
 
@@ -167,10 +170,18 @@ installTestBridge({
   },
   ocr: async ({ bitmap, lang }) => (await getOcr()).recognize(bitmap, lang),
   'ocr.preload': async ({ lang }) => (await getOcr()).preload(lang),
+  'mode.timeline': async () =>
+    mode
+      ? mode.timeline
+          .toJSON()
+          .map(l => ({ start: l.start, end: l.end, source: l.source, translation: l.translation, translatedAt: mode!.translatedAt.get(l.start) ?? null }))
+      : [],
   'mode.stats': async () => ({
     state: mode?.state ?? 'stopped',
     ocrCalls: mode?.ocrCalls ?? 0,
     translateCalls: mode?.translateCalls ?? 0,
+    raOcrCalls: mode?.raOcrCalls ?? 0,
+    readAheadLead: mode?.readAheadLead ?? 0,
     timelineSize: mode?.timeline.size ?? 0,
     videoId: currentVideoId(),
   }),

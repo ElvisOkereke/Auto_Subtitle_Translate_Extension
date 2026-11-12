@@ -6,9 +6,10 @@ Outputs (gitignored) in e2e/.cache/videos/:
   _zIrbXw-SVs.webm      full video, VP9 <=1080p + Opus
   _zIrbXw-SVs.s1.webm   0-180 s
   _zIrbXw-SVs.s2.webm   540-720 s
-  _zIrbXw-SVs.<s>.video.webm / .audio.webm   the same stretch split into one
+  _zIrbXw-SVs.<s>.video.mp4 / .audio.webm   the same stretch split into one
       track per file - the fixture page feeds them to two SourceBuffers like
-      YouTube does (Chrome's MSE demuxer rejects this muxed WebM).
+      YouTube does: video as fragmented MP4 (YouTube's container; the VP9
+      frames are stream-copied so OCR ground truth stays exact), audio WebM.
 Idempotent: existing files are kept.
 """
 import os
@@ -56,10 +57,13 @@ def cut(full_path: str, stretch: str, start: int, duration: int) -> None:
 
 def split_tracks(stretch: str) -> None:
     src = os.path.join(VIDEOS, f'{VIDEO_ID}.{stretch}.webm')
-    for kind, stream in (('video', '0:v'), ('audio', '0:a')):
-        out = os.path.join(VIDEOS, f'{VIDEO_ID}.{stretch}.{kind}.webm')
+    for kind, stream, ext, extra in (
+        ('video', '0:v', 'mp4', ['-movflags', 'frag_keyframe+empty_moov+default_base_moof']),
+        ('audio', '0:a', 'webm', []),
+    ):
+        out = os.path.join(VIDEOS, f'{VIDEO_ID}.{stretch}.{kind}.{ext}')
         if not os.path.exists(out):
-            subprocess.run([ffmpeg_exe(), '-loglevel', 'error', '-y', '-i', src, '-map', stream, '-c', 'copy', out], check=True)
+            subprocess.run([ffmpeg_exe(), '-loglevel', 'error', '-y', '-i', src, '-map', stream, '-c', 'copy', *extra, out], check=True)
 
 
 def main() -> None:

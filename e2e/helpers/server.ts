@@ -8,6 +8,7 @@ const TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
   '.wav': 'audio/wav',
   '.webm': 'video/webm',
+  '.mp4': 'video/mp4',
   '.json': 'application/json',
   '.png': 'image/png',
   '.js': 'text/javascript',

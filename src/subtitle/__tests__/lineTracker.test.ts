@@ -24,10 +24,10 @@ describe('LineTracker', () => {
     expect(run([A, A, noise, A, A])).toEqual([1]);
   });
 
-  it('reports the video time of the frame that confirmed the change', () => {
+  it('reports when the new image was confirmed and when it first appeared', () => {
     const tracker = new LineTracker();
     tracker.push(A, 10.0);
-    expect(tracker.push(A, 10.1)).toEqual({ type: 'changed', at: 10.1 });
+    expect(tracker.push(A, 10.1)).toEqual({ type: 'changed', at: 10.1, since: 10.0 });
   });
 
   it('re-emits the current image after reset (e.g. after a seek)', () => {
@@ -36,6 +36,6 @@ describe('LineTracker', () => {
     tracker.push(A, 1);
     tracker.reset();
     expect(tracker.push(A, 2)).toBeNull();
-    expect(tracker.push(A, 3)).toEqual({ type: 'changed', at: 3 });
+    expect(tracker.push(A, 3)).toEqual({ type: 'changed', at: 3, since: 2 });
   });
 });

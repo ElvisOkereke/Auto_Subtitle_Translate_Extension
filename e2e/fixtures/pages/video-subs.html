@@ -32,10 +32,21 @@
   const SLICE = 1 << 20;
   let loadToken = 0;
 
+  const AHEAD_SECONDS = 30; // like YouTube: keep ~30 s buffered ahead of playback
+
+  // Per SourceBuffer: one track racing ahead must not stall the other.
+  function bufferedAhead(sb) {
+    const b = sb.buffered;
+    for (let i = 0; i < b.length; i++) if (b.start(i) <= video.currentTime + 0.5 && b.end(i) >= video.currentTime) return b.end(i) - video.currentTime;
+    return 0;
+  }
+
   async function feed(ms, url, mime, token) {
     const sb = ms.addSourceBuffer(mime);
+    window.__fixture.sourceBuffers.push({ mime, sb });
     const size = Number((await fetch(url, { method: 'HEAD' })).headers.get('content-length'));
     for (let start = 0; start < size; start += SLICE) {
+      while (token === loadToken && bufferedAhead(sb) > AHEAD_SECONDS) await new Promise(r => setTimeout(r, 250));
       if (token !== loadToken) return;
       const end = Math.min(start + SLICE, size) - 1;
       const buf = await (await fetch(url, { headers: { Range: `bytes=${start}-${end}` } })).arrayBuffer();
@@ -49,11 +60,12 @@
   async function load(stretch) {
     const token = ++loadToken;
     const base = `/videos/_zIrbXw-SVs.${stretch}`;
+    window.__fixture.sourceBuffers = [];
     const ms = new MediaSource();
     video.src = URL.createObjectURL(ms);
     await new Promise(r => ms.addEventListener('sourceopen', r, { once: true }));
     await Promise.all([
-      feed(ms, `${base}.video.webm`, 'video/webm; codecs="vp9"', token),
+      feed(ms, `${base}.video.mp4`, 'video/mp4; codecs="vp09.00.41.08"', token),
       feed(ms, `${base}.audio.webm`, 'audio/webm; codecs="opus"', token),
     ]);
     if (token === loadToken && ms.readyState === 'open') ms.endOfStream();
@@ -61,6 +73,7 @@
 
   window.__fixture = {
     video,
+    sourceBuffers: [],
     navigate(v, stretch) {
       history.pushState({}, '', `?v=${encodeURIComponent(v)}&stretch=${encodeURIComponent(stretch)}`);
       load(stretch);

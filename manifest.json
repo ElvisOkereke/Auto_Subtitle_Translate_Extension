@@ -29,6 +29,12 @@
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
+      "js": ["mseTap.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": ["<all_urls>"],
       "js": ["content.js", "realTimeTranslate.js", "subtitle.js"],
       "css": ["subtitle-overlay.css"],
       "run_at": "document_end"
