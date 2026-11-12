@@ -225,7 +225,7 @@ export class TranslationService {
           return;
         }
         await this.deps.glossary.setVideoMeta(videoKey, { topic: topic.topic, topicKey: topic.topicKey });
-        await this.deps.glossary.learn(videoKey, topic.glossary);
+        await this.deps.glossary.learn(videoKey, topic.glossary, req.video.channel);
         if (topic.usage) await this.deps.usage.record(topic.usage, 0);
       })();
       this.topics.set(videoKey, pending);
@@ -240,7 +240,7 @@ export class TranslationService {
       () => ctx.claude.translateBatch({ sourceLang: ctx.sourceLang, targetLang: ctx.targetLang, lines, video: ctx.video, topic: meta?.topic || null, glossary }),
       priority
     );
-    await this.deps.glossary.learn(ctx.videoKey, result.glossaryUpdates);
+    await this.deps.glossary.learn(ctx.videoKey, result.glossaryUpdates, ctx.video.channel);
     if (result.usage) await this.deps.usage.record(result.usage, result.translations.length);
     return new Map(result.translations.map(t => [t.id, t.text]));
   }

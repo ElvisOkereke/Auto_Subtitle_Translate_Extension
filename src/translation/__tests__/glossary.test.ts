@@ -15,19 +15,40 @@ function memoryArea(): StorageArea & { data: Record<string, any> } {
 }
 
 describe('GlossaryStore', () => {
-  it('a learned term reaches the topic only once a second video agrees (one page cannot poison a topic)', async () => {
+  it('a learned term reaches the topic only once a second channel agrees (one uploader cannot poison a topic)', async () => {
     const store = new GlossaryStore(memoryArea());
     await store.setVideoMeta('vidA', { topic: 'LoL stream', topicKey: 'league-of-legends' });
-    await store.learn('vidA', [{ source: '뽀삐', target: 'Poppy' }, { source: '갱', target: 'buy now' }]);
+    await store.learn('vidA', [{ source: '뽀삐', target: 'Poppy' }, { source: '갱', target: 'buy now' }], 'chanA');
     expect(await store.effective('vidA')).toEqual([{ source: '갱', target: 'buy now' }, { source: '뽀삐', target: 'Poppy' }]); // own video: kept
     await store.setVideoMeta('vidB', { topic: 'Another LoL stream', topicKey: 'league-of-legends' });
     expect(await store.effective('vidB')).toEqual([]); // not shared yet
-    await store.learn('vidB', [{ source: '뽀삐', target: 'Poppy' }]); // a second video agrees
+    await store.learn('vidB', [{ source: '뽀삐', target: 'Poppy' }], 'chanB'); // a second channel agrees
     await store.setVideoMeta('vidC', { topic: 'LoL', topicKey: 'league-of-legends' });
     expect(await store.effective('vidC')).toEqual([{ source: '뽀삐', target: 'Poppy' }]);
-    await store.learn('vidA', [{ source: '뽀삐', target: 'Poppy' }]); // the same video repeating itself doesn't count twice
+    await store.learn('vidA', [{ source: '뽀삐', target: 'Poppy' }], 'chanA'); // repeating doesn't change anything
     expect((await store.effective('vidC')).map(e => e.source)).toEqual(['뽀삐']);
     expect(await store.effective('vidD')).toEqual([]); // no topic yet
+  });
+
+  it('two videos from the same channel, or videos with no known channel, are not enough', async () => {
+    const store = new GlossaryStore(memoryArea());
+    for (const [vid, chan] of [['v1', 'spam'], ['v2', 'spam'], ['v3', ''], ['v4', '']]) {
+      await store.setVideoMeta(vid, { topic: 'LoL', topicKey: 'lol' });
+      await store.learn(vid, [{ source: '갱', target: 'buy now' }], chan);
+    }
+    await store.setVideoMeta('fresh', { topic: 'LoL', topicKey: 'lol' });
+    expect(await store.effective('fresh')).toEqual([]);
+  });
+
+  it('a user correction clears a pending candidate so it cannot be promoted later', async () => {
+    const store = new GlossaryStore(memoryArea());
+    await store.setVideoMeta('v1', { topic: 'LoL', topicKey: 'lol' });
+    await store.learn('v1', [{ source: '갱', target: 'buy now' }], 'chanA');
+    await store.edit('v1', '갱', null); // user deletes it
+    await store.setVideoMeta('v2', { topic: 'LoL', topicKey: 'lol' });
+    await store.learn('v2', [{ source: '갱', target: 'buy now' }], 'chanB');
+    await store.setVideoMeta('fresh', { topic: 'LoL', topicKey: 'lol' });
+    expect(await store.effective('fresh')).toEqual([]);
   });
 
   it('a user correction applies to the topic immediately', async () => {

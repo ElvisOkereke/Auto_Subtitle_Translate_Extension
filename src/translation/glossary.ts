@@ -21,8 +21,8 @@ interface VideoMeta {
 
 const videoKeyOf = (videoKey: string) => `glossary:video:${videoKey}`;
 const metaKeyOf = (videoKey: string) => `glossary:meta:${videoKey}`;
-/** Videos needed to agree on a model-learned term before it is shared with the whole topic. */
-export const TOPIC_PROMOTION_VIDEOS = 2;
+/** Distinct channels needed to agree on a model-learned term before it is shared with the whole topic. */
+export const TOPIC_PROMOTION_CHANNELS = 2;
 const MAX_CANDIDATES = 500;
 
 /**
@@ -86,7 +86,7 @@ export class GlossaryStore {
 
   private async scopes(
     videoKey: string
-  ): Promise<{ meta: VideoMeta | null; scope: string | null; video: GlossaryEntry[]; topic: GlossaryEntry[]; candidates: Record<string, { target: string; videos: string[] }> }> {
+  ): Promise<{ meta: VideoMeta | null; scope: string | null; video: GlossaryEntry[]; topic: GlossaryEntry[]; candidates: Record<string, { target: string; channels: string[] }> }> {
     const meta = await this.getVideoMeta(videoKey);
     const scope = meta?.topicKey ? topicScope(videoKey, meta.topicKey) : null;
     const keys = [videoKeyOf(videoKey), ...(scope ? [topicKeyOf(scope), candidatesKeyOf(scope)] : [])];
@@ -109,22 +109,25 @@ export class GlossaryStore {
 
   /**
    * Terms fixed by the translator: kept for this video at once; shared with the
-   * topic only when TOPIC_PROMOTION_VIDEOS different videos agree on the same
-   * translation (a single page's injected text can't rewrite a whole topic).
+   * topic only when TOPIC_PROMOTION_CHANNELS different channels agree on the
+   * same translation, so one uploader's injected text can't rewrite a whole
+   * topic. Videos with no known channel never promote.
    */
-  async learn(videoKey: string, entries: GlossaryEntry[]): Promise<void> {
+  async learn(videoKey: string, entries: GlossaryEntry[], channel = ''): Promise<void> {
     const good = entries.filter(valid).map(clean);
     if (!good.length) return;
     const { scope, video, topic, candidates } = await this.scopes(videoKey);
     const items: Record<string, unknown> = { [videoKeyOf(videoKey)]: merge(video, good) };
     if (scope) {
       const promoted: GlossaryEntry[] = [];
+      const who = channel.trim().toLowerCase();
       for (const e of good) {
         const c = candidates[e.source];
-        const videos = c && c.target === e.target ? [...new Set([...c.videos, videoKey])] : [videoKey];
+        const known = c && c.target === e.target && Array.isArray(c.channels) ? c.channels : [];
+        const channels = who ? [...new Set([...known, who])] : known;
         delete candidates[e.source]; // re-insert: newest last
-        candidates[e.source] = { target: e.target, videos: videos.slice(-8) };
-        if (videos.length >= TOPIC_PROMOTION_VIDEOS) promoted.push(e);
+        candidates[e.source] = { target: e.target, channels: channels.slice(-8) };
+        if (channels.length >= TOPIC_PROMOTION_CHANNELS) promoted.push(e);
       }
       const sources = Object.keys(candidates);
       for (const old of sources.slice(0, Math.max(0, sources.length - MAX_CANDIDATES))) delete candidates[old];
@@ -136,7 +139,7 @@ export class GlossaryStore {
 
   /** A user correction (target) or deletion (null) in both scopes; returns the new glossary version. */
   async edit(videoKey: string, source: string, target: string | null): Promise<number> {
-    const { meta, scope, video, topic } = await this.scopes(videoKey);
+    const { meta, scope, video, topic, candidates } = await this.scopes(videoKey);
     const apply = (list: GlossaryEntry[]) =>
       target === null ? list.filter(e => e.source !== source) : merge(list, [{ source, target }]);
     const version = (meta?.version ?? 0) + 1;
@@ -144,7 +147,11 @@ export class GlossaryStore {
       [videoKeyOf(videoKey)]: apply(video),
       [metaKeyOf(videoKey)]: { topic: meta?.topic ?? '', topicKey: meta?.topicKey ?? '', version },
     };
-    if (scope) items[topicKeyOf(scope)] = apply(topic); // the user's own correction: trusted, shared at once
+    if (scope) {
+      items[topicKeyOf(scope)] = apply(topic); // the user's own correction: trusted, shared at once
+      delete candidates[source]; // and a pending model proposal for it is dropped
+      items[candidatesKeyOf(scope)] = candidates;
+    }
     await this.area.set(items);
     return version;
   }
