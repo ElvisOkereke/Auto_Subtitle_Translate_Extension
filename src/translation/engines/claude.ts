@@ -7,7 +7,7 @@ import type { MessageParam, TextBlockParam } from '@anthropic-ai/sdk/resources/m
 import { buildTopicMessages, buildTranslateMessages, parseTopicResponse, parseTranslateResponse } from '../claudePrompt';
 import type { ClaudeModel, TopicResult, TranslateBatchRequest, TranslateBatchResult, TranslationEngine, Usage, VideoContext } from '../types';
 
-export const ANTHROPIC_BASE_URL = 'https://api.anthropic.com';
+export { ANTHROPIC_BASE_URL, validateGatewayUrl } from '../claudeAccess';
 const MAX_TOKENS = 2000;
 
 export interface ClaudeConfig {
@@ -15,24 +15,6 @@ export interface ClaudeConfig {
   baseURL: string;
   auth: { kind: 'x-api-key' | 'bearer'; token: string };
   fetch?: typeof fetch;
-}
-
-/**
- * Gateway base URL check: https on any host, http only on loopback (local
- * gateways), no embedded credentials. Returns the URL without a trailing slash,
- * or null when it isn't acceptable.
- */
-export function validateGatewayUrl(url: string): string | null {
-  let u: URL;
-  try {
-    u = new URL(url.trim());
-  } catch {
-    return null;
-  }
-  if (u.username || u.password) return null;
-  const loopback = u.hostname === '127.0.0.1' || u.hostname === 'localhost';
-  if (u.protocol !== 'https:' && !(u.protocol === 'http:' && loopback)) return null;
-  return `${u.origin}${u.pathname}`.replace(/\/+$/, '');
 }
 
 export class ClaudeEngine implements TranslationEngine {

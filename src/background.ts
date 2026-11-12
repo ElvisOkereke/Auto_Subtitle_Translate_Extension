@@ -1,12 +1,27 @@
 // background.ts - Service Worker: orchestrates the offscreen capture pipeline and translation
 
 import { ExtensionMessage, CaptureResponse, APIError } from './types';
-import { apiService } from './services/apiService';
-import { DEFAULT_SETTINGS, getSettings, migrateSecretsFromSync, saveSettings } from './settings';
-import { PriorityRunner, JobPriority } from './utils/priorityRunner';
+import { apiService, getEndpointOverrides } from './services/apiService';
+import { DEFAULT_SETTINGS, getSecrets, getSettings, migrateSecretsFromSync, saveSettings } from './settings';
+import { JobPriority } from './utils/priorityRunner';
+import { LineTranslateRequest, StorageUsageMeter, TranslationService } from './translation/translationService';
+import { GlossaryStore } from './translation/glossary';
+import { ClaudeEngine } from './translation/engines/claude';
+import { DeepLEngine } from './translation/engines/deepl';
+import { GoogleEngine } from './translation/engines/google';
 
-// At most 4 translation requests in flight; lines on screen now go first.
-const subtitleTranslations = new PriorityRunner(4);
+// Fast (DeepL/Google) and best (Claude with video context + glossary) tiers;
+// at most 4 requests in flight, lines on screen now first.
+const translation = new TranslationService({
+  settings: getSettings,
+  secrets: getSecrets,
+  overrides: getEndpointOverrides,
+  glossary: new GlossaryStore(chrome.storage.local),
+  usage: new StorageUsageMeter(chrome.storage.local),
+  makeClaude: cfg => new ClaudeEngine(cfg),
+  makeFast: (provider, apiKey, endpoint) => (provider === 'deepl' ? new DeepLEngine({ apiKey, endpoint }) : new GoogleEngine({ apiKey, endpoint })),
+});
+const NO_VIDEO = { videoId: null, url: '', title: '', channel: '', description: '' };
 
 const HANDLED_MESSAGE_TYPES = new Set<string>([
   'START_CAPTURE',
@@ -15,6 +30,7 @@ const HANDLED_MESSAGE_TYPES = new Set<string>([
   'UPDATE_SETTINGS',
   'TRANSLATE_TEXT',
   'TRANSLATE_SUBTITLE_LINE',
+  'GET_TRANSLATION_PLAN',
   'TRANSCRIPTION_RESULT',
   'TRANSCRIPTION_ERROR',
   'MODEL_LOADING_PROGRESS'
@@ -99,6 +115,9 @@ class SubtitleService {
 
         case 'TRANSLATE_TEXT':
           return await this.translateText(message.text, message.targetLang);
+
+        case 'GET_TRANSLATION_PLAN':
+          return await translation.plan();
 
         case 'TRANSLATE_SUBTITLE_LINE':
           return await this.translateSubtitleLine(message);
@@ -290,27 +309,16 @@ class SubtitleService {
 
   /** Subtitle-mode line: source language is the subtitle language, neighbours give context. */
   async translateSubtitleLine(message: ExtensionMessage) {
-    const { text, sourceLang, previousLines = [], nextLines = [], priority = 'live' } = message as {
-      text: string;
-      sourceLang: string;
-      previousLines?: string[];
-      nextLines?: string[];
-      priority?: JobPriority;
-    } & ExtensionMessage;
-    try {
-      const { targetLanguage } = await getSettings();
-      if (sourceLang.split('-')[0] === targetLanguage.split('-')[0]) {
-        return { success: true, translatedText: text, quality: 'fast' };
-      }
-      const result = await subtitleTranslations.run(
-        () => apiService.translateText(text, sourceLang, targetLanguage, { previousLines, nextLines }),
-        priority
-      );
-      // Single engine until the translation-engine layer lands; every result is 'fast'.
-      return { success: true, translatedText: result.translatedText, quality: 'fast' };
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : String(error) };
-    }
+    const m = message as Partial<LineTranslateRequest> & { text: string; sourceLang: string } & ExtensionMessage;
+    return translation.translateLine({
+      tier: m.tier === 'best' ? 'best' : 'fast',
+      text: m.text,
+      sourceLang: m.sourceLang,
+      previousLines: m.previousLines ?? [],
+      nextLines: m.nextLines ?? [],
+      priority: (m.priority as JobPriority) ?? 'live',
+      video: m.video ?? NO_VIDEO,
+    });
   }
 
   async translateText(text: string, targetLang: string) {
