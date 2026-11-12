@@ -12,7 +12,11 @@ A Chrome (MV3) extension that translates what you watch, live:
   translation.
 
 Speech recognition and OCR run **locally in your browser** (no key, no server).
-Translation uses DeepL or Google Cloud Translation with your own API key.
+Translation is **fast then best**: DeepL (or Google) puts a translation up
+immediately, then Claude replaces it with a context-aware one that knows what
+the video is about (title, channel, description) and keeps names and jargon
+consistent with a learned glossary. Bring your own keys: a DeepL/Google key and
+an Anthropic API key — or any Anthropic-compatible gateway (base URL + token).
 
 ## Install (developer build)
 
@@ -23,7 +27,9 @@ npm run build          # dev build into dist/   (npm run build:prod for minified
 
 Chrome → `chrome://extensions` → enable Developer mode → **Load unpacked** →
 select `dist/`. Open the popup and paste a DeepL (free keys end in `:fx`) or
-Google Translate API key.
+Google Translate API key, and for context-aware translation an Anthropic API key
+(or choose **Anthropic-compatible gateway** and enter its URL and token). Keys
+are stored only in this browser's local extension storage.
 
 ## Use
 
@@ -39,6 +45,13 @@ downloads the speech model (~209 MB on GPUs with WebGPU, 80 MB otherwise).
 Only one mode runs at a time. Position/size settings in the popup apply to
 audio captions.
 
+**Translation engine** (popup): *Fast then best* (default with Claude access),
+*Fast only*, or *Best only*; Claude model Opus 5.5 (default), Sonnet 5.5 or
+Haiku 5.5. **Glossary for this video** lists the names and terms Claude fixed
+(e.g. 뽀삐 → Poppy); correct or delete an entry and the lines using it are
+re-translated. Terms are shared with other videos of the same topic once two
+different channels agree (or immediately when you correct them).
+
 ## How it works
 
 | Piece | Where |
@@ -47,7 +60,7 @@ audio captions.
 | Read-ahead (YouTube): taps the player's MSE stream (main world), decodes buffered video ahead of playback with WebCodecs, so most subtitles are translated before they appear | `src/subtitle/readAhead/` |
 | OCR: PaddleOCR PP-OCRv5 (ONNX Runtime Web, WebGPU → wasm fallback) in a worker inside a hidden extension iframe; saved timelines live in that extension-origin iframe | `src/ocr/` |
 | Live captions: tab capture → offscreen VAD → Whisper (transformers.js) worker | `src/offscreen.ts`, `src/whisper.worker.ts` |
-| Translation (DeepL / Google, neighbouring-line context, live-before-read-ahead priority) | `src/services/apiService.ts`, `src/background.ts` |
+| Translation engine layer: fast tier (DeepL / Google) and best tier (Claude with video context, topic summary, glossary, batching), browser-independent engines | `src/translation/`, `src/background.ts` |
 | Popup | `popup.html`, `src/popup.ts` |
 
 Design docs and decision records: `docs/superpowers/`. Benchmarks:
@@ -68,9 +81,9 @@ npm run verify           # types + lint + unit + e2e (ui, captions, subtitles) +
 |---|---|
 | `npm test` | Jest unit tests |
 | `npm run test:e2e` | Browser tests: popup, Screen Translate, live captions, subtitle mode (OCR, overlay, live path, read-ahead) |
-| `npm run test:live` | Real DeepL (needs `DEEPL_API_KEY` in `.env`) |
+| `npm run test:live` | Real DeepL (`DEEPL_API_KEY` in `.env`) and real Claude through a local relay (`ANTHROPIC_AUTH_TOKEN`/`ANTHROPIC_BASE_URL` or `ANTHROPIC_API_KEY` in the environment; `CLAUDE_MODEL` to pick the model) |
 | `npm run e2e:youtube` | Subtitle mode on real YouTube (installed Chrome, opt-in) |
-| `npm run e2e:judge` | Claude scores displayed translations (opt-in, Anthropic credentials) |
+| `npm run e2e:judge` | Claude scores displayed translations, and the cross-domain benchmark (football/anime/drama) — opt-in, Anthropic credentials |
 | `npm run perf:stt` | Speech-model benchmark |
 
 Test pages, audio and the frame-labelled subtitle timeline are in

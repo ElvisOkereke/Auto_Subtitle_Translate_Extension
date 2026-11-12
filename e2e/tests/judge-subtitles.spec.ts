@@ -26,6 +26,9 @@ const INSTRUCTIONS =
 const RUNS = [
   { engine: 'deepl', file: (b: string) => `subtitle-quality-deepl-${b}.json`, minScore: 0 },
   { engine: 'claude-opus-5-5', file: (b: string) => `subtitle-quality-claude-claude-opus-5-5-${b}.json`, minScore: 0.8 },
+  // Report only (cost comparison; CLAUDE_MODEL=… npm run test:live produces them).
+  { engine: 'claude-sonnet-5-5', file: (b: string) => `subtitle-quality-claude-claude-sonnet-5-5-${b}.json`, minScore: 0 },
+  { engine: 'claude-haiku-5-5', file: (b: string) => `subtitle-quality-claude-claude-haiku-5-5-${b}.json`, minScore: 0 },
 ];
 
 for (const run of RUNS) test(`Claude judges subtitle translation quality (${run.engine})`, async () => {

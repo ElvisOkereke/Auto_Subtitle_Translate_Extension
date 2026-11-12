@@ -93,6 +93,39 @@ after ~40 s ("Something went wrong") in every automated configuration tried
 CER 1.8%, read-ahead lead 28 s, 14/15 lines translated before they appeared**.
 Report and a stitched run video: `e2e/.perf/youtube/`.
 
+### Context-aware translation (Claude, fast then best) — `npm run test:live`, `npm run e2e:judge`
+
+Stretch s1 (29 lines, starts at 0:00 and plays immediately), real DeepL + real
+Claude through the test relay, read-ahead on, Chromium.
+
+| Engine | Judge score (0–1) | Key League terms | Names consistent | Claude version before the line appears | Cost / line | Cost / hour of this video |
+|---|---|---|---|---|---|---|
+| DeepL only (before) | 0.48–0.50 | 9 / 11 | — | — | DeepL quota | DeepL quota |
+| **Claude Opus 5.5 (default)** | **0.91–0.93** | **11 / 11** | yes | **93%** (the first two lines, 1.4 s and 2.9 s after play, are late) | $0.0059 | **$3.40** |
+| Claude Sonnet 5.5 | 0.72 | 10 / 11 | yes | 90% | $0.0027 | $1.56 |
+| Claude Haiku 5.5 | 0.45 | 8 / 11 | no (learned 탑 → "Top lane") | 97% | $0.00009 | $0.05 |
+
+Judge scores are from two judge runs (ranges where they differed). Cost per
+hour = cost per line × this stretch's line rate (580 lines/hour); slower-talking
+videos cost less. Haiku is ~65× cheaper than Opus but no better than DeepL here
+— the case for distilling Opus quality into a cheap model later.
+
+Every line ends on Claude's version. Cold-start latency (first line, play at
+0:00): Claude's version on screen at 2.9 s — down from 11.5 s before the topic
+summary stopped blocking lines (bounded 1.5 s wait, summary started when
+subtitle mode starts, separate request lanes for Claude, lines due within 10 s
+sent unbatched).
+
+**Other domains** (`e2e/tests/domain-bench.spec.ts`): 35 real subtitle lines per
+video, DeepL (neighbouring lines) vs Claude Opus 5.5 (video context + topic +
+glossary), blind pairwise judge:
+
+| Domain | Subtitles | Claude better | Tie | DeepL better | Claude win rate |
+|---|---|---|---|---|---|
+| Football — LaLiga Clásico summary (Spanish) | human-made | 26 | 6 | 3 | **0.83** |
+| Anime — 銀河特急 ミルキー☆サブウェイ ep. 1 (Japanese) | human-made | 21 | 5 | 9 | **0.67** |
+| K-drama — 선재 업고 튀어 highlight (Korean) | automatic captions | 25 | 4 | 6 | **0.77** |
+
 ### Translation quality end to end (real DeepL, default configuration)
 
 All 29 lines translated; key terms present in 9/11 lines that have them

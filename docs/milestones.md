@@ -4,6 +4,23 @@ Wins worth sharing, newest first. Each has the headline, the proof (a number
 or what was shown working), and where the evidence lives. Numbers come from
 automated runs in a real browser (details: [performance.md](performance.md)).
 
+## 2026-11-12 — Context-aware translation: Claude knows what you're watching
+
+- Subtitles are translated **fast then best**: DeepL appears instantly, then
+  Claude replaces it with a translation that knows the video (title, channel,
+  description) and keeps names consistent with a glossary it learns as it goes.
+- League of Legends test: translation quality judged **0.93 vs 0.50 for DeepL**;
+  champion names and slang right in **11/11** lines (DeepL 9/11); every name
+  spelled the same way throughout.
+- With read-ahead, **93% of lines already had Claude's version before they
+  appeared** — on a stream that starts playing at 0:00. First line: 2.9 s
+  (was 11.5 s before a latency pass).
+- Not just games: Claude beat DeepL on real subtitles of a **LaLiga Clásico
+  (Spanish, 83% of lines), an anime episode (Japanese, 67%) and a K-drama
+  (Korean, 77%)** in a blind comparison.
+- Costs about **$0.006 per subtitle line (~$3.40 per hour of video) with Claude
+  Opus 5.5** — the starting point for subscription pricing.
+
 ## 2026-11-12 — Translating burned-in subtitles before they appear
 
 - **Read-ahead:** the extension reads the video YouTube has already buffered
