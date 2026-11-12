@@ -8,6 +8,7 @@ import { LineTranslateRequest, StorageUsageMeter, TranslationService } from './t
 import { GlossaryStore } from './translation/glossary';
 import { ClaudeEngine } from './translation/engines/claude';
 import { DeepLEngine } from './translation/engines/deepl';
+import { videoIdFrom } from './subtitle/videoId';
 import { GoogleEngine } from './translation/engines/google';
 
 // Fast (DeepL/Google) and best (Claude with video context + glossary) tiers;
@@ -120,7 +121,7 @@ class SubtitleService {
           return await translation.plan();
 
         case 'TRANSLATE_SUBTITLE_LINE':
-          return await this.translateSubtitleLine(message);
+          return await this.translateSubtitleLine(message, sender);
 
         case 'TRANSCRIPTION_RESULT':
           await this.handleTranscriptionResult(message.text, message.timing);
@@ -308,8 +309,14 @@ class SubtitleService {
   }
 
   /** Subtitle-mode line: source language is the subtitle language, neighbours give context. */
-  async translateSubtitleLine(message: ExtensionMessage) {
+  async translateSubtitleLine(message: ExtensionMessage, sender?: chrome.runtime.MessageSender) {
     const m = message as Partial<LineTranslateRequest> & { text: string; sourceLang: string } & ExtensionMessage;
+    let video = m.video ?? NO_VIDEO;
+    if (sender?.tab && sender.url) {
+      // A tab's video identity (glossary/topic keys) comes from the URL Chrome reports
+      // for the sending frame, never from what the page could influence.
+      video = { ...video, url: sender.url, videoId: videoIdFrom(sender.url) };
+    }
     return translation.translateLine({
       tier: m.tier === 'best' ? 'best' : 'fast',
       text: m.text,
@@ -317,7 +324,7 @@ class SubtitleService {
       previousLines: m.previousLines ?? [],
       nextLines: m.nextLines ?? [],
       priority: (m.priority as JobPriority) ?? 'live',
-      video: m.video ?? NO_VIDEO,
+      video,
     });
   }
 

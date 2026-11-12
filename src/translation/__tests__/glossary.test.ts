@@ -15,13 +15,49 @@ function memoryArea(): StorageArea & { data: Record<string, any> } {
 }
 
 describe('GlossaryStore', () => {
-  it('learned terms are shared with the next video on the same topic', async () => {
+  it('a learned term reaches the topic only once a second video agrees (one page cannot poison a topic)', async () => {
     const store = new GlossaryStore(memoryArea());
     await store.setVideoMeta('vidA', { topic: 'LoL stream', topicKey: 'league-of-legends' });
-    await store.learn('vidA', [{ source: '뽀삐', target: 'Poppy' }]);
+    await store.learn('vidA', [{ source: '뽀삐', target: 'Poppy' }, { source: '갱', target: 'buy now' }]);
+    expect(await store.effective('vidA')).toEqual([{ source: '갱', target: 'buy now' }, { source: '뽀삐', target: 'Poppy' }]); // own video: kept
     await store.setVideoMeta('vidB', { topic: 'Another LoL stream', topicKey: 'league-of-legends' });
-    expect(await store.effective('vidB')).toEqual([{ source: '뽀삐', target: 'Poppy' }]);
-    expect(await store.effective('vidC')).toEqual([]); // no topic yet
+    expect(await store.effective('vidB')).toEqual([]); // not shared yet
+    await store.learn('vidB', [{ source: '뽀삐', target: 'Poppy' }]); // a second video agrees
+    await store.setVideoMeta('vidC', { topic: 'LoL', topicKey: 'league-of-legends' });
+    expect(await store.effective('vidC')).toEqual([{ source: '뽀삐', target: 'Poppy' }]);
+    await store.learn('vidA', [{ source: '뽀삐', target: 'Poppy' }]); // the same video repeating itself doesn't count twice
+    expect((await store.effective('vidC')).map(e => e.source)).toEqual(['뽀삐']);
+    expect(await store.effective('vidD')).toEqual([]); // no topic yet
+  });
+
+  it('a user correction applies to the topic immediately', async () => {
+    const store = new GlossaryStore(memoryArea());
+    await store.setVideoMeta('vidA', { topic: 'LoL', topicKey: 'lol' });
+    await store.edit('vidA', '렙차', 'level gap');
+    await store.setVideoMeta('vidB', { topic: 'LoL', topicKey: 'lol' });
+    expect(await store.effective('vidB')).toEqual([{ source: '렙차', target: 'level gap' }]);
+  });
+
+  it('topics of non-YouTube sites are kept per site', async () => {
+    const store = new GlossaryStore(memoryArea());
+    await store.setVideoMeta('https://evil.example/watch?v=1', { topic: 'LoL', topicKey: 'lol' });
+    await store.edit('https://evil.example/watch?v=1', '뽀삐', 'Poppy (sponsored)');
+    await store.setVideoMeta('ytVideo', { topic: 'LoL', topicKey: 'lol' });
+    expect(await store.effective('ytVideo')).toEqual([]);
+    await store.setVideoMeta('https://evil.example/watch?v=2', { topic: 'LoL', topicKey: 'lol' });
+    expect(await store.effective('https://evil.example/watch?v=2')).toEqual([{ source: '뽀삐', target: 'Poppy (sponsored)' }]);
+  });
+
+  it('entries whose target contains a link or markup are rejected', async () => {
+    const store = new GlossaryStore(memoryArea());
+    await store.setVideoMeta('v', { topic: 't', topicKey: 'k' });
+    await store.learn('v', [
+      { source: 'a', target: 'visit https://x.example' },
+      { source: 'b', target: 'www.x.example' },
+      { source: 'c', target: '<b>bold</b>' },
+      { source: 'd', target: 'fine' },
+    ]);
+    expect(await store.effective('v')).toEqual([{ source: 'd', target: 'fine' }]);
   });
 
   it('video entries win over topic entries; newest wins on conflicting targets', async () => {
@@ -72,14 +108,14 @@ describe('GlossaryStore', () => {
   it('list() reports the topic and each entry with its scope', async () => {
     const store = new GlossaryStore(memoryArea());
     await store.setVideoMeta('a', { topic: 'LoL stream', topicKey: 'lol' });
-    await store.learn('a', [{ source: '뽀삐', target: 'Poppy', note: 'champion' }]);
+    await store.edit('a', '뽀삐', 'Poppy'); // user correction: in the topic at once
     await store.setVideoMeta('b', { topic: 'LoL stream 2', topicKey: 'lol' });
     await store.edit('b', '갱', 'gank');
     const listed = await store.list('b');
     expect(listed.topic).toBe('LoL stream 2');
     expect(listed.entries).toEqual([
       { source: '갱', target: 'gank', scope: 'video' },
-      { source: '뽀삐', target: 'Poppy', note: 'champion', scope: 'topic' },
+      { source: '뽀삐', target: 'Poppy', scope: 'topic' },
     ]);
   });
 });

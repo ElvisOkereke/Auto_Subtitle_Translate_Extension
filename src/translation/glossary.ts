@@ -20,8 +20,28 @@ interface VideoMeta {
 }
 
 const videoKeyOf = (videoKey: string) => `glossary:video:${videoKey}`;
-const topicKeyOf = (topicKey: string) => `glossary:topic:${topicKey}`;
 const metaKeyOf = (videoKey: string) => `glossary:meta:${videoKey}`;
+/** Videos needed to agree on a model-learned term before it is shared with the whole topic. */
+export const TOPIC_PROMOTION_VIDEOS = 2;
+const MAX_CANDIDATES = 500;
+
+/**
+ * Topic storage key. YouTube videos (bare ids) share topics across YouTube;
+ * any other site's videos (keys are site-scoped URLs) only share with that site,
+ * so a page elsewhere can't push entries into, say, the League topic.
+ */
+function topicScope(videoKey: string, topicKey: string): string {
+  if (!videoKey.includes('://')) return topicKey;
+  try {
+    return `${new URL(videoKey).origin}|${topicKey}`;
+  } catch {
+    return `${videoKey}|${topicKey}`;
+  }
+}
+const topicKeyOf = (scope: string) => `glossary:topic:${scope}`;
+const candidatesKeyOf = (scope: string) => `glossary:candidates:${scope}`;
+// Glossary targets are subtitle words: links and markup are never legitimate (prompt-injection bait).
+const SUSPICIOUS = /https?:\/\/|www\.|[<>]/i;
 
 function valid(e: GlossaryEntry): boolean {
   return (
@@ -30,7 +50,9 @@ function valid(e: GlossaryEntry): boolean {
     e.source.trim().length > 0 &&
     e.target.trim().length > 0 &&
     e.source.length <= GLOSSARY_SOURCE_MAX &&
-    e.target.length <= GLOSSARY_TARGET_MAX
+    e.target.length <= GLOSSARY_TARGET_MAX &&
+    !SUSPICIOUS.test(e.source) &&
+    !SUSPICIOUS.test(e.target)
   );
 }
 
@@ -62,14 +84,19 @@ export class GlossaryStore {
     await this.area.set({ [metaKeyOf(videoKey)]: { ...meta, version: current?.version ?? 0 } });
   }
 
-  private async scopes(videoKey: string): Promise<{ meta: VideoMeta | null; video: GlossaryEntry[]; topic: GlossaryEntry[] }> {
+  private async scopes(
+    videoKey: string
+  ): Promise<{ meta: VideoMeta | null; scope: string | null; video: GlossaryEntry[]; topic: GlossaryEntry[]; candidates: Record<string, { target: string; videos: string[] }> }> {
     const meta = await this.getVideoMeta(videoKey);
-    const keys = [videoKeyOf(videoKey), ...(meta?.topicKey ? [topicKeyOf(meta.topicKey)] : [])];
+    const scope = meta?.topicKey ? topicScope(videoKey, meta.topicKey) : null;
+    const keys = [videoKeyOf(videoKey), ...(scope ? [topicKeyOf(scope), candidatesKeyOf(scope)] : [])];
     const stored = await this.area.get(keys);
     return {
       meta,
+      scope,
       video: stored[videoKeyOf(videoKey)] ?? [],
-      topic: meta?.topicKey ? (stored[topicKeyOf(meta.topicKey)] ?? []) : [],
+      topic: scope ? (stored[topicKeyOf(scope)] ?? []) : [],
+      candidates: scope ? (stored[candidatesKeyOf(scope)] ?? {}) : {},
     };
   }
 
@@ -80,18 +107,36 @@ export class GlossaryStore {
     return [...video, ...topic.filter(e => !own.has(e.source))].slice(0, MAX_GLOSSARY_ENTRIES);
   }
 
-  /** Terms fixed by the translator: kept for this video and its topic. */
+  /**
+   * Terms fixed by the translator: kept for this video at once; shared with the
+   * topic only when TOPIC_PROMOTION_VIDEOS different videos agree on the same
+   * translation (a single page's injected text can't rewrite a whole topic).
+   */
   async learn(videoKey: string, entries: GlossaryEntry[]): Promise<void> {
-    if (!entries.some(valid)) return;
-    const { meta, video, topic } = await this.scopes(videoKey);
-    const items: Record<string, GlossaryEntry[]> = { [videoKeyOf(videoKey)]: merge(video, entries) };
-    if (meta?.topicKey) items[topicKeyOf(meta.topicKey)] = merge(topic, entries);
+    const good = entries.filter(valid).map(clean);
+    if (!good.length) return;
+    const { scope, video, topic, candidates } = await this.scopes(videoKey);
+    const items: Record<string, unknown> = { [videoKeyOf(videoKey)]: merge(video, good) };
+    if (scope) {
+      const promoted: GlossaryEntry[] = [];
+      for (const e of good) {
+        const c = candidates[e.source];
+        const videos = c && c.target === e.target ? [...new Set([...c.videos, videoKey])] : [videoKey];
+        delete candidates[e.source]; // re-insert: newest last
+        candidates[e.source] = { target: e.target, videos: videos.slice(-8) };
+        if (videos.length >= TOPIC_PROMOTION_VIDEOS) promoted.push(e);
+      }
+      const sources = Object.keys(candidates);
+      for (const old of sources.slice(0, Math.max(0, sources.length - MAX_CANDIDATES))) delete candidates[old];
+      items[candidatesKeyOf(scope)] = candidates;
+      if (promoted.length) items[topicKeyOf(scope)] = merge(topic, promoted);
+    }
     await this.area.set(items);
   }
 
   /** A user correction (target) or deletion (null) in both scopes; returns the new glossary version. */
   async edit(videoKey: string, source: string, target: string | null): Promise<number> {
-    const { meta, video, topic } = await this.scopes(videoKey);
+    const { meta, scope, video, topic } = await this.scopes(videoKey);
     const apply = (list: GlossaryEntry[]) =>
       target === null ? list.filter(e => e.source !== source) : merge(list, [{ source, target }]);
     const version = (meta?.version ?? 0) + 1;
@@ -99,7 +144,7 @@ export class GlossaryStore {
       [videoKeyOf(videoKey)]: apply(video),
       [metaKeyOf(videoKey)]: { topic: meta?.topic ?? '', topicKey: meta?.topicKey ?? '', version },
     };
-    if (meta?.topicKey) items[topicKeyOf(meta.topicKey)] = apply(topic);
+    if (scope) items[topicKeyOf(scope)] = apply(topic); // the user's own correction: trusted, shared at once
     await this.area.set(items);
     return version;
   }
