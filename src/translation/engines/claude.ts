@@ -14,6 +14,8 @@ export interface ClaudeConfig {
   model: ClaudeModel;
   baseURL: string;
   auth: { kind: 'x-api-key' | 'bearer'; token: string };
+  /** 'proxy': the hosted service (subscription) instead of an Anthropic endpoint. */
+  via?: 'proxy';
   fetch?: typeof fetch;
   /** Per-attempt request timeout (default 20 s; the SDK's own default is 10 minutes). */
   timeoutMs?: number;

@@ -16,6 +16,11 @@ export type MessageType =
   | 'UPGRADE_SUBTITLE'
   | 'GET_VIDEO_CONTEXT'
   | 'GET_GLOSSARY'
+  | 'ACCOUNT_START'
+  | 'ACCOUNT_VERIFY'
+  | 'ACCOUNT_SIGNOUT'
+  | 'ACCOUNT_STATUS'
+  | 'BILLING_OPEN'
   | 'EDIT_GLOSSARY_ENTRY'
   | 'GLOSSARY_CHANGED'
   | 'TOGGLE_SUBTITLES'
@@ -190,14 +195,14 @@ export interface ExtensionSettings {
   fontSize: FontSize;
   enabled: boolean;
   /** Fast engine (API keys live in chrome.storage.local - see settings.ts SECRET_KEYS). */
-  translationProvider: 'google' | 'deepl';
+  translationProvider: 'google' | 'deepl' | 'subscription';
   /** Language of burned-in subtitles read by subtitle mode (OCR model choice). */
   subtitleLanguage: import('../subtitle/types').SubtitleLanguage;
   /** Fast engine first then Claude ('fast-then-best'), fast engine only, or Claude only. */
   translationEngineMode: 'fast-then-best' | 'fast' | 'best';
   claudeModel: 'claude-opus-5-5' | 'claude-sonnet-5-5' | 'claude-haiku-5-5';
   /** Anthropic API key (direct) or an Anthropic-compatible gateway (base URL + token). */
-  claudeAccess: 'key' | 'gateway';
+  claudeAccess: 'key' | 'gateway' | 'subscription';
   claudeGatewayUrl: string;
   claudeGatewayAuth: 'x-api-key' | 'bearer';
 }

@@ -3,7 +3,7 @@
 // glossary) tiers, Claude batching by priority, fallback to the fast engine,
 // usage metering. Dependencies are injected so the rules are unit-tested.
 import { ExtensionSettings } from '../types';
-import type { Secrets } from '../settings';
+import { DEFAULT_SERVER_URL, type Secrets } from '../settings';
 import type { EndpointOverrides } from '../services/apiService';
 import { PriorityRunner } from '../utils/priorityRunner';
 import { ClaudeBatcher } from './claudeBatcher';
@@ -44,7 +44,7 @@ export interface LineTranslateResponse {
   success: boolean;
   translatedText?: string;
   quality?: 'fast' | 'better';
-  engine?: 'deepl' | 'google' | 'claude';
+  engine?: 'deepl' | 'google' | 'subscription' | 'claude';
   error?: string;
   /** Shown to the user once (e.g. Claude rejected the key); the line still has a translation. */
   warning?: string;
@@ -109,7 +109,7 @@ export interface TranslationServiceDeps {
   glossary: GlossaryStore;
   usage: UsageMeter;
   makeClaude(cfg: ClaudeConfig): ClaudeLike;
-  makeFast(provider: 'deepl' | 'google', apiKey: string, endpoint?: string): FastLike;
+  makeFast(provider: 'deepl' | 'google' | 'subscription', apiKey: string, endpoint?: string): FastLike;
   batch?: { maxLines: number; windowMs: number };
   /** How long a line waits for the video's topic summary before going without it (ms). */
   topicWaitMs?: number;
@@ -121,6 +121,7 @@ export interface TranslationServiceDeps {
 const TOPIC_WAIT_MS = 1500;
 /** After a 429/5xx/timeout, Claude is left alone this long (fast tier carries on). */
 const COOLDOWN_MS = 30_000;
+const PAYMENT_COOLDOWN_MS = 10 * 60_000;
 /** A failed topic summary is retried at most this often per video. */
 const TOPIC_RETRY_MS = 60_000;
 const MAX_TRACKED_VIDEOS = 50;
@@ -163,6 +164,10 @@ export class TranslationService {
 
   /** Claude engine config from settings, or null when Claude access isn't set up. */
   private claudeConfig(settings: ExtensionSettings, secrets: Secrets, overrides: EndpointOverrides): ClaudeConfig | null {
+    if (settings.claudeAccess === 'subscription') {
+      if (!secrets.accountToken) return null;
+      return { model: settings.claudeModel, baseURL: overrides.server ?? DEFAULT_SERVER_URL, auth: { kind: 'bearer', token: secrets.accountToken }, via: 'proxy' };
+    }
     if (settings.claudeAccess === 'gateway') {
       const baseURL = validateGatewayUrl(settings.claudeGatewayUrl ?? '');
       if (!baseURL || !secrets.claudeGatewayToken) return null;
@@ -188,10 +193,11 @@ export class TranslationService {
     if (req.sourceLang.split('-')[0] === targetLang.split('-')[0]) {
       return { success: true, translatedText: req.text, quality: 'fast' };
     }
-    const provider = settings.translationProvider === 'deepl' ? 'deepl' : 'google';
-    const fastKey = provider === 'deepl' ? secrets.deeplApiKey : secrets.googleTranslateApiKey;
+    const provider = settings.translationProvider === 'deepl' || settings.translationProvider === 'subscription' ? settings.translationProvider : 'google';
+    const fastKey = provider === 'deepl' ? secrets.deeplApiKey : provider === 'subscription' ? secrets.accountToken : secrets.googleTranslateApiKey;
+    const fastEndpoint = provider === 'subscription' ? (overrides.server ?? DEFAULT_SERVER_URL) : overrides[provider];
     const fast = async (): Promise<LineTranslateResponse> => {
-      const engine = this.deps.makeFast(provider, fastKey, overrides[provider]);
+      const engine = this.deps.makeFast(provider, fastKey, fastEndpoint);
       const result = await this.runner.run(
         () => engine.translateOne(req.text, req.sourceLang, targetLang, { previousLines: req.previousLines, nextLines: req.nextLines }),
         req.priority
@@ -232,7 +238,8 @@ export class TranslationService {
         const status = statusOf(error);
         claudeError = `Claude: ${errorMessage(error)}`;
         if (isConfigError(status)) this.brokenConfig = cfgSignature;
-        else this.coolUntil = this.now() + COOLDOWN_MS;
+        // 402 from the hosted service: not subscribed / allowance used up - check again in a while.
+        else this.coolUntil = this.now() + (status === 402 ? PAYMENT_COOLDOWN_MS : COOLDOWN_MS);
         void this.report({ status, message: errorMessage(error), at: this.now() });
         if (status === 401 || status === 403) {
           if (!this.authWarned) warning = 'Claude rejected the API key or token - check the Claude settings.';

@@ -2,7 +2,8 @@
 
 import { ExtensionMessage, CaptureResponse, APIError } from './types';
 import { apiService, getEndpointOverrides } from './services/apiService';
-import { DEFAULT_SETTINGS, getSecrets, getSettings, migrateSecretsFromSync, saveSettings } from './settings';
+import { DEFAULT_SERVER_URL, DEFAULT_SETTINGS, getSecrets, getSettings, migrateSecretsFromSync, saveSettings, setSecrets } from './settings';
+import { ProxyClient, proxyClaude, proxyFast } from './translation/engines/proxy';
 import { JobPriority } from './utils/priorityRunner';
 import { LineTranslateRequest, StorageUsageMeter, TranslationService } from './translation/translationService';
 import { GlossaryStore } from './translation/glossary';
@@ -20,8 +21,13 @@ const translation = new TranslationService({
   overrides: getEndpointOverrides,
   glossary: glossaryStore,
   usage: new StorageUsageMeter(chrome.storage.local),
-  makeClaude: cfg => new ClaudeEngine(cfg),
-  makeFast: (provider, apiKey, endpoint) => (provider === 'deepl' ? new DeepLEngine({ apiKey, endpoint }) : new GoogleEngine({ apiKey, endpoint })),
+  makeClaude: cfg => (cfg.via === 'proxy' ? proxyClaude(new ProxyClient({ baseURL: cfg.baseURL, token: cfg.auth.token }), cfg.model) : new ClaudeEngine(cfg)),
+  makeFast: (provider, apiKey, endpoint) =>
+    provider === 'subscription'
+      ? proxyFast(new ProxyClient({ baseURL: endpoint ?? DEFAULT_SERVER_URL, token: apiKey }))
+      : provider === 'deepl'
+        ? new DeepLEngine({ apiKey, endpoint })
+        : new GoogleEngine({ apiKey, endpoint }),
   // The popup shows the last Claude failure (e.g. a rejected key) until Claude works again.
   reportClaudeError: error => (error ? chrome.storage.session.set({ claudeError: error }) : chrome.storage.session.remove('claudeError')),
 });
@@ -37,6 +43,11 @@ const HANDLED_MESSAGE_TYPES = new Set<string>([
   'GET_TRANSLATION_PLAN',
   'PREPARE_TRANSLATION',
   'GET_GLOSSARY',
+  'ACCOUNT_START',
+  'ACCOUNT_VERIFY',
+  'ACCOUNT_SIGNOUT',
+  'ACCOUNT_STATUS',
+  'BILLING_OPEN',
   'EDIT_GLOSSARY_ENTRY',
   'TRANSCRIPTION_RESULT',
   'TRANSCRIPTION_ERROR',
@@ -132,6 +143,13 @@ class SubtitleService {
           void translation.prepare(video, String(message.sourceLang ?? 'auto'));
           return { success: true };
         }
+
+        case 'ACCOUNT_START':
+        case 'ACCOUNT_VERIFY':
+        case 'ACCOUNT_SIGNOUT':
+        case 'ACCOUNT_STATUS':
+        case 'BILLING_OPEN':
+          return await this.handleAccount(message);
 
         case 'GET_GLOSSARY': {
           const videoKey = await this.videoKeyOfTab(message.tabId);
@@ -331,6 +349,48 @@ class SubtitleService {
       // no content script (e.g. restricted page)
     }
     return NO_VIDEO;
+  }
+
+  /** The hosted service (subscription): sign-in, status, sign-out, Stripe Checkout/Portal. */
+  private async handleAccount(message: ExtensionMessage): Promise<unknown> {
+    const overrides = await getEndpointOverrides();
+    const baseURL = overrides.server ?? DEFAULT_SERVER_URL;
+    const { accountToken } = await getSecrets();
+    const client = new ProxyClient({ baseURL, token: accountToken || undefined });
+    const m = message as ExtensionMessage & { email?: string; code?: string; plan?: 'standard' | 'pro' };
+    try {
+      switch (message.type) {
+        case 'ACCOUNT_START':
+          await client.start(String(m.email ?? ''));
+          return { success: true };
+        case 'ACCOUNT_VERIFY': {
+          const token = await client.verify(String(m.email ?? ''), String(m.code ?? ''));
+          await setSecrets({ accountToken: token });
+          return { success: true, account: await new ProxyClient({ baseURL, token }).me() };
+        }
+        case 'ACCOUNT_SIGNOUT':
+          if (accountToken) await client.signout().catch(() => undefined);
+          await setSecrets({ accountToken: '' });
+          return { success: true };
+        case 'ACCOUNT_STATUS':
+          if (!accountToken) return { success: true, signedIn: false };
+          return { success: true, signedIn: true, account: await client.me() };
+        case 'BILLING_OPEN': {
+          const url = m.plan ? await client.checkout(m.plan) : await client.portal();
+          // Only open Stripe pages (or a loopback test server).
+          if (!/^https:\/\/([a-z0-9-]+\.)*stripe\.com\//i.test(url) && !/^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?\//.test(url)) {
+            return { success: false, error: 'Unexpected billing URL' };
+          }
+          await chrome.tabs.create({ url });
+          return { success: true };
+        }
+      }
+    } catch (error) {
+      const status = (error as { status?: number }).status;
+      if (status === 401 && message.type !== 'ACCOUNT_VERIFY') await setSecrets({ accountToken: '' }); // session gone: signed out
+      return { success: false, error: error instanceof Error ? error.message : String(error), status: status ?? null, code: (error as { code?: string }).code ?? null };
+    }
+    return { success: false, error: 'Unknown account message' };
   }
 
   /** Glossary key of the video in a tab: site-scoped video id, or the page URL. */

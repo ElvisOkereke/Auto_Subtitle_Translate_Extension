@@ -58,7 +58,7 @@ function fakes(opts: { settings?: Partial<typeof DEFAULT_SETTINGS>; secrets?: Re
   f.now = { t: 1_000_000 };
   const deps: TranslationServiceDeps = {
     settings: async () => ({ ...DEFAULT_SETTINGS, translationProvider: 'deepl', ...opts.settings }),
-    secrets: async () => ({ deeplApiKey: 'k:fx', googleTranslateApiKey: '', anthropicApiKey: 'sk-ant', claudeGatewayToken: '', ...opts.secrets }),
+    secrets: async () => ({ deeplApiKey: 'k:fx', googleTranslateApiKey: '', anthropicApiKey: 'sk-ant', claudeGatewayToken: '', accountToken: '', ...opts.secrets }),
     overrides: async () => ({}),
     glossary: new GlossaryStore(area),
     usage: new StorageUsageMeter(area),
@@ -303,6 +303,34 @@ describe('TranslationService', () => {
     (f.service as any).deps.glossary.learn = async () => { throw new Error('QUOTA_BYTES quota exceeded'); };
     (f.service as any).deps.usage.record = async () => { throw new Error('QUOTA_BYTES quota exceeded'); };
     expect(await f.service.translateLine(request())).toMatchObject({ engine: 'claude', translatedText: 'CLAUDE(뽀삐 나왔네)' });
+  });
+
+  it('subscription access uses the proxy (Claude and fast tier) and needs only an account token', async () => {
+    const f = fakes({
+      settings: { claudeAccess: 'subscription', translationProvider: 'subscription' },
+      secrets: { anthropicApiKey: '', deeplApiKey: '', accountToken: 'acct-token' },
+    });
+    expect(await f.service.plan()).toEqual({ fast: true, best: true });
+    await f.service.translateLine(request());
+    expect(f.claudeConfigs[0]).toMatchObject({ via: 'proxy', auth: { kind: 'bearer', token: 'acct-token' } });
+    const fast = await f.service.translateLine(request({ tier: 'fast', text: '빠른' }));
+    expect(fast).toMatchObject({ success: true, engine: 'subscription' });
+    const signedOut = fakes({ settings: { claudeAccess: 'subscription', translationProvider: 'subscription' }, secrets: { anthropicApiKey: '', deeplApiKey: '' } });
+    expect(await signedOut.service.plan()).toEqual({ fast: true, best: false });
+  });
+
+  it('a 402 from the proxy (budget used up / not subscribed) pauses Claude for 10 minutes', async () => {
+    const f = fakes({ settings: { claudeAccess: 'subscription' }, secrets: { accountToken: 'acct-token' } });
+    await f.service.translateLine(request({ text: 'warm-up' }));
+    f.setClaudeFailure(Object.assign(new Error('used up'), { status: 402, code: 'budget_exhausted' }));
+    await f.service.translateLine(request({ text: 'a' }));
+    const calls = f.claudeBatches.length;
+    f.now.t += 5 * 60_000;
+    await f.service.translateLine(request({ text: 'b' }));
+    expect(f.claudeBatches.length).toBe(calls);
+    f.setClaudeFailure(null);
+    f.now.t += 6 * 60_000;
+    expect((await f.service.translateLine(request({ text: 'c' }))).engine).toBe('claude');
   });
 });
 

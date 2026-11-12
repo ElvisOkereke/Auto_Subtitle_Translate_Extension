@@ -1,5 +1,8 @@
 import { ExtensionSettings } from './types';
 
+/** The hosted translation service (subscriptions). Placeholder until deployed - see server/README.md. */
+export const DEFAULT_SERVER_URL = 'https://api.autosubtitle.app';
+
 export const DEFAULT_SETTINGS: ExtensionSettings = {
   sourceLanguage: 'auto',
   targetLanguage: 'en',
@@ -20,7 +23,7 @@ export const DEFAULT_SETTINGS: ExtensionSettings = {
  * would upload them to Google's sync servers, and a key must only ever go to
  * its own provider.
  */
-export const SECRET_KEYS = ['deeplApiKey', 'googleTranslateApiKey', 'anthropicApiKey', 'claudeGatewayToken'] as const;
+export const SECRET_KEYS = ['deeplApiKey', 'googleTranslateApiKey', 'anthropicApiKey', 'claudeGatewayToken', 'accountToken'] as const;
 export type SecretKey = (typeof SECRET_KEYS)[number];
 export type Secrets = Record<SecretKey, string>;
 
