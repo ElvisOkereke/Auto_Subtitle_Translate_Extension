@@ -19,6 +19,29 @@ interface PopupElements {
   deeplApiKeyGroup: HTMLDivElement;
 }
 
+/**
+ * The tab the popup controls. Normally the active tab of the popup's window;
+ * `popup.html?tabId=N` pins it to a specific tab (used by the E2E harness,
+ * which opens the popup as a regular page rather than via the toolbar).
+ */
+export async function getTargetTab(): Promise<chrome.tabs.Tab | undefined> {
+  const pinned = Number(new URLSearchParams(location.search).get('tabId'));
+  if (Number.isInteger(pinned) && pinned > 0) {
+    return chrome.tabs.get(pinned);
+  }
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  return tab;
+}
+
+/** Turns "no content script in this tab" into something a user can act on. */
+export function describeTabError(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  if (/Receiving end does not exist|Could not establish connection/i.test(message)) {
+    return "this page can't run the extension (browser pages, the Web Store, or tabs opened before install - try reloading the page).";
+  }
+  return message;
+}
+
 const NON_SETTING_ELEMENT_KEYS = [
   'toggleButton',
   'screenTranslateButton',
@@ -33,6 +56,8 @@ class PopupController {
   private isActive: boolean;
   private isScreenTranslating: boolean;
   private elements: PopupElements;
+  /** Bumped by every user action so a slow initial state query can't overwrite it. */
+  private screenTranslateActionCount = 0;
 
   constructor() {
     this.isActive = false;
@@ -42,6 +67,20 @@ class PopupController {
     this.loadSettings();
     this.setupEventListeners();
     this.refreshScreenTranslateState();
+    this.refreshSubtitleState();
+  }
+
+  /** Subtitles are per tab, so ask the tab rather than trusting a stored flag. */
+  async refreshSubtitleState() {
+    try {
+      const tab = await getTargetTab();
+      if (!tab || typeof tab.id !== 'number') return;
+      const response = await chrome.tabs.sendMessage(tab.id, { type: 'GET_SUBTITLE_STATE' });
+      this.isActive = response?.active === true;
+    } catch {
+      this.isActive = false;
+    }
+    this.updateToggleButton();
   }
 
   initializeElements() {
@@ -153,7 +192,6 @@ class PopupController {
       this.elements.deeplApiKey.value = settings.deeplApiKey;
       this.updateApiKeyVisibility();
 
-      this.isActive = settings.enabled;
       this.updateToggleButton();
 
       this.showStatus('Ready to start subtitles', 'success');
@@ -186,8 +224,7 @@ class PopupController {
         fontSize: this.elements.fontSize.value,
         translationProvider: this.elements.translationProvider.value,
         googleTranslateApiKey: this.elements.googleTranslateApiKey.value,
-        deeplApiKey: this.elements.deeplApiKey.value,
-        enabled: this.isActive
+        deeplApiKey: this.elements.deeplApiKey.value
       };
 
       await chrome.runtime.sendMessage({
@@ -207,21 +244,25 @@ class PopupController {
       this.isActive = !this.isActive;
       this.updateToggleButton();
 
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      const tab = await getTargetTab();
 
       if (!tab) {
         throw new Error('No active tab found');
       }
 
-      if (typeof tab.id === 'number') {
-        chrome.tabs.sendMessage(tab.id, {
-          type: 'TOGGLE_SUBTITLES'
-        });
-      } else {
+      if (typeof tab.id !== 'number') {
         throw new Error('Active tab does not have a valid id');
       }
-
-      await this.saveSettings();
+      const response = await chrome.tabs.sendMessage(tab.id, {
+        type: 'TOGGLE_SUBTITLES'
+      });
+      if (typeof response?.active === 'boolean' && response.active !== this.isActive) {
+        // The content script couldn't start capture; it shows the reason on the page.
+        this.isActive = response.active;
+        this.updateToggleButton();
+        this.showStatus('Could not start subtitles - see the message on the page', 'error');
+        return;
+      }
 
       this.showStatus(
         this.isActive ? 'Subtitles activated' : 'Subtitles deactivated',
@@ -230,10 +271,7 @@ class PopupController {
 
     } catch (error) {
       console.error('Failed to toggle subtitles:', error);
-      const errorMsg = (error && typeof error === 'object' && 'message' in error)
-        ? (error as Error).message
-        : String(error);
-      this.showStatus('Failed to toggle subtitles: ' + errorMsg, 'error');
+      this.showStatus('Failed to toggle subtitles: ' + describeTabError(error), 'error');
       this.isActive = !this.isActive;
       this.updateToggleButton();
     }
@@ -241,20 +279,24 @@ class PopupController {
 
   async toggleScreenTranslation() {
     const wasScreenTranslating = this.isScreenTranslating;
+    this.screenTranslateActionCount++;
 
     try {
       this.renderScreenTranslateState(wasScreenTranslating ? 'inactive' : 'armed');
 
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      const tab = await getTargetTab();
 
       if (!tab) {
         throw new Error('No active tab found');
       }
 
       if (typeof tab.id === 'number') {
-        chrome.tabs.sendMessage(tab.id, {
+        const response = await chrome.tabs.sendMessage(tab.id, {
           type: 'TOGGLE_SCREEN_TRANSLATION'
         });
+        if (response?.state) {
+          this.renderScreenTranslateState(response.state);
+        }
       } else {
         throw new Error('Active tab does not have a valid id');
       }
@@ -266,17 +308,15 @@ class PopupController {
 
     } catch (error) {
       console.error('Failed to toggle screen translation:', error);
-      const errorMsg = (error && typeof error === 'object' && 'message' in error)
-        ? (error as Error).message
-        : String(error);
-      this.showStatus('Failed to toggle screen translation: ' + errorMsg, 'error');
+      this.showStatus('Failed to toggle screen translation: ' + describeTabError(error), 'error');
       this.renderScreenTranslateState(wasScreenTranslating ? 'armed' : 'inactive');
     }
   }
 
   async refreshScreenTranslateState() {
+    const actionCountAtStart = this.screenTranslateActionCount;
     try {
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      const tab = await getTargetTab();
 
       if (!tab || typeof tab.id !== 'number') {
         this.renderScreenTranslateState('inactive');
@@ -287,8 +327,10 @@ class PopupController {
         type: 'GET_SCREEN_TRANSLATE_STATE'
       });
 
+      if (this.screenTranslateActionCount !== actionCountAtStart) return;
       this.renderScreenTranslateState(response?.state ?? 'inactive');
     } catch (error) {
+      if (this.screenTranslateActionCount !== actionCountAtStart) return;
       this.renderScreenTranslateState('inactive');
     }
   }
@@ -311,24 +353,22 @@ class PopupController {
   }
 
   async drawNewBox() {
+    this.screenTranslateActionCount++;
     try {
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      const tab = await getTargetTab();
 
       if (!tab || typeof tab.id !== 'number') {
         throw new Error('No active tab found');
       }
 
-      chrome.tabs.sendMessage(tab.id, {
+      await chrome.tabs.sendMessage(tab.id, {
         type: 'DRAW_NEW_BOX'
       });
 
       this.renderScreenTranslateState('armed');
     } catch (error) {
       console.error('Failed to draw new box:', error);
-      const errorMsg = (error && typeof error === 'object' && 'message' in error)
-        ? (error as Error).message
-        : String(error);
-      this.showStatus('Failed to draw new box: ' + errorMsg, 'error');
+      this.showStatus('Failed to draw new box: ' + describeTabError(error), 'error');
     }
   }
 

@@ -1,0 +1,119 @@
+import http from 'node:http';
+import fs from 'node:fs';
+import path from 'node:path';
+import { AddressInfo } from 'node:net';
+import { FIXTURES } from './paths';
+
+const TYPES: Record<string, string> = {
+  '.html': 'text/html; charset=utf-8',
+  '.wav': 'audio/wav',
+  '.js': 'text/javascript',
+  '.css': 'text/css',
+};
+
+export interface TranslationCall {
+  provider: 'deepl' | 'google';
+  text: string;
+  target: string;
+  source?: string;
+  authorization?: string;
+}
+
+export interface FixtureServer {
+  url: string;
+  /** Requests received by the mock translation endpoints (cleared per test). */
+  translationCalls: TranslationCall[];
+  /** Artificial latency for mock translation responses, in ms. */
+  setTranslationDelay: (ms: number) => void;
+  close: () => Promise<void>;
+}
+
+function readJson(req: http.IncomingMessage): Promise<any> {
+  return new Promise((resolve, reject) => {
+    let data = '';
+    req.on('data', chunk => (data += chunk));
+    req.on('end', () => {
+      try {
+        resolve(JSON.parse(data || '{}'));
+      } catch (e) {
+        reject(e);
+      }
+    });
+  });
+}
+
+/**
+ * Serves e2e/fixtures/pages at /, e2e/fixtures/audio at /audio/, and fake
+ * DeepL/Google Translate APIs at /mock/deepl and /mock/google (the extension
+ * is pointed at them via chrome.storage.local.devEndpointOverrides).
+ */
+export async function startFixtureServer(): Promise<FixtureServer> {
+  const translationCalls: TranslationCall[] = [];
+  let translationDelay = 0;
+
+  const handleMock = async (req: http.IncomingMessage, res: http.ServerResponse, urlPath: string) => {
+    const body = await readJson(req);
+    if (translationDelay) await new Promise(r => setTimeout(r, translationDelay));
+    res.setHeader('content-type', 'application/json');
+    if (urlPath === '/mock/deepl') {
+      const text: string = body.text?.[0] ?? '';
+      translationCalls.push({
+        provider: 'deepl',
+        text,
+        target: body.target_lang,
+        source: body.source_lang,
+        authorization: req.headers.authorization,
+      });
+      res.end(JSON.stringify({ translations: [{ text: `[${body.target_lang}] ${text}`, detected_source_language: 'FR' }] }));
+    } else {
+      translationCalls.push({ provider: 'google', text: body.q, target: body.target, source: body.source });
+      res.end(
+        JSON.stringify({ data: { translations: [{ translatedText: `[${body.target}] ${body.q}`, detectedSourceLanguage: 'fr' }] } })
+      );
+    }
+  };
+
+  const server = http.createServer((req, res) => {
+    const urlPath = decodeURIComponent(new URL(req.url ?? '/', 'http://x').pathname);
+    if (urlPath.startsWith('/mock/')) {
+      handleMock(req, res, urlPath).catch(e => {
+        res.statusCode = 400;
+        res.end(String(e));
+      });
+      return;
+    }
+    const file = urlPath.startsWith('/audio/')
+      ? path.join(FIXTURES, 'audio', path.basename(urlPath))
+      : path.join(FIXTURES, 'pages', path.basename(urlPath) || 'index.html');
+    if (!fs.existsSync(file)) {
+      res.statusCode = 404;
+      res.end('not found');
+      return;
+    }
+    const data = fs.readFileSync(file);
+    res.setHeader('content-type', TYPES[path.extname(file)] ?? 'application/octet-stream');
+    res.setHeader('accept-ranges', 'bytes');
+    const range = req.headers.range?.match(/bytes=(\d*)-(\d*)/);
+    if (range) {
+      const start = range[1] ? Number(range[1]) : 0;
+      const end = range[2] ? Number(range[2]) : data.length - 1;
+      res.statusCode = 206;
+      res.setHeader('content-range', `bytes ${start}-${end}/${data.length}`);
+      res.end(data.subarray(start, end + 1));
+      return;
+    }
+    res.end(data);
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  const { port } = server.address() as AddressInfo;
+  return {
+    url: `http://127.0.0.1:${port}`,
+    translationCalls,
+    setTranslationDelay: ms => (translationDelay = ms),
+    close: () =>
+      new Promise(resolve => {
+        server.closeAllConnections();
+        server.close(() => resolve());
+      }),
+  };
+}

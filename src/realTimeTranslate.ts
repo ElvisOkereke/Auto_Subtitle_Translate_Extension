@@ -3,9 +3,6 @@
 import {
   ToggleScreenTranslationMessage,
   TranslateSelectedTextMessage,
-  ShowTranslationOverlayMessage,
-  StartROISelectionMessage,
-  EndROISelectionMessage,
   GetScreenTranslateStateMessage,
   DrawNewBoxMessage,
   ROIData
@@ -46,10 +43,15 @@ class RealTimeTranslator {
     this.overlayRects = new Map();
     this.overlayTimers = new Map();
     this.screenTranslateState = 'inactive';
-    this.roiSelector = new ROISelector(() => {
-      this.screenTranslateState = 'ready-to-redraw';
-      document.body.style.cursor = '';
-    });
+    this.roiSelector = new ROISelector(
+      () => {
+        this.screenTranslateState = 'ready-to-redraw';
+        document.body.style.cursor = '';
+      },
+      (text, rect) => {
+        this.translateAndShowText(text, rect);
+      }
+    );
     this.setupMessageListener();
     this.setupTextSelectionListener();
   }
@@ -59,8 +61,6 @@ class RealTimeTranslator {
       (
         message: ToggleScreenTranslationMessage |
           TranslateSelectedTextMessage |
-          StartROISelectionMessage |
-          EndROISelectionMessage |
           GetScreenTranslateStateMessage |
           DrawNewBoxMessage,
         sender,
@@ -69,14 +69,7 @@ class RealTimeTranslator {
         switch (message.type) {
           case 'TOGGLE_SCREEN_TRANSLATION':
             this.toggleTranslation();
-            break;
-
-          case 'START_ROI_SELECTION':
-            this.startSelection();
-            break;
-
-          case 'END_ROI_SELECTION':
-            this.endSelection(message.roi);
+            sendResponse({ state: this.screenTranslateState });
             break;
 
           case 'TRANSLATE_SELECTED_TEXT':
@@ -89,6 +82,7 @@ class RealTimeTranslator {
 
           case 'DRAW_NEW_BOX':
             this.drawNewBox();
+            sendResponse({ state: this.screenTranslateState });
             break;
         }
       }
@@ -154,16 +148,6 @@ class RealTimeTranslator {
     document.removeEventListener('click', this.handleGuardedEvent, true);
   }
 
-  private startSelection(): void {
-    // Enable text selection for translation
-    document.addEventListener('mouseup', this.handleTextSelection.bind(this));
-  }
-
-  private endSelection(roi: ROIData): void {
-    // Handle finalization of ROI selection
-    document.removeEventListener('mouseup', this.handleTextSelection.bind(this));
-  }
-
   private handleTextSelection(): void {
     if (!this.isActive) return;
 
@@ -197,7 +181,7 @@ class RealTimeTranslator {
       if (translation.success) {
         this.showTranslationOverlay(text, translation.translatedText, rect);
       } else {
-        this.showError('Translation failed', rect);
+        this.showError(translation.error || 'Translation failed', rect);
       }
     } catch (error) {
       this.hideLoadingIndicator();
@@ -210,12 +194,14 @@ class RealTimeTranslator {
     await this.translateAndShowText(text, rect);
   }
 
-  private async fetchTranslation(text: string): Promise<{ success: true; translatedText: string } | { success: false }> {
+  private async fetchTranslation(
+    text: string
+  ): Promise<{ success: true; translatedText: string } | { success: false; error?: string }> {
     const settings = await chrome.runtime.sendMessage({
       type: 'GET_SETTINGS'
     });
 
-    const targetLang = settings.targetLanguage || 'en';
+    const targetLang = settings?.targetLanguage || 'en';
 
     const translation = await chrome.runtime.sendMessage({
       type: 'TRANSLATE_TEXT',
@@ -223,7 +209,7 @@ class RealTimeTranslator {
       targetLang
     });
 
-    return translation;
+    return translation ?? { success: false, error: 'No response from extension background' };
   }
 
   private showLoadingIndicator(rect: DOMRect): void {
@@ -231,8 +217,8 @@ class RealTimeTranslator {
     loader.id = 'translation-loading';
     loader.style.cssText = `
       position: fixed;
-      top: ${rect.bottom + window.scrollY + 5}px;
-      left: ${rect.left + window.scrollX}px;
+      top: ${rect.bottom + 5}px;
+      left: ${rect.left}px;
       background: #2196F3;
       color: white;
       padding: 5px 10px;
@@ -275,8 +261,8 @@ class RealTimeTranslator {
     overlay.setAttribute('data-rtt-owned', '');
     overlay.style.cssText = `
       position: fixed;
-      top: ${rect.bottom + window.scrollY + 5}px;
-      left: ${rect.left + window.scrollX}px;
+      top: ${rect.bottom + 5}px;
+      left: ${rect.left}px;
       max-width: 300px;
       background: rgba(0, 0, 0, 0.9);
       color: white;
@@ -384,7 +370,7 @@ class RealTimeTranslator {
       if (translation.success) {
         this.updateTranslationOverlay(overlayId, textContent, translation.translatedText);
       } else {
-        this.showError('Translation failed', rect);
+        this.showError(translation.error || 'Translation failed', rect);
       }
     } catch (error) {
       console.error('Error refreshing translation:', error);
@@ -401,8 +387,8 @@ class RealTimeTranslator {
     const errorDiv = document.createElement('div');
     errorDiv.style.cssText = `
       position: fixed;
-      top: ${rect.bottom + window.scrollY + 5}px;
-      left: ${rect.left + window.scrollX}px;
+      top: ${rect.bottom + 5}px;
+      left: ${rect.left}px;
       background: #f44336;
       color: white;
       padding: 5px 10px;
@@ -461,12 +447,14 @@ class ROISelector {
   private startPoint: { x: number; y: number } | null;
   private selectionBox: HTMLDivElement | null;
   private onSelectionEnded: () => void;
+  private onRegionSelected: (text: string, rect: DOMRect) => void;
 
-  constructor(onSelectionEnded: () => void) {
+  constructor(onSelectionEnded: () => void, onRegionSelected: (text: string, rect: DOMRect) => void) {
     this.isSelecting = false;
     this.startPoint = null;
     this.selectionBox = null;
     this.onSelectionEnded = onSelectionEnded;
+    this.onRegionSelected = onRegionSelected;
   }
 
   startSelection(): void {
@@ -558,12 +546,11 @@ class ROISelector {
     const rect = new DOMRect(roi.x, roi.y, roi.width, roi.height);
     const textContent = extractTextAtRect(rect);
 
+    // Translate in this content script directly. (Previously this posted
+    // TRANSLATE_SELECTED_TEXT via chrome.runtime.sendMessage, which only
+    // reaches extension pages - never this script - so nothing happened.)
     if (textContent) {
-      chrome.runtime.sendMessage({
-        type: 'TRANSLATE_SELECTED_TEXT',
-        text: textContent,
-        rect
-      });
+      this.onRegionSelected(textContent, rect);
     }
   }
 }

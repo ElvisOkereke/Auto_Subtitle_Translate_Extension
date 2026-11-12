@@ -11,6 +11,7 @@ export type MessageType =
   | 'UPDATE_SETTINGS'
   | 'TRANSLATE_TEXT'
   | 'TOGGLE_SUBTITLES'
+  | 'GET_SUBTITLE_STATE'
   | 'CAPTURE_STARTED'
   | 'CAPTURE_STOPPED'
   | 'DISPLAY_SUBTITLE'
@@ -70,6 +71,8 @@ export interface DisplaySubtitleMessage extends ExtensionMessage {
   type: 'DISPLAY_SUBTITLE';
   text: string;
   language: string;
+  /** Pipeline timings in ms (segmentId, audioMs, queueMs, inferenceMs, translationMs). */
+  timing?: Record<string, number>;
 }
 
 export interface CaptionErrorMessage extends ExtensionMessage {
@@ -80,6 +83,8 @@ export interface CaptionErrorMessage extends ExtensionMessage {
 export interface CaptionStatusMessage extends ExtensionMessage {
   type: 'CAPTION_STATUS';
   message: string;
+  /** Replace the previous replaceable status instead of adding a new line. */
+  replace?: boolean;
 }
 
 export interface UpdateStyleMessage extends ExtensionMessage {
@@ -148,7 +153,8 @@ export interface TranscriptionErrorMessage extends ExtensionMessage {
 
 export interface ModelLoadingProgressMessage extends ExtensionMessage {
   type: 'MODEL_LOADING_PROGRESS';
-  status: 'downloading' | 'cpu-fallback' | 'ready';
+  status: 'downloading' | 'download-progress' | 'cpu-fallback' | 'ready';
+  percent?: number;
 }
 
 // Settings types
@@ -217,17 +223,6 @@ export interface SubtitleEntry {
 // DOM element types
 export interface SubtitleElement extends HTMLDivElement {
   subtitleId?: string;
-}
-
-// Chrome extension types augmentation
-declare global {
-  namespace chrome.runtime {
-    interface ExtensionMessageEvent {
-      message: ExtensionMessage;
-      sender: chrome.runtime.MessageSender;
-      sendResponse: (response?: any) => void;
-    }
-  }
 }
 
 // Error types

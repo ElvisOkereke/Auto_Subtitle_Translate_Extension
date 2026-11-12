@@ -31,19 +31,53 @@ interface TranslationSettings {
   translationProvider: 'google' | 'deepl';
   googleTranslateApiKey: string;
   deeplApiKey: string;
+  endpoints: { google: string; deeplFree: string; deeplPro: string };
+}
+
+/**
+ * Dev/test hook: `chrome.storage.local.devEndpointOverrides` can point the
+ * providers at a local mock server. Only loopback http URLs are honoured, so
+ * this can never redirect API keys to a remote host.
+ */
+const LOOPBACK_URL = /^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?\//;
+
+async function getEndpointOverrides(): Promise<Partial<Record<'google' | 'deepl', string>>> {
+  try {
+    const { devEndpointOverrides } = (await chrome.storage.local?.get('devEndpointOverrides')) ?? {};
+    const result: Partial<Record<'google' | 'deepl', string>> = {};
+    for (const key of ['google', 'deepl'] as const) {
+      const url = devEndpointOverrides?.[key];
+      if (typeof url === 'string' && LOOPBACK_URL.test(url)) result[key] = url;
+    }
+    return result;
+  } catch {
+    return {};
+  }
+}
+
+// Client errors (bad key, quota, bad request) won't succeed on retry; only
+// network failures, timeouts, rate limits and server errors are retried.
+function isRetryable(error: unknown): boolean {
+  if (!(error instanceof APIError) || error.status === undefined) return true;
+  const status = error.status;
+  return status === 0 || status === 408 || status === 429 || status >= 500;
 }
 
 export class ApiService {
   private async getSettings(): Promise<TranslationSettings> {
-    const settings = await chrome.storage.sync.get([
-      'translationProvider',
-      'googleTranslateApiKey',
-      'deeplApiKey'
+    const [settings, overrides] = await Promise.all([
+      chrome.storage.sync.get(['translationProvider', 'googleTranslateApiKey', 'deeplApiKey']),
+      getEndpointOverrides()
     ]);
     return {
       translationProvider: settings.translationProvider === 'deepl' ? 'deepl' : 'google',
       googleTranslateApiKey: settings.googleTranslateApiKey || '',
-      deeplApiKey: settings.deeplApiKey || ''
+      deeplApiKey: settings.deeplApiKey || '',
+      endpoints: {
+        google: overrides.google ?? GOOGLE_TRANSLATE_ENDPOINT,
+        deeplFree: overrides.deepl ?? DEEPL_FREE_ENDPOINT,
+        deeplPro: overrides.deepl ?? DEEPL_PRO_ENDPOINT
+      }
     };
   }
 
@@ -59,7 +93,7 @@ export class ApiService {
         throw new APIError('No DeepL API key configured', 401);
       }
       return this.retryRequest(() =>
-        this.executeDeepLTranslate(settings.deeplApiKey, text, sourceLanguage, targetLanguage)
+        this.executeDeepLTranslate(settings, text, sourceLanguage, targetLanguage)
       );
     }
 
@@ -70,15 +104,16 @@ export class ApiService {
     if (sourceLanguage && sourceLanguage !== 'auto') {
       body.source = sourceLanguage;
     }
-    return this.retryRequest(() => this.executeGoogleTranslate(settings.googleTranslateApiKey, body));
+    return this.retryRequest(() => this.executeGoogleTranslate(settings, body));
   }
 
   private async executeGoogleTranslate(
-    apiKey: string,
+    settings: TranslationSettings,
     body: Record<string, string>
   ): Promise<TranslationResult> {
+    const apiKey = settings.googleTranslateApiKey;
     return this.withTimeout(async signal => {
-      const response = await fetch(`${GOOGLE_TRANSLATE_ENDPOINT}?key=${encodeURIComponent(apiKey)}`, {
+      const response = await fetch(`${settings.endpoints.google}?key=${encodeURIComponent(apiKey)}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -104,12 +139,13 @@ export class ApiService {
   }
 
   private async executeDeepLTranslate(
-    apiKey: string,
+    settings: TranslationSettings,
     text: string,
     sourceLanguage: string,
     targetLanguage: string
   ): Promise<TranslationResult> {
-    const endpoint = apiKey.endsWith(':fx') ? DEEPL_FREE_ENDPOINT : DEEPL_PRO_ENDPOINT;
+    const apiKey = settings.deeplApiKey;
+    const endpoint = apiKey.endsWith(':fx') ? settings.endpoints.deeplFree : settings.endpoints.deeplPro;
     const body: Record<string, unknown> = { text: [text], target_lang: toDeepLTarget(targetLanguage) };
     if (sourceLanguage && sourceLanguage !== 'auto') {
       body.source_lang = toDeepLSource(sourceLanguage);
@@ -169,7 +205,7 @@ export class ApiService {
         return await requestFn();
       } catch (error) {
         lastError = error as Error;
-        if (attempt === maxRetries) break;
+        if (attempt === maxRetries || !isRetryable(error)) break;
         const delay = Math.pow(2, attempt) * 1000;
         await new Promise(resolve => setTimeout(resolve, delay));
       }
