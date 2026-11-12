@@ -91,6 +91,8 @@ export const test = base.extend<ExtensionFixtures & ExtensionOptions, { server: 
     async ({ sw, server, mockTranslation }, use) => {
       server.translationCalls.length = 0;
       server.setTranslationDelay(0);
+      // Lets tests drive subtitle-mode internals through the content-script test bridge.
+      await sw.evaluate(() => chrome.storage.local.set({ devExposeInternals: true }));
       if (mockTranslation) {
         await sw.evaluate(
           base => chrome.storage.local.set({ devEndpointOverrides: { deepl: `${base}/mock/deepl`, google: `${base}/mock/google` } }),

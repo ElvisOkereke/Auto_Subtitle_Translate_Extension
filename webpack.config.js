@@ -44,7 +44,9 @@ module.exports = (env, argv) => {
       content: './src/content.ts',
       popup: './src/popup.ts',
       realTimeTranslate: './src/realTimeTranslate.ts',
-      offscreen: './src/offscreen.ts'
+      offscreen: './src/offscreen.ts',
+      subtitle: './src/subtitle/index.ts',
+      ocrFrame: './src/ocr/ocrFrame.ts'
     },
     plugins: [
       new CopyWebpackPlugin({
@@ -52,6 +54,8 @@ module.exports = (env, argv) => {
           { from: 'manifest.json', to: 'manifest.json' },
           { from: 'popup.html', to: 'popup.html' },
           { from: 'offscreen.html', to: 'offscreen.html' },
+          { from: 'ocr-frame.html', to: 'ocr-frame.html' },
+          { from: 'src/ocr/charsets/', to: 'ocr/charsets/' },
           { from: 'subtitle-overlay.css', to: 'subtitle-overlay.css' },
           { from: 'icons/', to: 'icons/', noErrorOnMissing: true }
         ]
@@ -68,7 +72,8 @@ module.exports = (env, argv) => {
     name: 'worker',
     target: 'webworker',
     entry: {
-      'whisper.worker': './src/whisper.worker.ts'
+      'whisper.worker': './src/whisper.worker.ts',
+      'ocr.worker': './src/ocr/ocr.worker.ts'
     },
     module: {
       ...shared.module,

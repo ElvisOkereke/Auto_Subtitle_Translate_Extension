@@ -112,6 +112,18 @@ export async function startFixtureServer(): Promise<FixtureServer> {
       serveStream(req, res, path.join(CACHE, 'videos', path.basename(urlPath)));
       return;
     }
+    if (urlPath.startsWith('/crops/')) {
+      // OCR crops exported by e2e/scripts/export_crops.py (gitignored), e.g. /crops/s1/003.png
+      const root = path.join(CACHE, 'ocr-crops');
+      const file = path.resolve(root, '.' + urlPath.slice('/crops'.length));
+      if (!file.startsWith(root + path.sep)) {
+        res.statusCode = 403;
+        res.end();
+        return;
+      }
+      serveStream(req, res, file);
+      return;
+    }
     const file = urlPath.startsWith('/audio/')
       ? path.join(FIXTURES, 'audio', path.basename(urlPath))
       : urlPath.startsWith('/subtitles/')
