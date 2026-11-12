@@ -85,3 +85,5 @@ playwright-report/
 test-results/
 e2e/.perf/
 e2e/.perf-chrome.log
+.superpowers/
+e2e/.recon/
