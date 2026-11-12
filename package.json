@@ -31,8 +31,9 @@
     "e2e:youtube": "npm run build:prod && cross-env-shell E2E_BROWSER=chrome playwright test --project=youtube",
     "e2e:judge": "cross-env-shell E2E_JUDGE=1 playwright test --project=judge",
     "server:test": "jest --selectProjects server",
-    "server:build": "esbuild server/src/main.ts --bundle --platform=node --target=node22 --format=cjs --outdir=server/dist --external:node:sqlite",
-    "server:dev": "npm run server:build && node server/dist/main.js"
+    "server:build": "esbuild server/src/main.ts server/src/admin.ts --bundle --platform=node --target=node22 --format=cjs --outdir=server/dist --external:node:sqlite",
+    "server:dev": "npm run server:build && node server/dist/main.js",
+    "admin": "node server/dist/admin.js"
   },
   "devDependencies": {
     "@playwright/test": "^1.56.1",

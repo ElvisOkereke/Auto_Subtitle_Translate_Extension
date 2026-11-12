@@ -7,11 +7,15 @@ import type { Account, Repo } from './db';
 import { Mailer, OutboxMailer, ResendMailer } from './mailer';
 import { BUDGET_WARN_SHARE, PLANS, isActive, isPaidPlan } from './plans';
 import { mountTranslate } from './translate';
+import { StripeLike, mountBilling } from './billing';
+import Stripe from 'stripe';
 
 export interface AppDeps {
   config: ServerConfig;
   repo: Repo;
   mailer?: Mailer;
+  /** Stripe client (null = billing disabled); defaults to the real SDK when STRIPE_SECRET_KEY is set. */
+  stripe?: StripeLike | null;
   /** Upstream HTTP (Anthropic, DeepL); tests pass a fake. */
   fetch?: typeof fetch;
   /** Time source (tests move it). */
@@ -84,6 +88,9 @@ export function createApp(deps: AppDeps): Hono<AuthEnv> {
   });
 
   app.get('/v1/me', requireAccount, c => c.json(accountStatus(repo, c.get('account'), clock())));
+
+  const stripe = deps.stripe !== undefined ? deps.stripe : config.stripe.secretKey ? (new Stripe(config.stripe.secretKey) as unknown as StripeLike) : null;
+  mountBilling(app, requireAccount, { config, repo, stripe });
 
   mountTranslate(app, requireAccount, { config, repo, clock, monthOf, status: account => accountStatus(repo, account, clock()), fetch: deps.fetch });
 
