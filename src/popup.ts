@@ -2,6 +2,7 @@
 
 import { ExtensionSettings } from './types';
 import { DEFAULT_SETTINGS, getSecrets } from './settings';
+import { validateGatewayUrl } from './translation/claudeAccess';
 
 interface PopupElements {
   toggleButton: HTMLButtonElement;
@@ -27,6 +28,18 @@ interface PopupElements {
   drawSubtitleBox: HTMLButtonElement;
   stopSubtitleMode: HTMLButtonElement;
   subtitleModeStatus: HTMLDivElement;
+  engineMode: HTMLSelectElement;
+  claudeModel: HTMLSelectElement;
+  claudeAccess: HTMLSelectElement;
+  anthropicApiKey: HTMLInputElement;
+  claudeGatewayUrl: HTMLInputElement;
+  claudeGatewayToken: HTMLInputElement;
+  claudeGatewayAuth: HTMLSelectElement;
+  anthropicKeyGroup: HTMLDivElement;
+  claudeGatewayGroup: HTMLDivElement;
+  claudeStatus: HTMLDivElement;
+  glossaryTopic: HTMLDivElement;
+  glossaryList: HTMLDivElement;
 }
 
 const ELEMENT_IDS: (keyof PopupElements)[] = [
@@ -34,8 +47,16 @@ const ELEMENT_IDS: (keyof PopupElements)[] = [
   'sourceLanguage', 'targetLanguage', 'subtitleStyle', 'fontSize', 'translationProvider',
   'googleTranslateApiKey', 'deeplApiKey', 'googleApiKeyGroup', 'deeplApiKeyGroup',
   'modeAudio', 'modeSubtitles', 'audioPanel', 'subtitlePanel', 'subtitleLanguage',
-  'startSubtitleMode', 'drawSubtitleBox', 'stopSubtitleMode', 'subtitleModeStatus'
+  'startSubtitleMode', 'drawSubtitleBox', 'stopSubtitleMode', 'subtitleModeStatus',
+  'engineMode', 'claudeModel', 'claudeAccess', 'anthropicApiKey', 'claudeGatewayUrl', 'claudeGatewayToken',
+  'claudeGatewayAuth', 'anthropicKeyGroup', 'claudeGatewayGroup', 'claudeStatus', 'glossaryTopic', 'glossaryList'
 ];
+
+const MODE_LABELS: Record<string, string> = {
+  'fast-then-best': 'Fast then best (DeepL, then Claude)',
+  fast: 'Fast only',
+  best: 'Best only (Claude)',
+};
 
 /**
  * The tab the popup controls. Normally the active tab of the popup's window;
@@ -75,7 +96,12 @@ const NON_SETTING_ELEMENT_KEYS = [
   'startSubtitleMode',
   'drawSubtitleBox',
   'stopSubtitleMode',
-  'subtitleModeStatus'
+  'subtitleModeStatus',
+  'anthropicKeyGroup',
+  'claudeGatewayGroup',
+  'claudeStatus',
+  'glossaryTopic',
+  'glossaryList'
 ];
 
 class PopupController {
@@ -95,6 +121,59 @@ class PopupController {
     this.refreshScreenTranslateState();
     this.refreshSubtitleState();
     this.refreshSubtitleModeState();
+    this.loadGlossary();
+  }
+
+  /** Glossary of the video in the target tab: learned names/terms, editable. */
+  async loadGlossary(): Promise<void> {
+    try {
+      const tab = await getTargetTab();
+      if (!tab?.id) return;
+      const glossary = await chrome.runtime.sendMessage({ type: 'GET_GLOSSARY', tabId: tab.id });
+      this.renderGlossary(tab.id, glossary);
+    } catch (error) {
+      console.warn('Glossary unavailable:', error);
+    }
+  }
+
+  private renderGlossary(tabId: number, glossary: { topic: string | null; entries: { source: string; target: string; scope: string }[] } | undefined) {
+    const list = this.elements.glossaryList;
+    list.replaceChildren();
+    this.elements.glossaryTopic.textContent = glossary?.topic ? `Topic: ${glossary.topic}` : '';
+    const entries = glossary?.entries ?? [];
+    if (!entries.length) {
+      const empty = document.createElement('div');
+      empty.className = 'glossary-empty';
+      empty.textContent = 'No names or terms learned for this video yet.';
+      list.append(empty);
+      return;
+    }
+    for (const entry of entries) {
+      const row = document.createElement('div');
+      row.className = 'glossary-row';
+      row.dataset.source = entry.source;
+      const source = document.createElement('span');
+      source.className = 'glossary-source';
+      source.textContent = entry.source;
+      const target = document.createElement('input');
+      target.type = 'text';
+      target.value = entry.target;
+      target.maxLength = 80;
+      target.setAttribute('aria-label', `Translation of ${entry.source}`);
+      target.addEventListener('change', () => void this.editGlossary(tabId, entry.source, target.value));
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.textContent = '✕';
+      remove.title = `Remove ${entry.source}`;
+      remove.addEventListener('click', () => void this.editGlossary(tabId, entry.source, null));
+      row.append(source, target, remove);
+      list.append(row);
+    }
+  }
+
+  private async editGlossary(tabId: number, source: string, target: string | null) {
+    await chrome.runtime.sendMessage({ type: 'EDIT_GLOSSARY_ENTRY', tabId, source, target });
+    await this.loadGlossary();
   }
 
   private subtitleModeRunning = false;
@@ -222,6 +301,10 @@ class PopupController {
     this.elements.translationProvider.addEventListener('change', () => {
       this.updateApiKeyVisibility();
     });
+    this.elements.claudeAccess.addEventListener('change', () => this.updateClaudeFields());
+    for (const key of ['anthropicApiKey', 'claudeGatewayUrl', 'claudeGatewayToken'] as const) {
+      this.elements[key].addEventListener('change', () => this.updateClaudeFields());
+    }
 
     Object.keys(this.elements).forEach(key => {
       if (!NON_SETTING_ELEMENT_KEYS.includes(key)) {
@@ -230,6 +313,23 @@ class PopupController {
         });
       }
     });
+  }
+
+  /** Key vs gateway fields, the gateway URL check, and "(needs Claude access)" on Claude modes. */
+  private updateClaudeFields(): boolean {
+    const gateway = this.elements.claudeAccess.value === 'gateway';
+    this.elements.anthropicKeyGroup.classList.toggle('hidden', gateway);
+    this.elements.claudeGatewayGroup.classList.toggle('hidden', !gateway);
+    const url = this.elements.claudeGatewayUrl.value.trim();
+    const urlOk = !url || validateGatewayUrl(url) !== null;
+    this.elements.claudeStatus.textContent =
+      gateway && !urlOk ? 'Gateway URL must start with https:// (http:// only for localhost).' : '';
+    const hasClaude = gateway ? !!url && urlOk && !!this.elements.claudeGatewayToken.value : !!this.elements.anthropicApiKey.value;
+    for (const option of this.elements.engineMode.options) {
+      const needsClaude = option.value !== 'fast';
+      option.textContent = MODE_LABELS[option.value] + (needsClaude && !hasClaude ? ' (needs Claude access)' : '');
+    }
+    return urlOk;
   }
 
   private updateApiKeyVisibility() {
@@ -251,7 +351,15 @@ class PopupController {
       this.elements.googleTranslateApiKey.value = secrets.googleTranslateApiKey;
       this.elements.deeplApiKey.value = secrets.deeplApiKey;
       this.elements.subtitleLanguage.value = settings.subtitleLanguage;
+      this.elements.engineMode.value = settings.translationEngineMode;
+      this.elements.claudeModel.value = settings.claudeModel;
+      this.elements.claudeAccess.value = settings.claudeAccess;
+      this.elements.claudeGatewayUrl.value = settings.claudeGatewayUrl;
+      this.elements.claudeGatewayAuth.value = settings.claudeGatewayAuth;
+      this.elements.anthropicApiKey.value = secrets.anthropicApiKey;
+      this.elements.claudeGatewayToken.value = secrets.claudeGatewayToken;
       this.updateApiKeyVisibility();
+      this.updateClaudeFields();
 
       this.updateToggleButton();
 
@@ -278,7 +386,8 @@ class PopupController {
 
   async saveSettings() {
     try {
-      const settings = {
+      const gatewayUrlOk = this.updateClaudeFields();
+      const settings: Record<string, string> = {
         sourceLanguage: this.elements.sourceLanguage.value,
         targetLanguage: this.elements.targetLanguage.value,
         subtitleStyle: this.elements.subtitleStyle.value,
@@ -286,8 +395,16 @@ class PopupController {
         translationProvider: this.elements.translationProvider.value,
         googleTranslateApiKey: this.elements.googleTranslateApiKey.value,
         deeplApiKey: this.elements.deeplApiKey.value,
-        subtitleLanguage: this.elements.subtitleLanguage.value
+        subtitleLanguage: this.elements.subtitleLanguage.value,
+        translationEngineMode: this.elements.engineMode.value,
+        claudeModel: this.elements.claudeModel.value,
+        claudeAccess: this.elements.claudeAccess.value,
+        claudeGatewayAuth: this.elements.claudeGatewayAuth.value,
+        anthropicApiKey: this.elements.anthropicApiKey.value,
+        claudeGatewayToken: this.elements.claudeGatewayToken.value
       };
+      // An unacceptable gateway URL is never stored (the token must only go to a safe endpoint).
+      if (gatewayUrlOk) settings.claudeGatewayUrl = validateGatewayUrl(this.elements.claudeGatewayUrl.value) ?? '';
 
       await chrome.runtime.sendMessage({
         type: 'UPDATE_SETTINGS',

@@ -179,6 +179,16 @@
         .hidden {
             display: none;
         }
+
+        .setting-status { font-size: 12px; color: #b91c1c; min-height: 0; margin: 2px 0 6px; }
+        .setting-status:empty { display: none; }
+        #glossarySection summary { cursor: pointer; font-weight: 600; margin-bottom: 6px; }
+        #glossaryTopic { color: #475569; }
+        .glossary-row { display: grid; grid-template-columns: 1fr 1.4fr auto; gap: 6px; align-items: center; margin: 4px 0; }
+        .glossary-row .glossary-source { font-size: 13px; overflow-wrap: anywhere; }
+        .glossary-row input { min-width: 0; }
+        .glossary-row button { padding: 2px 8px; }
+        .glossary-empty { font-size: 12px; color: #64748b; }
     </style>
 </head>
 <body>
@@ -305,6 +315,56 @@
             <label for="deeplApiKey">DeepL API Key:</label>
             <input type="password" id="deeplApiKey" placeholder="Paste your API key">
         </div>
+
+        <div class="setting-group">
+            <label for="engineMode">Translation engine:</label>
+            <select id="engineMode">
+                <option value="fast-then-best">Fast then best (DeepL, then Claude)</option>
+                <option value="fast">Fast only</option>
+                <option value="best">Best only (Claude)</option>
+            </select>
+        </div>
+
+        <div class="setting-group">
+            <label for="claudeModel">Claude model:</label>
+            <select id="claudeModel">
+                <option value="claude-opus-5-5">Claude Opus 5.5 (best)</option>
+                <option value="claude-sonnet-5-5">Claude Sonnet 5.5 (faster)</option>
+                <option value="claude-haiku-5-5">Claude Haiku 5.5 (cheapest)</option>
+            </select>
+        </div>
+
+        <div class="setting-group">
+            <label for="claudeAccess">Claude access:</label>
+            <select id="claudeAccess">
+                <option value="key">Anthropic API key</option>
+                <option value="gateway">Anthropic-compatible gateway</option>
+            </select>
+        </div>
+
+        <div class="setting-group" id="anthropicKeyGroup">
+            <label for="anthropicApiKey">Anthropic API Key:</label>
+            <input type="password" id="anthropicApiKey" placeholder="sk-ant-...">
+        </div>
+
+        <div class="setting-group hidden" id="claudeGatewayGroup">
+            <label for="claudeGatewayUrl">Gateway URL:</label>
+            <input type="url" id="claudeGatewayUrl" placeholder="https://gateway.example.com/anthropic">
+            <label for="claudeGatewayToken">Gateway token:</label>
+            <input type="password" id="claudeGatewayToken" placeholder="Paste your token">
+            <label for="claudeGatewayAuth">Send token as:</label>
+            <select id="claudeGatewayAuth">
+                <option value="bearer">Authorization: Bearer</option>
+                <option value="x-api-key">x-api-key</option>
+            </select>
+        </div>
+        <div class="setting-status" id="claudeStatus" role="status"></div>
+
+        <details class="setting-group" id="glossarySection">
+            <summary>Glossary for this video</summary>
+            <div id="glossaryTopic" class="setting-status"></div>
+            <div id="glossaryList"></div>
+        </details>
     </div>
     
     <div class="footer">

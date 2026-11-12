@@ -16,6 +16,34 @@ test.describe('Popup', () => {
     expect(settings).toMatchObject({ targetLanguage: 'en', translationProvider: 'google' });
   });
 
+  test('engine and Claude settings persist (secrets to local, the rest to sync)', async ({ context, fixtureURL, openPopup, sw }) => {
+    const page = await context.newPage();
+    await page.goto(`${fixtureURL}/screen-translate.html`);
+    const popup = await openPopup(page);
+    await popup.selectOption('#engineMode', 'best');
+    await popup.selectOption('#claudeModel', 'claude-sonnet-5-5');
+    await popup.selectOption('#claudeAccess', 'gateway');
+    await popup.fill('#claudeGatewayUrl', 'http://gateway.example.com');
+    await popup.locator('#claudeGatewayUrl').blur();
+    await expect(popup.locator('#claudeStatus')).toContainText('https://');
+    await popup.fill('#claudeGatewayUrl', 'https://gateway.example.com/anthropic/');
+    await popup.locator('#claudeGatewayUrl').blur();
+    await popup.fill('#claudeGatewayToken', 'tok-123');
+    await popup.locator('#claudeGatewayToken').blur();
+    await expect(popup.locator('#claudeStatus')).toBeHidden();
+    await expect
+      .poll(() => sw.evaluate(() => chrome.storage.sync.get(['translationEngineMode', 'claudeModel', 'claudeAccess', 'claudeGatewayUrl'])))
+      .toEqual({ translationEngineMode: 'best', claudeModel: 'claude-sonnet-5-5', claudeAccess: 'gateway', claudeGatewayUrl: 'https://gateway.example.com/anthropic' });
+    await expect.poll(() => sw.evaluate(() => chrome.storage.local.get('claudeGatewayToken'))).toEqual({ claudeGatewayToken: 'tok-123' });
+    expect(await sw.evaluate(() => chrome.storage.sync.get('claudeGatewayToken'))).toEqual({});
+    await popup.screenshot({ path: test.info().outputPath('popup-engine.png'), fullPage: true });
+    await popup.close();
+    const again = await openPopup(page);
+    await expect(again.locator('#claudeModel')).toHaveValue('claude-sonnet-5-5');
+    await expect(again.locator('#claudeGatewayToken')).toHaveValue('tok-123');
+    await expect(again.locator('#claudeGatewayGroup')).toBeVisible();
+  });
+
   test('provider switch toggles key fields and settings persist', async ({ context, fixtureURL, openPopup, sw }) => {
     const page = await context.newPage();
     await page.goto(`${fixtureURL}/screen-translate.html`);
@@ -102,6 +130,29 @@ test.describe('Subtitle line translation', () => {
 
     server.setAnthropicFailure(429);
     expect(await send('또 뽀삐')).toMatchObject({ success: true, translatedText: '[EN-US] 또 뽀삐', quality: 'fast', engine: 'deepl' });
+  });
+
+  test('gateway mode sends the token with the chosen auth style to the gateway', async ({ context, extensionId, configure, translationCalls, server }) => {
+    await configure({
+      translationProvider: 'deepl',
+      deeplApiKey: 'k:fx',
+      targetLanguage: 'en',
+      claudeAccess: 'gateway',
+      claudeGatewayUrl: `${server.url}/mock/anthropic`,
+      claudeGatewayToken: 'gw-token',
+      claudeGatewayAuth: 'bearer',
+    });
+    const page = await context.newPage();
+    await page.goto(`chrome-extension://${extensionId}/popup.html`);
+    const video = { videoId: 'v2', url: 'https://www.youtube.com/watch?v=v2', title: 't', channel: 'c', description: 'd' };
+    const r = await page.evaluate(
+      video => chrome.runtime.sendMessage({ type: 'TRANSLATE_SUBTITLE_LINE', tier: 'best', text: '안녕', sourceLang: 'ko', previousLines: [], nextLines: [], priority: 'live', video }),
+      video
+    );
+    expect(r).toMatchObject({ translatedText: '[CLAUDE] 안녕', engine: 'claude' });
+    const call = translationCalls.find(c => c.provider === 'anthropic')!;
+    expect(call.authorization).toBe('Bearer gw-token');
+    expect(call.xApiKey).toBeUndefined();
   });
 
   test('a line already in the target language is returned without a request', async ({ context, extensionId, configure, translationCalls }) => {
