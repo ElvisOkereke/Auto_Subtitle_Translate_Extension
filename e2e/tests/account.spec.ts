@@ -40,6 +40,7 @@ test.describe('Account and subscription', () => {
     const popup = await openPopup(page);
     await popup.fill('#accountEmail', 'free@example.com');
     await popup.click('#accountSendCode');
+    await expect(popup.locator('#accountCodeRow')).toBeVisible();
     await popup.fill('#accountCode', proxy.lastCode('free@example.com'));
     await popup.click('#accountSignIn');
     await expect(popup.locator('#accountPlan')).toContainText('Free');
@@ -64,6 +65,7 @@ test.describe('Account and subscription', () => {
     const popup = await openPopup(page);
     await popup.fill('#accountEmail', 'buyer@example.com');
     await popup.click('#accountSendCode');
+    await expect(popup.locator('#accountCodeRow')).toBeVisible();
     await popup.fill('#accountCode', proxy.lastCode('buyer@example.com'));
     await popup.click('#accountSignIn');
     const opened = context.waitForEvent('page');

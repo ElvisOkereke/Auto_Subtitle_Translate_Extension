@@ -31,9 +31,10 @@ is my call and is marked as such.
    engine layer was written browser-independent for this). Only subscribers
    (active `standard`/`pro`) can use it.
 4. **Usage metering and budgets.** Every proxied request records tokens/chars
-   and cost per account per month. Each plan has a monthly cost budget; when it
-   is used up, the proxy stops the Claude tier (fast tier keeps working up to
-   its own cap) and the popup says so. Prevents cost runaway — the measured
+   and cost per account per billing period. Each plan has a cost budget per
+   period covering both tiers; when it is used up the proxy stops translating
+   for that account (ruling after review: one budget is what makes the price
+   cover the cost) and the popup points to upgrading or using one's own keys. Prevents cost runaway — the measured
    heavy case is ~$3.5/hour with Opus.
 5. **Extension integration.** A third Claude access option, **Subscription
    (signed in)**, plus a fast-tier option **Subscription**: the extension's
