@@ -40,6 +40,37 @@ export interface FixtureServer {
   close: () => Promise<void>;
 }
 
+/**
+ * Real-Claude relay for opt-in live tests: the extension is configured with this
+ * loopback URL as its "gateway"; the relay forwards to ANTHROPIC_BASE_URL (or
+ * api.anthropic.com) and adds the credentials from the environment
+ * (ANTHROPIC_AUTH_TOKEN as Bearer, or ANTHROPIC_API_KEY), so they never enter
+ * the extension. Responds 404 when no credentials are set.
+ */
+export const anthropicRelayAvailable = () => !!(process.env.ANTHROPIC_AUTH_TOKEN || process.env.ANTHROPIC_API_KEY);
+
+async function relayAnthropic(req: http.IncomingMessage, res: http.ServerResponse, rest: string): Promise<void> {
+  if (!anthropicRelayAvailable()) {
+    res.statusCode = 404;
+    res.end('no Anthropic credentials in the environment');
+    return;
+  }
+  const chunks: Buffer[] = [];
+  for await (const chunk of req) chunks.push(chunk as Buffer);
+  const base = (process.env.ANTHROPIC_BASE_URL || 'https://api.anthropic.com').replace(/\/+$/, '');
+  const headers: Record<string, string> = { 'content-type': 'application/json' };
+  for (const h of ['anthropic-version', 'anthropic-beta']) {
+    const v = req.headers[h];
+    if (typeof v === 'string') headers[h] = v;
+  }
+  if (process.env.ANTHROPIC_AUTH_TOKEN) headers.authorization = `Bearer ${process.env.ANTHROPIC_AUTH_TOKEN}`;
+  else headers['x-api-key'] = process.env.ANTHROPIC_API_KEY!;
+  const upstream = await fetch(`${base}${rest}`, { method: req.method, headers, body: chunks.length ? Buffer.concat(chunks) : undefined });
+  res.statusCode = upstream.status;
+  res.setHeader('content-type', upstream.headers.get('content-type') ?? 'application/json');
+  res.end(Buffer.from(await upstream.arrayBuffer()));
+}
+
 function serveStream(req: http.IncomingMessage, res: http.ServerResponse, file: string): void {
   if (!fs.existsSync(file)) {
     res.statusCode = 404;
@@ -162,6 +193,13 @@ export async function startFixtureServer(): Promise<FixtureServer> {
 
   const server = http.createServer((req, res) => {
     const urlPath = decodeURIComponent(new URL(req.url ?? '/', 'http://x').pathname);
+    if (urlPath.startsWith('/relay/anthropic/')) {
+      relayAnthropic(req, res, urlPath.slice('/relay/anthropic'.length)).catch(e => {
+        res.statusCode = 502;
+        res.end(String(e));
+      });
+      return;
+    }
     if (urlPath.startsWith('/mock/')) {
       handleMock(req, res, urlPath).catch(e => {
         res.statusCode = 400;

@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import Anthropic from '@anthropic-ai/sdk';
-import { test } from '@playwright/test';
+import { test, expect } from '@playwright/test';
 import { ROOT } from '../helpers/paths';
 
 // Opt-in (E2E_JUDGE=1): Claude scores the subtitle translations produced by the
@@ -22,9 +22,15 @@ const INSTRUCTIONS =
   'The reference is one good translation, not the only acceptable one. ' +
   'Reply with only a JSON array of integers, one per item, in order.';
 
-test('Claude judges subtitle translation quality', async () => {
+// One judged run per engine: DeepL (default before piece 2) and Claude Opus 5.5 (context-aware).
+const RUNS = [
+  { engine: 'deepl', file: (b: string) => `subtitle-quality-deepl-${b}.json`, minScore: 0 },
+  { engine: 'claude-opus-5-5', file: (b: string) => `subtitle-quality-claude-claude-opus-5-5-${b}.json`, minScore: 0.8 },
+];
+
+for (const run of RUNS) test(`Claude judges subtitle translation quality (${run.engine})`, async () => {
   const source = ['chrome', 'chromium']
-    .map(b => path.join(ROOT, `e2e/.perf/subtitle-quality-deepl-${b}.json`))
+    .map(b => path.join(ROOT, 'e2e/.perf', run.file(b)))
     .find(p => fs.existsSync(p));
   test.skip(!source, 'run the live project first (npx playwright test --project=live)');
   const { pairs } = JSON.parse(fs.readFileSync(source!, 'utf8')) as { pairs: Pair[] };
@@ -45,11 +51,12 @@ test('Claude judges subtitle translation quality', async () => {
   if (scores.length !== pairs.length) throw new Error(`Judge returned ${scores.length} scores for ${pairs.length} lines`);
   const report = {
     judge: 'claude-opus-5-5',
-    engine: 'deepl',
+    engine: run.engine,
     lines: pairs.length,
     translationJudgeScore: scores.reduce((a, b) => a + b, 0) / (2 * scores.length),
     perLine: pairs.map((p, i) => ({ ...p, score: scores[i] })),
   };
   console.log(`translationJudgeScore ${report.translationJudgeScore.toFixed(3)} over ${pairs.length} lines`);
-  fs.writeFileSync(path.join(ROOT, 'e2e/.perf/subtitle-judge.json'), JSON.stringify(report, null, 2));
+  fs.writeFileSync(path.join(ROOT, `e2e/.perf/subtitle-judge-${run.engine}.json`), JSON.stringify(report, null, 2));
+  if (run.minScore) expect(report.translationJudgeScore).toBeGreaterThanOrEqual(run.minScore);
 });
