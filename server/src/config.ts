@@ -12,6 +12,8 @@ export interface ServerConfig {
   mail: { resendApiKey?: string; from: string };
   /** Dev/test: keep sent emails in memory (GET /dev/outbox) instead of sending them. */
   devOutbox: boolean;
+  /** Reverse proxies in front of the server that append to X-Forwarded-For (Cloud Run: 1). 0 = use the socket address. */
+  trustProxyHops: number;
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv): ServerConfig {
@@ -33,5 +35,6 @@ export function loadConfig(env: NodeJS.ProcessEnv): ServerConfig {
     },
     mail: { resendApiKey: env.RESEND_API_KEY || undefined, from: env.MAIL_FROM ?? 'Auto Subtitle Translator <login@example.com>' },
     devOutbox: env.DEV_OUTBOX === '1',
+    trustProxyHops: Number(env.TRUST_PROXY_HOPS ?? 0),
   };
 }

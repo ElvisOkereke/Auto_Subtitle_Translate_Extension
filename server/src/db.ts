@@ -142,10 +142,17 @@ export class Repo {
     this.db.prepare('INSERT INTO sessions (token_hash, account_id, created_at) VALUES (?, ?, ?)').run(tokenHash, accountId, now);
   }
 
-  sessionAccount(tokenHash: string): Account | null {
+  /** The account of a live session created at or after `createdAfter` (expired sessions don't count). */
+  sessionAccount(tokenHash: string, createdAfter = 0): Account | null {
     return toAccount(
-      this.db.prepare('SELECT a.* FROM sessions s JOIN accounts a ON a.id = s.account_id WHERE s.token_hash = ? AND s.revoked = 0').get(tokenHash)
+      this.db
+        .prepare('SELECT a.* FROM sessions s JOIN accounts a ON a.id = s.account_id WHERE s.token_hash = ? AND s.revoked = 0 AND s.created_at >= ?')
+        .get(tokenHash, createdAfter)
     );
+  }
+
+  revokeAllSessions(accountId: number): void {
+    this.db.prepare('UPDATE sessions SET revoked = 1 WHERE account_id = ?').run(accountId);
   }
 
   revokeSession(tokenHash: string): void {

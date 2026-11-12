@@ -56,7 +56,8 @@ describe('accounts', () => {
   });
 
   it('more than 3 codes per email per 15 minutes is rate limited (429), and per IP after 20 per hour', async () => {
-    const { app, now } = setup();
+    const now = { t: Date.UTC(2026, 10, 12, 12) };
+    const app = createApp(testDeps({ clock: () => now.t, config: { ...testDeps().config, trustProxyHops: 1 } }));
     for (let i = 0; i < 3; i++) expect((await post(app, '/v1/auth/start', { email: 'a@example.com' })).status).toBe(200);
     expect((await post(app, '/v1/auth/start', { email: 'a@example.com' })).status).toBe(429);
     now.t += 15 * 60_000 + 1;
@@ -105,4 +106,50 @@ describe('accounts', () => {
     const off = createApp(testDeps({ mailer: new OutboxMailer(), config: { ...testDeps().config, devOutbox: false } }));
     expect((await off.request('/dev/outbox?email=a@example.com')).status).toBe(404);
   });
+
+  it('the client IP comes from the trusted proxy hop, not a client-supplied X-Forwarded-For', async () => {
+    const now = { t: Date.UTC(2026, 10, 12) };
+    const behindOneProxy = createApp(testDeps({ clock: () => now.t, config: { ...testDeps().config, trustProxyHops: 1 } }));
+    // The client prepends fake addresses; the proxy appends the real one last.
+    for (let i = 0; i < 20; i++) {
+      const spoofed = { 'x-forwarded-for': `10.0.0.${i}, 198.51.100.7` };
+      expect((await post(behindOneProxy, '/v1/auth/start', { email: `v${i}@example.com` }, spoofed)).status).toBe(200);
+    }
+    expect((await post(behindOneProxy, '/v1/auth/start', { email: 'v99@example.com' }, { 'x-forwarded-for': '10.9.9.9, 198.51.100.7' })).status).toBe(429);
+    // With no trusted proxy the header is ignored entirely (all from the same socket here).
+    const direct = createApp(testDeps({ clock: () => now.t }));
+    for (let i = 0; i < 20; i++) await post(direct, '/v1/auth/start', { email: `w${i}@example.com` }, { 'x-forwarded-for': `10.1.0.${i}` });
+    expect((await post(direct, '/v1/auth/start', { email: 'w99@example.com' }, { 'x-forwarded-for': '10.1.9.9' })).status).toBe(429);
+  });
+
+  it('an email is locked after 10 failed codes in an hour, even across new codes', async () => {
+    const { app, lastCode, now } = setup();
+    let failures = 0;
+    for (let round = 0; round < 4 && failures < 10; round++) {
+      now.t += 16 * 60_000; // past the per-email send limit window
+      await post(app, '/v1/auth/start', { email: 'victim@example.com' });
+      const code = lastCode('victim@example.com');
+      const wrong = code === '000000' ? '111111' : '000000';
+      for (let i = 0; i < 4 && failures < 10; i++, failures++) await post(app, '/v1/auth/verify', { email: 'victim@example.com', code: wrong });
+    }
+    now.t += 16 * 60_000;
+    await post(app, '/v1/auth/start', { email: 'victim@example.com' });
+    const res = await post(app, '/v1/auth/verify', { email: 'victim@example.com', code: lastCode('victim@example.com') });
+    expect(res.status).toBe(429); // the right code is refused while locked
+    now.t += 61 * 60_000;
+    await post(app, '/v1/auth/start', { email: 'victim@example.com' });
+    expect((await post(app, '/v1/auth/verify', { email: 'victim@example.com', code: lastCode('victim@example.com') })).status).toBe(200);
+  });
+
+  it('sessions expire after 90 days, and signout-all revokes every session', async () => {
+    const { app, signIn, now } = setup();
+    const old = await signIn('a@example.com');
+    now.t += 91 * 24 * 3600_000;
+    expect((await app.request('/v1/me', { headers: { authorization: `Bearer ${old}` } })).status).toBe(401);
+    const t1 = await signIn('b@example.com');
+    const t2 = await signIn('b@example.com');
+    expect((await post(app, '/v1/auth/signout-all', {}, { authorization: `Bearer ${t1}` })).status).toBe(200);
+    expect((await app.request('/v1/me', { headers: { authorization: `Bearer ${t2}` } })).status).toBe(401);
+  });
 });
+

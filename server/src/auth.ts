@@ -8,6 +8,9 @@ import type { Mailer } from './mailer';
 export const CODE_TTL_MS = 10 * 60_000;
 export const MAX_CODE_ATTEMPTS = 5;
 const EMAIL_LIMIT = { count: 3, windowMs: 15 * 60_000 };
+/** Wrong codes per email across all its codes before sign-in is locked for the window. */
+const FAILURE_LIMIT = { count: 10, windowMs: 60 * 60_000 };
+export const SESSION_TTL_MS = 90 * 24 * 3600_000;
 const IP_LIMIT = { count: 20, windowMs: 60 * 60_000 };
 const EMAIL_RE = /^[^\s@]{1,64}@[^\s@]{1,190}\.[^\s@]{2,63}$/;
 
@@ -18,8 +21,18 @@ export function validEmail(email: unknown): email is string {
   return typeof email === 'string' && email.length <= 254 && EMAIL_RE.test(email.trim());
 }
 
-export function clientIp(c: Context): string {
-  return c.req.header('x-forwarded-for')?.split(',')[0].trim() || 'local';
+/**
+ * The client's address: with `trustProxyHops` proxies in front (each appends to
+ * X-Forwarded-For), the entry that many from the end; otherwise the socket.
+ * Client-supplied X-Forwarded-For entries are never trusted.
+ */
+export function clientIp(c: Context, trustProxyHops: number): string {
+  if (trustProxyHops > 0) {
+    const entries = (c.req.header('x-forwarded-for') ?? '').split(',').map(s => s.trim()).filter(Boolean);
+    const entry = entries[entries.length - trustProxyHops];
+    if (entry) return entry;
+  }
+  return (c.env as { incoming?: { socket?: { remoteAddress?: string } } } | undefined)?.incoming?.socket?.remoteAddress ?? 'local';
 }
 
 export type AuthEnv = { Variables: { account: Account; tokenHash: string } };
@@ -49,15 +62,17 @@ export class Auth {
     return 'sent';
   }
 
-  /** Returns a new session token, or null for a wrong/expired/used/exhausted code. */
-  verify(emailRaw: string, code: string): string | null {
+  /** A new session token; null for a wrong/expired/used/exhausted code; 'locked' after too many failures. */
+  verify(emailRaw: string, code: string): string | null | 'locked' {
     const email = emailRaw.trim().toLowerCase();
+    if (this.repo.countRateEvents(`fail:${email}`, this.clock() - FAILURE_LIMIT.windowMs) >= FAILURE_LIMIT.count) return 'locked';
     const stored = this.repo.latestCode(email);
     if (!stored || stored.used || stored.attempts >= MAX_CODE_ATTEMPTS || this.clock() > stored.expiresAt) return null;
     const expected = Buffer.from(stored.codeHash, 'hex');
     const given = Buffer.from(codeHash(email, String(code)), 'hex');
     if (expected.length !== given.length || !timingSafeEqual(expected, given)) {
       this.repo.markCodeAttempt(stored.id);
+      this.repo.addRateEvent(`fail:${email}`, this.clock());
       return null;
     }
     this.repo.markCodeUsed(stored.id);
@@ -73,7 +88,7 @@ export class Auth {
       const header = c.req.header('authorization') ?? '';
       const token = header.startsWith('Bearer ') ? header.slice(7).trim() : '';
       const tokenHash = token ? sha256(token) : '';
-      const account = tokenHash ? this.repo.sessionAccount(tokenHash) : null;
+      const account = tokenHash ? this.repo.sessionAccount(tokenHash, this.clock() - SESSION_TTL_MS) : null;
       if (!account) return c.json({ error: 'unauthorized', message: 'Sign in again.' }, 401);
       c.set('account', account);
       c.set('tokenHash', tokenHash);

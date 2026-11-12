@@ -57,7 +57,7 @@ export function createApp(deps: AppDeps): Hono<AuthEnv> {
   app.post('/v1/auth/start', async c => {
     const body = await c.req.json().catch(() => null);
     if (!validEmail(body?.email)) return c.json({ error: 'bad_request', message: 'Enter a valid email address.' }, 400);
-    const result = await auth.start(body.email, clientIp(c));
+    const result = await auth.start(body.email, clientIp(c, config.trustProxyHops));
     if (result === 'rate_limited') return c.json({ error: 'rate_limited', message: 'Too many codes requested. Try again later.' }, 429);
     return c.json({ ok: true });
   });
@@ -68,12 +68,18 @@ export function createApp(deps: AppDeps): Hono<AuthEnv> {
       return c.json({ error: 'bad_request', message: 'Enter the 6-digit code from the email.' }, 400);
     }
     const token = auth.verify(body.email, String(body.code));
+    if (token === 'locked') return c.json({ error: 'rate_limited', message: 'Too many wrong codes. Try again in an hour.' }, 429);
     if (!token) return c.json({ error: 'invalid_code', message: 'That code is wrong or expired. Request a new one.' }, 400);
     return c.json({ token });
   });
 
   app.post('/v1/auth/signout', requireAccount, c => {
     repo.revokeSession(c.get('tokenHash'));
+    return c.json({ ok: true });
+  });
+
+  app.post('/v1/auth/signout-all', requireAccount, c => {
+    repo.revokeAllSessions(c.get('account').id);
     return c.json({ ok: true });
   });
 
