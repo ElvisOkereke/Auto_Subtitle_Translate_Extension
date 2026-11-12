@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { launchExtensionBrowser } from './launch';
 import { startFixtureServer, FixtureServer, TranslationCall } from './server';
+import { startLocalProxy, LocalProxy } from './proxy';
 
 export type { TranslationCall };
 
@@ -20,6 +21,8 @@ export interface ExtensionFixtures {
   /** Open popup.html bound to the given page's tab (as if the toolbar icon was clicked there). */
   openPopup: (target: Page) => Promise<Page>;
   tabIdOf: (target: Page) => Promise<number>;
+  /** The hosted proxy (server/) running locally; the extension is pointed at it. Opt-in: only started when a test uses it. */
+  proxy: LocalProxy;
 }
 
 export interface ExtensionOptions {
@@ -100,7 +103,7 @@ export const test = base.extend<ExtensionFixtures & ExtensionOptions, { server: 
       // Persistent profiles keep keys and engine settings from earlier tests: start each
       // test without them so it gets exactly what it configures.
       await sw.evaluate(async () => {
-        await chrome.storage.local.remove(['deeplApiKey', 'googleTranslateApiKey', 'anthropicApiKey', 'claudeGatewayToken']);
+        await chrome.storage.local.remove(['deeplApiKey', 'googleTranslateApiKey', 'anthropicApiKey', 'claudeGatewayToken', 'accountToken']);
         await chrome.storage.sync.remove(['translationEngineMode', 'claudeModel', 'claudeAccess', 'claudeGatewayUrl', 'claudeGatewayAuth']);
       });
       if (mockTranslation) {
@@ -123,12 +126,23 @@ export const test = base.extend<ExtensionFixtures & ExtensionOptions, { server: 
     await use(async settings => {
       // API keys go to storage.local like the extension stores them (settings.ts SECRET_KEYS).
       await sw.evaluate(s => {
-        const secretKeys = ['deeplApiKey', 'googleTranslateApiKey', 'anthropicApiKey', 'claudeGatewayToken'];
+        const secretKeys = ['deeplApiKey', 'googleTranslateApiKey', 'anthropicApiKey', 'claudeGatewayToken', 'accountToken'];
         const secrets = Object.fromEntries(Object.entries(s).filter(([k]) => secretKeys.includes(k)));
         const rest = Object.fromEntries(Object.entries(s).filter(([k]) => !secretKeys.includes(k)));
         return Promise.all([chrome.storage.local.set(secrets), chrome.storage.sync.set(rest)]);
       }, settings);
     });
+  },
+
+  proxy: async ({ server, sw, translationCalls }, use) => {
+    void translationCalls; // mock endpoints configured first
+    const proxy = await startLocalProxy(server.url);
+    await sw.evaluate(async url => {
+      const { devEndpointOverrides = {} } = await chrome.storage.local.get('devEndpointOverrides');
+      await chrome.storage.local.set({ devEndpointOverrides: { ...devEndpointOverrides, server: url } });
+    }, proxy.url);
+    await use(proxy);
+    await proxy.close();
   },
 
   tabIdOf: async ({ sw }, use) => {

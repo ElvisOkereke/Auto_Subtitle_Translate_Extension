@@ -92,3 +92,28 @@ test('the glossary editor lists learned terms, and a correction re-translates th
   await expect(editor.locator('.glossary-row[data-source="뽀삐"] input')).toHaveValue('Poppy (champion)');
 });
 
+
+test('a subscriber gets Claude subtitles through the hosted proxy with no API keys in the extension', async ({ context, fixtureURL, openPopup, proxy, sw, configure }) => {
+  test.setTimeout(180_000);
+  // No DeepL/Anthropic keys: subscription for both tiers.
+  await configure({ translationProvider: 'subscription', claudeAccess: 'subscription', targetLanguage: 'en', subtitleLanguage: 'ko', translationEngineMode: 'fast-then-best', claudeModel: 'claude-sonnet-5-5' });
+  await sw.evaluate(() => chrome.storage.local.remove(['deeplApiKey', 'googleTranslateApiKey', 'anthropicApiKey', 'claudeGatewayToken']));
+  proxy.setPlan('sub@example.com', 'standard');
+  const page = await context.newPage();
+  await openFixture(page, fixtureURL);
+  const login = await openPopup(page);
+  await login.fill('#accountEmail', 'sub@example.com');
+  await login.click('#accountSendCode');
+  await expect(login.locator('#accountCodeRow')).toBeVisible();
+  await login.fill('#accountCode', proxy.lastCode('sub@example.com'));
+  await login.click('#accountSignIn');
+  await expect(login.locator('#signedInView')).toBeVisible();
+  await login.close();
+  await startViaPopup(page, openPopup);
+  await playUntil(page, 9);
+  const shown = await shownRecords(page);
+  expect(shown.some(s => s.text.startsWith('[CLAUDE]'))).toBe(true);
+  const local = await sw.evaluate(() => chrome.storage.local.get(null));
+  for (const key of ['deeplApiKey', 'anthropicApiKey', 'claudeGatewayToken', 'googleTranslateApiKey']) expect(local[key] ?? '').toBe('');
+  expect(proxy.usageUsd('sub@example.com')).toBeGreaterThan(0);
+});

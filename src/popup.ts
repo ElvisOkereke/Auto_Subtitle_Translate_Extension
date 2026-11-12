@@ -40,6 +40,22 @@ interface PopupElements {
   claudeStatus: HTMLDivElement;
   glossaryTopic: HTMLDivElement;
   glossaryList: HTMLDivElement;
+  accountEmail: HTMLInputElement;
+  accountSendCode: HTMLButtonElement;
+  accountCodeRow: HTMLDivElement;
+  accountCode: HTMLInputElement;
+  accountSignIn: HTMLButtonElement;
+  signedOutView: HTMLDivElement;
+  signedInView: HTMLDivElement;
+  accountEmailShown: HTMLDivElement;
+  accountPlan: HTMLDivElement;
+  accountUsage: HTMLDivElement;
+  accountUsageBar: HTMLProgressElement;
+  accountSubscribeStandard: HTMLButtonElement;
+  accountSubscribePro: HTMLButtonElement;
+  accountManage: HTMLButtonElement;
+  accountSignOut: HTMLButtonElement;
+  accountStatus: HTMLDivElement;
 }
 
 const ELEMENT_IDS: (keyof PopupElements)[] = [
@@ -49,7 +65,8 @@ const ELEMENT_IDS: (keyof PopupElements)[] = [
   'modeAudio', 'modeSubtitles', 'audioPanel', 'subtitlePanel', 'subtitleLanguage',
   'startSubtitleMode', 'drawSubtitleBox', 'stopSubtitleMode', 'subtitleModeStatus',
   'engineMode', 'claudeModel', 'claudeAccess', 'anthropicApiKey', 'claudeGatewayUrl', 'claudeGatewayToken',
-  'claudeGatewayAuth', 'anthropicKeyGroup', 'claudeGatewayGroup', 'claudeStatus', 'glossaryTopic', 'glossaryList'
+  'claudeGatewayAuth', 'anthropicKeyGroup', 'claudeGatewayGroup', 'claudeStatus', 'glossaryTopic', 'glossaryList',
+  'accountEmail', 'accountSendCode', 'accountCodeRow', 'accountCode', 'accountSignIn', 'signedOutView', 'signedInView', 'accountEmailShown', 'accountPlan', 'accountUsage', 'accountUsageBar', 'accountSubscribeStandard', 'accountSubscribePro', 'accountManage', 'accountSignOut', 'accountStatus'
 ];
 
 const MODE_LABELS: Record<string, string> = {
@@ -101,8 +118,36 @@ const NON_SETTING_ELEMENT_KEYS = [
   'claudeGatewayGroup',
   'claudeStatus',
   'glossaryTopic',
-  'glossaryList'
+  'glossaryList',
+  'accountEmail',
+  'accountSendCode',
+  'accountCodeRow',
+  'accountCode',
+  'accountSignIn',
+  'signedOutView',
+  'signedInView',
+  'accountEmailShown',
+  'accountPlan',
+  'accountUsage',
+  'accountUsageBar',
+  'accountSubscribeStandard',
+  'accountSubscribePro',
+  'accountManage',
+  'accountSignOut',
+  'accountStatus'
 ];
+
+interface AccountView {
+  email: string;
+  plan: 'free' | 'standard' | 'pro';
+  active: boolean;
+  usageUsd: number;
+  budgetUsd: number;
+  warn: boolean;
+  exhausted: boolean;
+}
+
+const PLAN_LABELS: Record<string, string> = { free: 'Free', standard: 'Standard', pro: 'Pro' };
 
 class PopupController {
   private isActive: boolean;
@@ -110,6 +155,7 @@ class PopupController {
   private elements: PopupElements;
   /** Bumped by every user action so a slow initial state query can't overwrite it. */
   private screenTranslateActionCount = 0;
+  private signedIn = false;
 
   constructor() {
     this.isActive = false;
@@ -122,6 +168,72 @@ class PopupController {
     this.refreshSubtitleState();
     this.refreshSubtitleModeState();
     this.loadGlossary();
+    this.refreshAccount();
+  }
+
+  // ---- account (hosted translation) ----
+
+  private setAccountStatus(text: string, ok = false) {
+    this.elements.accountStatus.textContent = text;
+    this.elements.accountStatus.classList.toggle('ok', ok);
+  }
+
+  async refreshAccount(): Promise<void> {
+    const r = await chrome.runtime.sendMessage({ type: 'ACCOUNT_STATUS' }).catch(() => null);
+    this.renderAccount(r?.signedIn ? r.account : null);
+    if (r && !r.success && r.error) this.setAccountStatus(r.error);
+  }
+
+  private renderAccount(account: AccountView | null) {
+    const e = this.elements;
+    this.signedIn = !!account;
+    e.signedOutView.classList.toggle('hidden', !!account);
+    e.signedInView.classList.toggle('hidden', !account);
+    if (account) {
+      e.accountEmailShown.textContent = account.email;
+      e.accountPlan.textContent = `Plan: ${PLAN_LABELS[account.plan] ?? account.plan}${account.plan !== 'free' && !account.active ? ' (payment needed)' : ''}`;
+      e.accountUsage.textContent = account.active ? `$${account.usageUsd.toFixed(2)} of $${account.budgetUsd.toFixed(2)} used this month` : '';
+      e.accountUsageBar.classList.toggle('hidden', !account.active);
+      e.accountUsageBar.value = account.budgetUsd ? Math.min(1, account.usageUsd / account.budgetUsd) : 0;
+      e.accountSubscribeStandard.classList.toggle('hidden', account.active);
+      e.accountSubscribePro.classList.toggle('hidden', account.active && account.plan === 'pro');
+      e.accountManage.classList.toggle('hidden', !account.active);
+      if (!account.active) this.setAccountStatus('Subscribe to translate with the hosted service (no API keys needed).');
+      else if (account.exhausted) this.setAccountStatus("This month's allowance is used up - upgrade, or use your own keys until next month.");
+      else if (account.warn) this.setAccountStatus("You've used over 80% of this month's allowance.");
+      else this.setAccountStatus('');
+    }
+    this.updateClaudeFields();
+  }
+
+  private async sendCode() {
+    const email = this.elements.accountEmail.value.trim();
+    if (!email) return this.setAccountStatus('Enter your email address.');
+    this.setAccountStatus('Sending...');
+    const r = await chrome.runtime.sendMessage({ type: 'ACCOUNT_START', email });
+    if (!r?.success) return this.setAccountStatus(r?.error ?? 'Could not send the code.');
+    this.elements.accountCodeRow.classList.remove('hidden');
+    this.setAccountStatus(`Code sent to ${email}. It expires in 10 minutes.`, true);
+    this.elements.accountCode.focus();
+  }
+
+  private async signIn() {
+    const r = await chrome.runtime.sendMessage({ type: 'ACCOUNT_VERIFY', email: this.elements.accountEmail.value.trim(), code: this.elements.accountCode.value.trim() });
+    if (!r?.success) return this.setAccountStatus(r?.error ?? 'Sign-in failed.');
+    this.elements.accountCode.value = '';
+    this.elements.accountCodeRow.classList.add('hidden');
+    this.renderAccount(r.account);
+  }
+
+  private async openBilling(plan?: 'standard' | 'pro') {
+    const r = await chrome.runtime.sendMessage({ type: 'BILLING_OPEN', ...(plan ? { plan } : {}) });
+    if (!r?.success) this.setAccountStatus(r?.error ?? 'Could not open billing.');
+  }
+
+  private async signOut() {
+    await chrome.runtime.sendMessage({ type: 'ACCOUNT_SIGNOUT' });
+    this.renderAccount(null);
+    this.setAccountStatus('Signed out.', true);
   }
 
   /** Glossary of the video in the target tab: learned names/terms, editable. */
@@ -302,6 +414,13 @@ class PopupController {
       this.updateApiKeyVisibility();
     });
     this.elements.claudeAccess.addEventListener('change', () => this.updateClaudeFields());
+    this.elements.accountSendCode.addEventListener('click', () => void this.sendCode());
+    this.elements.accountSignIn.addEventListener('click', () => void this.signIn());
+    this.elements.accountCode.addEventListener('keydown', e => e.key === 'Enter' && void this.signIn());
+    this.elements.accountSubscribeStandard.addEventListener('click', () => void this.openBilling('standard'));
+    this.elements.accountSubscribePro.addEventListener('click', () => void this.openBilling('pro'));
+    this.elements.accountManage.addEventListener('click', () => void this.openBilling());
+    this.elements.accountSignOut.addEventListener('click', () => void this.signOut());
     for (const key of ['anthropicApiKey', 'claudeGatewayUrl', 'claudeGatewayToken'] as const) {
       this.elements[key].addEventListener('change', () => this.updateClaudeFields());
     }
@@ -330,13 +449,14 @@ class PopupController {
   /** Key vs gateway fields, the gateway URL check, and "(needs Claude access)" on Claude modes. */
   private updateClaudeFields(): boolean {
     const gateway = this.elements.claudeAccess.value === 'gateway';
-    this.elements.anthropicKeyGroup.classList.toggle('hidden', gateway);
+    const subscription = this.elements.claudeAccess.value === 'subscription';
+    this.elements.anthropicKeyGroup.classList.toggle('hidden', gateway || subscription);
     this.elements.claudeGatewayGroup.classList.toggle('hidden', !gateway);
     const url = this.elements.claudeGatewayUrl.value.trim();
     const urlOk = !url || validateGatewayUrl(url) !== null;
     this.elements.claudeStatus.textContent =
       gateway && !urlOk ? 'Gateway URL must start with https:// (http:// only for localhost).' : '';
-    const hasClaude = gateway ? !!url && urlOk && !!this.elements.claudeGatewayToken.value : !!this.elements.anthropicApiKey.value;
+    const hasClaude = subscription ? this.signedIn : gateway ? !!url && urlOk && !!this.elements.claudeGatewayToken.value : !!this.elements.anthropicApiKey.value;
     for (const option of this.elements.engineMode.options) {
       const needsClaude = option.value !== 'fast';
       option.textContent = MODE_LABELS[option.value] + (needsClaude && !hasClaude ? ' (needs Claude access)' : '');
@@ -346,7 +466,8 @@ class PopupController {
 
   private updateApiKeyVisibility() {
     const isDeepL = this.elements.translationProvider.value === 'deepl';
-    this.elements.googleApiKeyGroup.classList.toggle('hidden', isDeepL);
+    const isSubscription = this.elements.translationProvider.value === 'subscription';
+    this.elements.googleApiKeyGroup.classList.toggle('hidden', isDeepL || isSubscription);
     this.elements.deeplApiKeyGroup.classList.toggle('hidden', !isDeepL);
   }
 

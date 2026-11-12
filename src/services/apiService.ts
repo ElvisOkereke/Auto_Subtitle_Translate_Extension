@@ -24,7 +24,7 @@ export type EndpointOverrides = Partial<Record<'google' | 'deepl' | 'anthropic' 
  * providers at a local mock server. Only loopback http URLs are honoured, so
  * this can never redirect API keys to a remote host.
  */
-const LOOPBACK_URL = /^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?\//;
+const LOOPBACK_URL = /^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?(\/|$)/;
 
 export async function getEndpointOverrides(): Promise<EndpointOverrides> {
   try {
