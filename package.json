@@ -4,7 +4,10 @@
   "description": "Browser extension for auto-generating and translating subtitles",
   "dependencies": {
     "@anthropic-ai/sdk": "^1.8.0",
-    "@huggingface/transformers": "^3.0.0"
+    "@hono/node-server": "^1.19.19",
+    "@huggingface/transformers": "^3.0.0",
+    "hono": "^4.13.18",
+    "stripe": "^18.5.0"
   },
   "scripts": {
     "build": "npm run build:dev",
@@ -13,7 +16,7 @@
     "watch": "webpack --mode development --watch",
     "test": "jest",
     "lint": "eslint src/ --ext .ts",
-    "type-check": "tsc --noEmit",
+    "type-check": "tsc --noEmit && tsc --noEmit -p server",
     "package": "npm run build:prod && web-ext build --source-dir=dist",
     "prebuild:prod": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
     "prebuild:dev": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
@@ -26,7 +29,10 @@
     "test:e2e:chrome": "npm run build:prod && cross-env-shell E2E_BROWSER=chrome playwright test --project=ui --project=captions --project=subtitles",
     "fixtures:video": "node e2e/scripts/fixtures-video.mjs",
     "e2e:youtube": "npm run build:prod && cross-env-shell E2E_BROWSER=chrome playwright test --project=youtube",
-    "e2e:judge": "cross-env-shell E2E_JUDGE=1 playwright test --project=judge"
+    "e2e:judge": "cross-env-shell E2E_JUDGE=1 playwright test --project=judge",
+    "server:test": "jest --selectProjects server",
+    "server:build": "esbuild server/src/main.ts --bundle --platform=node --target=node22 --format=cjs --outdir=server/dist --external:node:sqlite",
+    "server:dev": "npm run server:build && node server/dist/main.js"
   },
   "devDependencies": {
     "@playwright/test": "^1.56.1",
@@ -36,6 +42,7 @@
     "@typescript-eslint/parser": "^6.7.0",
     "copy-webpack-plugin": "^11.0.0",
     "cross-env": "^7.0.3",
+    "esbuild": "^0.28.2",
     "eslint": "^8.50.0",
     "fake-indexeddb": "^6.0.0",
     "jest": "^29.6.0",

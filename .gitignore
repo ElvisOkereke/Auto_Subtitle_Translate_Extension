@@ -87,3 +87,8 @@ e2e/.perf/
 e2e/.perf-chrome.log
 .superpowers/
 e2e/.recon/
+
+# hosted proxy local databases
+*.db
+*.db-wal
+*.db-shm
