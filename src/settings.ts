@@ -8,6 +8,7 @@ export const DEFAULT_SETTINGS: ExtensionSettings = {
   googleTranslateApiKey: '',
   translationProvider: 'google',
   deeplApiKey: '',
+  subtitleLanguage: 'ko',
   enabled: false
 };
 

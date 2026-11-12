@@ -1,6 +1,7 @@
 // popup.ts - Popup interface logic
 
 import { ExtensionSettings } from './types';
+import { DEFAULT_SETTINGS } from './settings';
 
 interface PopupElements {
   toggleButton: HTMLButtonElement;
@@ -17,7 +18,24 @@ interface PopupElements {
   deeplApiKey: HTMLInputElement;
   googleApiKeyGroup: HTMLDivElement;
   deeplApiKeyGroup: HTMLDivElement;
+  modeAudio: HTMLButtonElement;
+  modeSubtitles: HTMLButtonElement;
+  audioPanel: HTMLDivElement;
+  subtitlePanel: HTMLDivElement;
+  subtitleLanguage: HTMLSelectElement;
+  startSubtitleMode: HTMLButtonElement;
+  drawSubtitleBox: HTMLButtonElement;
+  stopSubtitleMode: HTMLButtonElement;
+  subtitleModeStatus: HTMLDivElement;
 }
+
+const ELEMENT_IDS: (keyof PopupElements)[] = [
+  'toggleButton', 'screenTranslateButton', 'drawNewBoxButton', 'screenTranslateStatus', 'status',
+  'sourceLanguage', 'targetLanguage', 'subtitleStyle', 'fontSize', 'translationProvider',
+  'googleTranslateApiKey', 'deeplApiKey', 'googleApiKeyGroup', 'deeplApiKeyGroup',
+  'modeAudio', 'modeSubtitles', 'audioPanel', 'subtitlePanel', 'subtitleLanguage',
+  'startSubtitleMode', 'drawSubtitleBox', 'stopSubtitleMode', 'subtitleModeStatus'
+];
 
 /**
  * The tab the popup controls. Normally the active tab of the popup's window;
@@ -49,7 +67,15 @@ const NON_SETTING_ELEMENT_KEYS = [
   'screenTranslateStatus',
   'status',
   'googleApiKeyGroup',
-  'deeplApiKeyGroup'
+  'deeplApiKeyGroup',
+  'modeAudio',
+  'modeSubtitles',
+  'audioPanel',
+  'subtitlePanel',
+  'startSubtitleMode',
+  'drawSubtitleBox',
+  'stopSubtitleMode',
+  'subtitleModeStatus'
 ];
 
 class PopupController {
@@ -68,6 +94,87 @@ class PopupController {
     this.setupEventListeners();
     this.refreshScreenTranslateState();
     this.refreshSubtitleState();
+    this.refreshSubtitleModeState();
+  }
+
+  private subtitleModeRunning = false;
+
+  /** Audio (live captions from speech) or Subtitles (burned-in subtitle translation). */
+  setMode(mode: 'audio' | 'subtitles') {
+    const subtitles = mode === 'subtitles';
+    this.elements.modeAudio.classList.toggle('active', !subtitles);
+    this.elements.modeSubtitles.classList.toggle('active', subtitles);
+    this.elements.audioPanel.classList.toggle('hidden', subtitles);
+    this.elements.subtitlePanel.classList.toggle('hidden', !subtitles);
+    chrome.storage.local?.set({ popupMode: mode }).catch(() => undefined);
+  }
+
+  async refreshSubtitleModeState() {
+    let state: { mode?: string; state?: string; hasBox?: boolean } = {};
+    try {
+      const tab = await getTargetTab();
+      if (tab?.id !== undefined) state = (await chrome.tabs.sendMessage(tab.id, { type: 'GET_SUBTITLE_MODE_STATE' })) ?? {};
+    } catch {
+      // page without content scripts
+    }
+    const stored = await chrome.storage.local?.get('popupMode').catch(() => ({}));
+    this.subtitleModeRunning = state.mode === 'subtitles';
+    this.setMode(this.subtitleModeRunning || (stored as any)?.popupMode === 'subtitles' ? 'subtitles' : 'audio');
+    this.renderSubtitleMode(!!state.hasBox, state.state);
+  }
+
+  private renderSubtitleMode(hasBox: boolean, state?: string) {
+    const running = this.subtitleModeRunning;
+    this.elements.stopSubtitleMode.classList.toggle('hidden', !running);
+    this.elements.startSubtitleMode.classList.toggle('hidden', running || !hasBox);
+    this.elements.drawSubtitleBox.textContent = hasBox || running ? 'Redraw box' : 'Draw subtitle box';
+    const status = this.elements.subtitleModeStatus;
+    const text = running
+      ? state === 'paused-ad'
+        ? 'Paused during the ad.'
+        : state === 'loading'
+          ? 'Loading OCR model...'
+          : 'Translating subtitles in the box.'
+      : '';
+    status.textContent = text;
+    status.className = 'status success';
+    status.classList.toggle('hidden', !text);
+  }
+
+  private async sendToTab(message: Record<string, unknown>) {
+    const tab = await getTargetTab();
+    if (!tab || typeof tab.id !== 'number') throw new Error('No active tab found');
+    return chrome.tabs.sendMessage(tab.id, message);
+  }
+
+  async drawSubtitleBox() {
+    try {
+      if (this.isActive) await this.toggleSubtitles(); // one mode at a time
+      await this.sendToTab({ type: 'DRAW_SUBTITLE_BOX', lang: this.elements.subtitleLanguage.value });
+      this.showStatus('Drag a box around the subtitles on the video.', 'success');
+    } catch (error) {
+      this.showStatus('Failed to start: ' + describeTabError(error), 'error');
+    }
+  }
+
+  async startSubtitleModeWithSavedBox() {
+    try {
+      if (this.isActive) await this.toggleSubtitles();
+      const response = await this.sendToTab({ type: 'START_SUBTITLE_MODE' });
+      if (!response?.success) throw new Error(response?.error || 'Could not start');
+      await this.refreshSubtitleModeState();
+    } catch (error) {
+      this.showStatus('Failed to start: ' + describeTabError(error), 'error');
+    }
+  }
+
+  async stopSubtitleMode() {
+    try {
+      await this.sendToTab({ type: 'STOP_SUBTITLE_MODE' });
+    } catch {
+      // nothing to stop
+    }
+    await this.refreshSubtitleModeState();
   }
 
   /** Subtitles are per tab, so ask the tab rather than trusting a stored flag. */
@@ -84,56 +191,13 @@ class PopupController {
   }
 
   initializeElements() {
-    const toggleButton = document.getElementById('toggleButton') as HTMLButtonElement | null;
-    const screenTranslateButton = document.getElementById('screenTranslateButton') as HTMLButtonElement | null;
-    const drawNewBoxButton = document.getElementById('drawNewBoxButton') as HTMLButtonElement | null;
-    const screenTranslateStatus = document.getElementById('screenTranslateStatus') as HTMLDivElement | null;
-    const status = document.getElementById('status') as HTMLDivElement | null;
-    const sourceLanguage = document.getElementById('sourceLanguage') as HTMLSelectElement | null;
-    const targetLanguage = document.getElementById('targetLanguage') as HTMLSelectElement | null;
-    const subtitleStyle = document.getElementById('subtitleStyle') as HTMLSelectElement | null;
-    const fontSize = document.getElementById('fontSize') as HTMLSelectElement | null;
-    const translationProvider = document.getElementById('translationProvider') as HTMLSelectElement | null;
-    const googleTranslateApiKey = document.getElementById('googleTranslateApiKey') as HTMLInputElement | null;
-    const deeplApiKey = document.getElementById('deeplApiKey') as HTMLInputElement | null;
-    const googleApiKeyGroup = document.getElementById('googleApiKeyGroup') as HTMLDivElement | null;
-    const deeplApiKeyGroup = document.getElementById('deeplApiKeyGroup') as HTMLDivElement | null;
-
-    if (
-      !toggleButton ||
-      !screenTranslateButton ||
-      !drawNewBoxButton ||
-      !screenTranslateStatus ||
-      !status ||
-      !sourceLanguage ||
-      !targetLanguage ||
-      !subtitleStyle ||
-      !fontSize ||
-      !translationProvider ||
-      !googleTranslateApiKey ||
-      !deeplApiKey ||
-      !googleApiKeyGroup ||
-      !deeplApiKeyGroup
-    ) {
-      throw new Error('One or more popup elements not found in the DOM.');
+    const found: Partial<PopupElements> = {};
+    for (const id of ELEMENT_IDS) {
+      const el = document.getElementById(id);
+      if (!el) throw new Error(`Popup element #${id} not found in the DOM.`);
+      (found as Record<string, HTMLElement>)[id] = el;
     }
-
-    this.elements = {
-      toggleButton,
-      screenTranslateButton,
-      drawNewBoxButton,
-      screenTranslateStatus,
-      status,
-      sourceLanguage,
-      targetLanguage,
-      subtitleStyle,
-      fontSize,
-      translationProvider,
-      googleTranslateApiKey,
-      deeplApiKey,
-      googleApiKeyGroup,
-      deeplApiKeyGroup
-    };
+    this.elements = found as PopupElements;
   }
 
   setupEventListeners() {
@@ -148,6 +212,12 @@ class PopupController {
     this.elements.drawNewBoxButton.addEventListener('click', () => {
       this.drawNewBox();
     });
+
+    this.elements.modeAudio.addEventListener('click', () => this.setMode('audio'));
+    this.elements.modeSubtitles.addEventListener('click', () => this.setMode('subtitles'));
+    this.elements.drawSubtitleBox.addEventListener('click', () => this.drawSubtitleBox());
+    this.elements.startSubtitleMode.addEventListener('click', () => this.startSubtitleModeWithSavedBox());
+    this.elements.stopSubtitleMode.addEventListener('click', () => this.stopSubtitleMode());
 
     this.elements.translationProvider.addEventListener('change', () => {
       this.updateApiKeyVisibility();
@@ -170,18 +240,7 @@ class PopupController {
 
   async loadSettings() {
     try {
-      const defaultSettings: ExtensionSettings = {
-        sourceLanguage: 'auto',
-        targetLanguage: 'en',
-        subtitleStyle: 'bottom',
-        fontSize: 'medium',
-        googleTranslateApiKey: '',
-        translationProvider: 'google',
-        deeplApiKey: '',
-        enabled: false
-      };
-
-      const settings = await chrome.storage.sync.get(defaultSettings);
+      const settings = (await chrome.storage.sync.get(DEFAULT_SETTINGS)) as ExtensionSettings;
 
       this.elements.sourceLanguage.value = settings.sourceLanguage;
       this.elements.targetLanguage.value = settings.targetLanguage;
@@ -190,6 +249,7 @@ class PopupController {
       this.elements.translationProvider.value = settings.translationProvider;
       this.elements.googleTranslateApiKey.value = settings.googleTranslateApiKey;
       this.elements.deeplApiKey.value = settings.deeplApiKey;
+      this.elements.subtitleLanguage.value = settings.subtitleLanguage;
       this.updateApiKeyVisibility();
 
       this.updateToggleButton();
@@ -224,7 +284,8 @@ class PopupController {
         fontSize: this.elements.fontSize.value,
         translationProvider: this.elements.translationProvider.value,
         googleTranslateApiKey: this.elements.googleTranslateApiKey.value,
-        deeplApiKey: this.elements.deeplApiKey.value
+        deeplApiKey: this.elements.deeplApiKey.value,
+        subtitleLanguage: this.elements.subtitleLanguage.value
       };
 
       await chrome.runtime.sendMessage({
@@ -241,6 +302,9 @@ class PopupController {
 
   async toggleSubtitles() {
     try {
+      if (!this.isActive && this.subtitleModeRunning) {
+        await this.stopSubtitleMode(); // one mode at a time
+      }
       this.isActive = !this.isActive;
       this.updateToggleButton();
 

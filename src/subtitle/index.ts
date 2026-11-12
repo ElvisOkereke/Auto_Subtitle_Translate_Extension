@@ -2,14 +2,143 @@
 import { OcrClient } from './ocrClient';
 import { installTestBridge } from './testBridge';
 import { SubtitleOverlay } from './overlay';
-import { boxToPage, contentRect } from './videoGeometry';
-import type { NormalizedBox } from './types';
+import { SubtitleMode, TranslateRequest, TranslateResponse } from './subtitleMode';
+import { TimelineStore } from './timeline';
+import { boxToPage, contentRect, pageToBox, Rect } from './videoGeometry';
+import { videoIdFrom } from './videoId';
+import type { NormalizedBox, SubtitleLanguage } from './types';
+
+const MIN_BOX_WIDTH = 24;
+const MIN_BOX_HEIGHT = 12;
 
 let ocr: Promise<OcrClient> | null = null;
 export function getOcr(): Promise<OcrClient> {
   ocr ??= OcrClient.attach();
   return ocr;
 }
+
+let store: Promise<TimelineStore | null> | null = null;
+function getStore(): Promise<TimelineStore | null> {
+  store ??= TimelineStore.open().catch(() => null);
+  return store;
+}
+
+let mode: SubtitleMode | null = null;
+let starting: Promise<unknown> | null = null;
+/** Subtitle mode stays on across in-page navigation until the user stops it. */
+let enabled = false;
+let lastVideoId: string | null = currentVideoId();
+
+function currentVideoId(): string | null {
+  return videoIdFrom(location.href);
+}
+
+const boxKey = (videoId: string) => `subtitleBox:${videoId}`;
+
+async function storedBox(videoId: string): Promise<NormalizedBox | null> {
+  const stored = await chrome.storage.local.get(boxKey(videoId));
+  return (stored[boxKey(videoId)] as NormalizedBox | undefined) ?? null;
+}
+
+async function subtitleLanguage(): Promise<SubtitleLanguage> {
+  const { subtitleLanguage: lang } = await chrome.storage.sync.get({ subtitleLanguage: 'ko' });
+  return lang as SubtitleLanguage;
+}
+
+function translate(req: TranslateRequest): Promise<TranslateResponse> {
+  return chrome.runtime.sendMessage({ type: 'TRANSLATE_SUBTITLE_LINE', ...req });
+}
+
+/** The <video> under a page point, if any. */
+function videoAt(x: number, y: number): HTMLVideoElement | null {
+  const hit = document.elementsFromPoint(x, y).find(el => el instanceof HTMLVideoElement) as HTMLVideoElement | undefined;
+  if (hit) return hit;
+  for (const v of document.querySelectorAll('video')) {
+    const r = v.getBoundingClientRect();
+    if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) return v;
+  }
+  return null;
+}
+
+async function startMode(video: HTMLVideoElement, videoId: string, box: NormalizedBox): Promise<void> {
+  stopMode();
+  const lang = await subtitleLanguage();
+  const client = await getOcr();
+  await client.preload(lang); // first run downloads the OCR models
+  mode = await SubtitleMode.start({ video, videoId, box, lang, deps: { ocr: client, translate, store: await getStore() } });
+  enabled = true;
+}
+
+function stopMode(): void {
+  mode?.stop();
+  mode = null;
+}
+
+export type StartResult = 'started' | 'too-small' | 'not-over-video';
+
+/** Called by the box selector (realTimeTranslate.ts) with the drawn rectangle in viewport coordinates. */
+async function startFromRect(rect: Rect): Promise<StartResult> {
+  const video = videoAt(rect.x + rect.width / 2, rect.y + rect.height / 2);
+  if (!video) return 'not-over-video';
+  if (rect.width < MIN_BOX_WIDTH || rect.height < MIN_BOX_HEIGHT) return 'too-small';
+  const box = pageToBox(rect, video.getBoundingClientRect(), contentRect(video));
+  const videoId = currentVideoId() ?? location.href;
+  await chrome.storage.local.set({ [boxKey(videoId)]: box });
+  starting = startMode(video, videoId, box);
+  await starting;
+  return 'started';
+}
+
+// Content scripts of one extension share an isolated world, so the box
+// selector in realTimeTranslate.js can reach this directly (pages cannot).
+(globalThis as any).__astSubtitleMode = { startFromRect };
+
+async function onNavigate(): Promise<void> {
+  const videoId = currentVideoId();
+  if (videoId === lastVideoId) return;
+  lastVideoId = videoId;
+  stopMode();
+  if (!enabled || !videoId) return;
+  const box = await storedBox(videoId);
+  if (!box) return;
+  const video = document.querySelector<HTMLVideoElement>('video.html5-main-video, video');
+  if (!video) return;
+  if (video.readyState < 1) await new Promise(r => video.addEventListener('loadedmetadata', r, { once: true }));
+  if (currentVideoId() === videoId) await startMode(video, videoId, box);
+}
+
+document.addEventListener('yt-navigate-finish', () => void onNavigate());
+window.addEventListener('popstate', () => void onNavigate());
+
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  switch (message.type) {
+    case 'GET_SUBTITLE_MODE_STATE': {
+      const videoId = currentVideoId();
+      (videoId ? storedBox(videoId) : Promise.resolve(null)).then(box =>
+        sendResponse({ mode: mode ? 'subtitles' : 'off', state: mode?.state ?? 'stopped', videoId, hasBox: !!box })
+      );
+      return true;
+    }
+    case 'START_SUBTITLE_MODE': {
+      // Start with the box saved for this video (no redraw needed).
+      const videoId = currentVideoId();
+      const video = document.querySelector<HTMLVideoElement>('video');
+      (async () => {
+        const box = videoId ? await storedBox(videoId) : null;
+        if (!box || !video || !videoId) return { success: false, error: 'No saved box for this video' };
+        await startMode(video, videoId, box);
+        return { success: true };
+      })().then(sendResponse, e => sendResponse({ success: false, error: String(e) }));
+      return true;
+    }
+    case 'STOP_SUBTITLE_MODE':
+      enabled = false;
+      stopMode();
+      sendResponse({ success: true });
+      return false;
+  }
+  return false;
+});
 
 let testOverlay: { overlay: SubtitleOverlay; box: NormalizedBox; video: HTMLVideoElement } | null = null;
 
@@ -38,4 +167,11 @@ installTestBridge({
   },
   ocr: async ({ bitmap, lang }) => (await getOcr()).recognize(bitmap, lang),
   'ocr.preload': async ({ lang }) => (await getOcr()).preload(lang),
+  'mode.stats': async () => ({
+    state: mode?.state ?? 'stopped',
+    ocrCalls: mode?.ocrCalls ?? 0,
+    translateCalls: mode?.translateCalls ?? 0,
+    timelineSize: mode?.timeline.size ?? 0,
+    videoId: currentVideoId(),
+  }),
 });

@@ -5,6 +5,7 @@ import {
   TranslateSelectedTextMessage,
   GetScreenTranslateStateMessage,
   DrawNewBoxMessage,
+  DrawSubtitleBoxMessage,
   ROIData
 } from './types';
 
@@ -27,6 +28,8 @@ type ScreenTranslateState = 'inactive' | 'armed' | 'ready-to-redraw';
 
 class RealTimeTranslator {
   private isActive: boolean;
+  /** What the current box is for: page text (Screen Translate) or video subtitles (popup "Draw subtitle box"). */
+  private intent: 'screen' | 'subtitle' = 'screen';
   private isSelecting: boolean;
   private selectionOverlay: HTMLDivElement | null;
   private translationOverlays: Map<string, HTMLDivElement>;
@@ -48,8 +51,8 @@ class RealTimeTranslator {
         this.screenTranslateState = 'ready-to-redraw';
         document.body.style.cursor = '';
       },
-      (text, rect) => {
-        this.translateAndShowText(text, rect);
+      roi => {
+        void this.onRegionDrawn(roi);
       }
     );
     this.setupMessageListener();
@@ -62,12 +65,14 @@ class RealTimeTranslator {
         message: ToggleScreenTranslationMessage |
           TranslateSelectedTextMessage |
           GetScreenTranslateStateMessage |
-          DrawNewBoxMessage,
+          DrawNewBoxMessage |
+          DrawSubtitleBoxMessage,
         sender,
         sendResponse
       ) => {
         switch (message.type) {
           case 'TOGGLE_SCREEN_TRANSLATION':
+            this.intent = 'screen';
             this.toggleTranslation();
             sendResponse({ state: this.screenTranslateState });
             break;
@@ -79,6 +84,13 @@ class RealTimeTranslator {
           case 'GET_SCREEN_TRANSLATE_STATE':
             sendResponse({ state: this.screenTranslateState });
             return true;
+
+          case 'DRAW_SUBTITLE_BOX':
+            this.intent = 'subtitle';
+            if (this.isActive) this.drawNewBox();
+            else this.startTranslation();
+            sendResponse({ state: this.screenTranslateState });
+            break;
 
           case 'DRAW_NEW_BOX':
             this.drawNewBox();
@@ -165,6 +177,43 @@ class RealTimeTranslator {
   private handleKeyDown(event: KeyboardEvent): void {
     if (event.key === 'Escape' && this.isActive) {
       this.stopTranslation();
+    }
+  }
+
+  /**
+   * A box over a <video> starts subtitle mode (continuous OCR of burned-in
+   * subtitles, src/subtitle); anywhere else it is a one-shot translation of
+   * the page text under the box.
+   */
+  private async onRegionDrawn(roi: ROIData): Promise<void> {
+    const rect = new DOMRect(roi.x, roi.y, roi.width, roi.height);
+    const subtitleMode = (globalThis as any).__astSubtitleMode as
+      | { startFromRect(r: { x: number; y: number; width: number; height: number }): Promise<'started' | 'too-small' | 'not-over-video'> }
+      | undefined;
+    if (subtitleMode && roi.width > 0 && roi.height > 0) {
+      try {
+        const result = await subtitleMode.startFromRect({ x: roi.x, y: roi.y, width: roi.width, height: roi.height });
+        if (result === 'started') {
+          this.stopTranslation();
+          return;
+        }
+        if (result === 'too-small') {
+          this.showError('Box too small - draw it around the subtitles', rect);
+          return;
+        }
+      } catch (error) {
+        console.error('Subtitle mode failed to start:', error);
+        this.showError(`Subtitle mode failed: ${error instanceof Error ? error.message : String(error)}`, rect);
+        return;
+      }
+    }
+    if (this.intent === 'subtitle') {
+      this.showError("Draw the box over the video's subtitles", rect);
+      return;
+    }
+    if (roi.width > 10 && roi.height > 10) {
+      const text = extractTextAtRect(rect);
+      if (text) await this.translateAndShowText(text, rect);
     }
   }
 
@@ -447,14 +496,14 @@ class ROISelector {
   private startPoint: { x: number; y: number } | null;
   private selectionBox: HTMLDivElement | null;
   private onSelectionEnded: () => void;
-  private onRegionSelected: (text: string, rect: DOMRect) => void;
+  private onRegionDrawn: (roi: ROIData) => void;
 
-  constructor(onSelectionEnded: () => void, onRegionSelected: (text: string, rect: DOMRect) => void) {
+  constructor(onSelectionEnded: () => void, onRegionDrawn: (roi: ROIData) => void) {
     this.isSelecting = false;
     this.startPoint = null;
     this.selectionBox = null;
     this.onSelectionEnded = onSelectionEnded;
-    this.onRegionSelected = onRegionSelected;
+    this.onRegionDrawn = onRegionDrawn;
   }
 
   startSelection(): void {
@@ -508,10 +557,8 @@ class ROISelector {
       height: Math.abs(event.clientY - this.startPoint.y)
     };
 
-    // Only process if the selection is large enough
-    if (roi.width > 10 && roi.height > 10) {
-      this.processROI(roi);
-    }
+    // The translator decides what the box is for (subtitle mode, page text, or too small).
+    this.onRegionDrawn(roi);
 
     this.stopSelection();
     this.onSelectionEnded();
@@ -540,18 +587,6 @@ class ROISelector {
       this.selectionBox = null;
     }
     this.startPoint = null;
-  }
-
-  private processROI(roi: ROIData): void {
-    const rect = new DOMRect(roi.x, roi.y, roi.width, roi.height);
-    const textContent = extractTextAtRect(rect);
-
-    // Translate in this content script directly. (Previously this posted
-    // TRANSLATE_SELECTED_TEXT via chrome.runtime.sendMessage, which only
-    // reaches extension pages - never this script - so nothing happened.)
-    if (textContent) {
-      this.onRegionSelected(textContent, rect);
-    }
   }
 }
 

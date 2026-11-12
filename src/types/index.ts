@@ -23,6 +23,10 @@ export type MessageType =
   | 'TRANSLATE_SELECTED_TEXT'
   | 'GET_SCREEN_TRANSLATE_STATE'
   | 'DRAW_NEW_BOX'
+  | 'DRAW_SUBTITLE_BOX'
+  | 'GET_SUBTITLE_MODE_STATE'
+  | 'START_SUBTITLE_MODE'
+  | 'STOP_SUBTITLE_MODE'
   | 'SHOW_TRANSLATION_OVERLAY'
   | 'START_OFFSCREEN_CAPTURE'
   | 'STOP_OFFSCREEN_CAPTURE'
@@ -121,6 +125,11 @@ export interface DrawNewBoxMessage extends ExtensionMessage {
   type: 'DRAW_NEW_BOX';
 }
 
+export interface DrawSubtitleBoxMessage extends ExtensionMessage {
+  type: 'DRAW_SUBTITLE_BOX';
+  lang?: string;
+}
+
 export interface ScreenTranslateStateResponse {
   state: 'inactive' | 'armed' | 'ready-to-redraw';
 }
@@ -168,6 +177,8 @@ export interface ExtensionSettings {
   googleTranslateApiKey: string;
   translationProvider: 'google' | 'deepl';
   deeplApiKey: string;
+  /** Language of burned-in subtitles read by subtitle mode (OCR model choice). */
+  subtitleLanguage: import('../subtitle/types').SubtitleLanguage;
 }
 
 export type SubtitlePosition = 'top' | 'center' | 'bottom';

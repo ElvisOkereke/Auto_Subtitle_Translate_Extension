@@ -69,7 +69,7 @@ export const test = base.extend<ExtensionFixtures & ExtensionOptions, { server: 
     const logs: string[] = [];
     const stamp = () => new Date().toISOString().slice(17, 23);
     context.on('console', m => logs.push(`${stamp()} [${m.page()?.url() ?? 'worker'}] ${m.type()}: ${m.text()}`));
-    context.on('weberror', e => logs.push(`${stamp()} [pageerror] ${e.error().message}`));
+    context.on('weberror', e => logs.push(`${stamp()} [pageerror] ${e.error().stack ?? e.error().message}`));
     await use(context);
     if (logs.length && testInfo.status !== testInfo.expectedStatus) {
       await testInfo.attach('console.log', { body: logs.join('\n'), contentType: 'text/plain' });

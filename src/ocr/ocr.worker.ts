@@ -49,7 +49,8 @@ async function fetchModel(url: string): Promise<ArrayBuffer> {
 
 async function createSession(url: string): Promise<ort.InferenceSession> {
   const model = new Uint8Array(await fetchModel(url));
-  return ort.InferenceSession.create(model, { executionProviders: [device], graphOptimizationLevel: 'all' });
+  // logSeverityLevel 3 = errors only (the exported models trigger harmless graph-cleanup warnings).
+  return ort.InferenceSession.create(model, { executionProviders: [device], graphOptimizationLevel: 'all', logSeverityLevel: 3 });
 }
 
 function getDet(lang: SubtitleLanguage) {

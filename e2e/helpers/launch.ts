@@ -62,6 +62,13 @@ export async function launchExtensionBrowser(o: LaunchOptions): Promise<Launched
   const exe = process.env.CHROME_PATH ?? CHROME_PATHS.find(p => fs.existsSync(p));
   if (!exe) throw new Error('Google Chrome not found; set CHROME_PATH');
   fs.rmSync(`${o.profileDir}/DevToolsActivePort`, { force: true });
+  // Branded Chrome keeps the extension's previous service-worker registration
+  // and script in a persistent profile even when loadUnpacked installs a newer
+  // build (and a version bump doesn't help here). Drop the registrations; the
+  // Cache API data next to them (downloaded models) is kept.
+  for (const dir of ['Database', 'ScriptCache']) {
+    fs.rmSync(`${o.profileDir}/Default/Service Worker/${dir}`, { recursive: true, force: true });
+  }
   const proc = spawn(
     exe,
     [
@@ -99,7 +106,11 @@ export async function launchExtensionBrowser(o: LaunchOptions): Promise<Launched
     console.warn(`Extension loaded as ${id}, expected ${o.extensionId}; tabCapture allowlist may not apply`);
   }
   const context = browser.contexts()[0];
+  // Same viewport as the Chromium launch (a headless Chrome window minus its UI is smaller).
   await context.pages()[0]?.setViewportSize({ width: 1280, height: 800 });
+  context.on('page', page => {
+    if (!page.url().includes('popup.html')) page.setViewportSize({ width: 1280, height: 800 }).catch(() => undefined);
+  });
   return {
     context,
     close: async () => {
