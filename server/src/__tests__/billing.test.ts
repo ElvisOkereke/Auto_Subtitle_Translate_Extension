@@ -45,7 +45,7 @@ describe('billing', () => {
 
   it('checkout.session.completed activates the plan for client_reference_id', async () => {
     const { webhook, deps, account } = setup();
-    const res = await webhook({ id: 'evt_1', type: 'checkout.session.completed', data: { object: { object: 'checkout.session', client_reference_id: String(account.id), customer: 'cus_9', metadata: { plan: 'standard' } } } });
+    const res = await webhook({ id: 'evt_1', type: 'checkout.session.completed', data: { object: { object: 'checkout.session', client_reference_id: String(account.id), customer: 'cus_9', payment_status: 'paid', subscription: 'sub_1', metadata: { plan: 'standard' } } } });
     expect(res.status).toBe(200);
     expect(deps.repo.accountById(account.id)).toMatchObject({ plan: 'standard', subscriptionStatus: 'active', stripeCustomerId: 'cus_9' });
   });
@@ -113,4 +113,41 @@ describe('billing', () => {
     expect(deps.repo.accountByEmail('cli@example.com')).toMatchObject({ plan: 'free', subscriptionStatus: null });
     expect(() => setPlanCommand(deps.repo, ['set-plan', 'cli@example.com', 'gold'])).toThrow(/plan/);
   });
+
+  it('an unpaid checkout (payment still pending) does not activate; async_payment_succeeded does', async () => {
+    const { webhook, deps, account } = setup();
+    const session = { object: 'checkout.session', client_reference_id: String(account.id), customer: 'cus_7', subscription: 'sub_7', metadata: { plan: 'pro' } };
+    await webhook({ id: 'evt_p1', type: 'checkout.session.completed', data: { object: { ...session, payment_status: 'unpaid' } } });
+    expect(deps.repo.accountById(account.id)).toMatchObject({ plan: 'free', subscriptionStatus: 'incomplete', stripeCustomerId: 'cus_7' });
+    await webhook({ id: 'evt_p2', type: 'checkout.session.async_payment_succeeded', data: { object: { ...session, payment_status: 'paid' } } });
+    expect(deps.repo.accountById(account.id)).toMatchObject({ plan: 'pro', subscriptionStatus: 'active' });
+  });
+
+  it('an older subscription event arriving after a newer one is ignored', async () => {
+    const { webhook, deps, account } = setup();
+    deps.repo.setPlan(account.id, 'pro', 'active', 'cus_9');
+    await webhook({ id: 'evt_new', created: 2000, type: 'customer.subscription.deleted', data: { object: subscription('cus_9', 'price_pro', 'canceled') } });
+    await webhook({ id: 'evt_old', created: 1000, type: 'customer.subscription.updated', data: { object: subscription('cus_9', 'price_pro', 'active') } });
+    expect(deps.repo.accountById(account.id)).toMatchObject({ plan: 'free', subscriptionStatus: 'canceled' });
+  });
+
+  it('a failure while applying an event leaves it unrecorded, so Stripe’s retry is processed', async () => {
+    const { webhook, deps, account } = setup();
+    deps.repo.setPlan(account.id, 'standard', 'active', 'cus_9');
+    const original = deps.repo.setPlan.bind(deps.repo);
+    let fail = true;
+    deps.repo.setPlan = (...args: Parameters<typeof original>) => {
+      if (fail) {
+        fail = false;
+        throw new Error('disk full');
+      }
+      return original(...args);
+    };
+    const event = { id: 'evt_retry', created: 3000, type: 'customer.subscription.deleted', data: { object: subscription('cus_9', 'price_std', 'canceled') } };
+    expect((await webhook(event)).status).toBe(500);
+    expect(deps.repo.accountById(account.id)?.plan).toBe('standard');
+    expect((await webhook(event)).status).toBe(200);
+    expect(deps.repo.accountById(account.id)?.plan).toBe('free');
+  });
 });
+

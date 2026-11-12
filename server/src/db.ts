@@ -80,6 +80,37 @@ export class Repo {
     this.db.exec('PRAGMA foreign_keys = ON');
     if (path !== ':memory:') this.db.exec('PRAGMA journal_mode = WAL');
     for (const statement of SCHEMA) this.db.exec(statement);
+    // Columns added after the first schema (existing databases get them here).
+    for (const column of ['stripe_event_at INTEGER']) {
+      try {
+        this.db.exec(`ALTER TABLE accounts ADD COLUMN ${column}`);
+      } catch {
+        // already there
+      }
+    }
+  }
+
+  /** Runs fn atomically: any throw rolls back everything it wrote. */
+  transaction<T>(fn: () => T): T {
+    this.db.exec('BEGIN');
+    try {
+      const result = fn();
+      this.db.exec('COMMIT');
+      return result;
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
+    }
+  }
+
+  /** Creation time (Stripe `event.created`, seconds) of the last billing event applied to an account. */
+  stripeEventAt(accountId: number): number | null {
+    const row: any = this.db.prepare('SELECT stripe_event_at FROM accounts WHERE id = ?').get(accountId);
+    return row?.stripe_event_at === null || row?.stripe_event_at === undefined ? null : Number(row.stripe_event_at);
+  }
+
+  setStripeEventAt(accountId: number, created: number): void {
+    this.db.prepare('UPDATE accounts SET stripe_event_at = ? WHERE id = ?').run(created, accountId);
   }
 
   close(): void {

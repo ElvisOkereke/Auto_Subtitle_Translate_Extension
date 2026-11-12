@@ -6,7 +6,7 @@ import type Stripe from 'stripe';
 import type { AuthEnv } from './auth';
 import type { ServerConfig } from './config';
 import type { Account, Repo } from './db';
-import { Plan, isPaidPlan } from './plans';
+import { Plan, isActive, isPaidPlan } from './plans';
 
 /** The parts of the Stripe SDK the server uses (the real `Stripe` instance satisfies it). */
 export interface StripeLike {
@@ -69,35 +69,73 @@ export function mountBilling(app: Hono<AuthEnv>, requireAccount: MiddlewareHandl
     } catch {
       return c.json({ error: 'bad_signature', message: 'Invalid Stripe signature.' }, 400);
     }
-    if (!repo.recordStripeEvent(event.id)) return c.json({ ok: true, duplicate: true });
+    // Record the event and apply it in one transaction: a failure rolls both back,
+    // so Stripe's retry is processed instead of being skipped as a duplicate.
+    try {
+      const applied = repo.transaction(() => {
+        if (!repo.recordStripeEvent(event.id)) return false;
+        applyEvent(event);
+        return true;
+      });
+      return c.json(applied ? { ok: true } : { ok: true, duplicate: true });
+    } catch (error) {
+      console.error('Stripe webhook failed:', (error as Error).message);
+      return c.json({ error: 'webhook_failed', message: 'Try again.' }, 500);
+    }
+  });
+
+  /** Applies one billing event to its account, ignoring events older than the last one applied. */
+  function applyEvent(event: Stripe.Event): void {
     const obj = event.data.object as any;
+    const created = typeof event.created === 'number' ? event.created : null;
+    const fresh = (account: Account) => {
+      const last = repo.stripeEventAt(account.id);
+      return created === null || last === null || created >= last;
+    };
+    const stamp = (account: Account) => {
+      if (created !== null) repo.setStripeEventAt(account.id, created);
+    };
+    const accountOfCustomer = () => (typeof obj.customer === 'string' ? repo.accountByCustomer(obj.customer) : null);
+    const customerId = typeof obj.customer === 'string' ? obj.customer : null;
+
     switch (event.type) {
-      case 'checkout.session.completed': {
+      case 'checkout.session.completed':
+      case 'checkout.session.async_payment_succeeded':
+      case 'checkout.session.async_payment_failed': {
         const account = repo.accountById(Number(obj.client_reference_id));
         const plan = obj.metadata?.plan;
-        if (account && isPaidPlan(plan)) repo.setPlan(account.id, plan, 'active', typeof obj.customer === 'string' ? obj.customer : null);
-        break;
+        if (!account || !isPaidPlan(plan) || !fresh(account)) return;
+        const paid = event.type !== 'checkout.session.async_payment_failed' && (obj.payment_status === 'paid' || obj.payment_status === 'no_payment_required');
+        if (paid) repo.setPlan(account.id, plan, 'active', customerId);
+        else if (!isActive(account.subscriptionStatus)) repo.setPlan(account.id, account.plan, 'incomplete', customerId); // payment pending/failed: no access yet
+        stamp(account);
+        return;
       }
       case 'customer.subscription.created':
       case 'customer.subscription.updated': {
-        const account = typeof obj.customer === 'string' ? repo.accountByCustomer(obj.customer) : null;
+        const account = accountOfCustomer();
         const plan = planOfPrice(obj.items?.data?.[0]?.price?.id);
-        if (account && plan) repo.setPlan(account.id, plan, String(obj.status));
-        break;
+        if (!account || !plan || !fresh(account)) return;
+        repo.setPlan(account.id, plan, String(obj.status));
+        stamp(account);
+        return;
       }
       case 'customer.subscription.deleted': {
-        const account = typeof obj.customer === 'string' ? repo.accountByCustomer(obj.customer) : null;
-        if (account) repo.setPlan(account.id, 'free', 'canceled');
-        break;
+        const account = accountOfCustomer();
+        if (!account || !fresh(account)) return;
+        repo.setPlan(account.id, 'free', 'canceled');
+        stamp(account);
+        return;
       }
       case 'invoice.payment_failed': {
-        const account = typeof obj.customer === 'string' ? repo.accountByCustomer(obj.customer) : null;
-        if (account) repo.setPlan(account.id, account.plan, 'past_due');
-        break;
+        const account = accountOfCustomer();
+        if (!account || !fresh(account)) return;
+        repo.setPlan(account.id, account.plan, 'past_due');
+        stamp(account);
+        return;
       }
     }
-    return c.json({ ok: true });
-  });
+  }
 
   app.post('/v1/admin/plan', async c => {
     if (!sameSecret(c.req.header('x-admin-token') ?? '', config.adminToken)) return c.json({ error: 'unauthorized', message: 'Admin token required.' }, 401);
