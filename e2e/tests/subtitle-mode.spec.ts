@@ -2,74 +2,22 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { Page } from '@playwright/test';
 import { test, expect } from '../helpers/extension';
-import { CACHE, FIXTURES, ROOT } from '../helpers/paths';
+import { CACHE, ROOT } from '../helpers/paths';
 import { browserKind } from '../helpers/launch';
 import { astTest } from '../helpers/bridge';
 import { charErrorRate } from '../helpers/cer';
+import { timelineFixture, modeStats, shownRecords, openFixture, startViaPopup, playUntil } from '../helpers/subtitles';
 
 // Live path of subtitle mode on the local YouTube-like fixture with real OCR and
 // mock DeepL ("[EN-US] <text>"). Read-ahead is disabled here (Task 9 covers it).
 test.use({ profileDir: path.join(CACHE, `profile-subtitles-${browserKind()}`) });
 test.describe.configure({ mode: 'serial' });
 
-const BOX = { x: 0.2, y: 0.75, w: 0.6, h: 0.14 };
 interface Line { stretch: string; start: number; end: number; ko: string }
-const timeline: { lines: Line[] } = JSON.parse(fs.readFileSync(path.join(FIXTURES, 'subtitles/_zIrbXw-SVs.timeline.json'), 'utf8'));
-interface Shown { shownAt: number; lineStart: number; text: string }
-interface Stats { state: string; ocrCalls: number; translateCalls: number; timelineSize: number; videoId: string | null }
-
-async function openFixture(page: Page, fixtureURL: string, stretch = 's1', v = '_zIrbXw-SVs') {
-  await page.goto(`${fixtureURL}/video-subs.html?v=${v}&stretch=${stretch}`);
-  await page.waitForFunction(() => (window as any).__fixture.video.readyState >= 1);
-  // Records every overlay update in the page's main world (the DOM is shared with content scripts).
-  await page.evaluate(() => {
-    const w = window as any;
-    w.__shown = [];
-    new MutationObserver(() => {
-      const el = document.querySelector<HTMLElement>('.ast-subtitle-overlay');
-      if (!el || el.style.display === 'none') return;
-      const text = el.textContent ?? '';
-      const last = w.__shown[w.__shown.length - 1];
-      if (!last || last.text !== text || last.lineStart !== Number(el.dataset.lineStart)) {
-        w.__shown.push({ shownAt: Number(el.dataset.shownAt), lineStart: Number(el.dataset.lineStart), text });
-      }
-    }).observe(document.documentElement, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['style', 'data-shown-at'] });
-  });
-}
-
-async function dragBox(page: Page, box = BOX) {
-  const r = await page.evaluate(b => {
-    const v = (window as any).__fixture.video as HTMLVideoElement;
-    const rect = v.getBoundingClientRect();
-    return { x: rect.x + b.x * rect.width, y: rect.y + b.y * rect.height, w: b.w * rect.width, h: b.h * rect.height };
-  }, box);
-  await page.mouse.move(r.x, r.y);
-  await page.mouse.down();
-  await page.mouse.move(r.x + r.w / 2, r.y + r.h / 2, { steps: 4 });
-  await page.mouse.move(r.x + r.w, r.y + r.h, { steps: 4 });
-  await page.mouse.up();
-}
-
-async function startViaPopup(page: Page, openPopup: (p: Page) => Promise<Page>) {
-  const popup = await openPopup(page);
-  await popup.click('#modeSubtitles');
-  await popup.selectOption('#subtitleLanguage', 'ko');
-  await popup.click('#drawSubtitleBox');
-  await page.bringToFront();
-  await expect.poll(() => page.evaluate(() => document.body.style.cursor)).toBe('crosshair');
-  await dragBox(page);
-  await expect.poll(async () => (await astTest<Stats>(page, 'mode.stats')).state, { timeout: 120_000 }).toBe('running');
-  return popup;
-}
-
-const stats = (page: Page) => astTest<Stats>(page, 'mode.stats');
-const shown = (page: Page) => page.evaluate(() => (window as any).__shown as Shown[]);
+const timeline: { lines: Line[] } = timelineFixture;
+const stats = modeStats;
+const shown = shownRecords;
 const strip = (t: string) => t.replace(/^\[EN-US\]\s*/, '');
-
-async function playUntil(page: Page, t: number) {
-  await page.evaluate(() => (window as any).__fixture.video.play());
-  await page.waitForFunction(at => (window as any).__fixture.video.currentTime >= at, t, { timeout: (t + 30) * 1000, polling: 250 });
-}
 
 test.beforeEach(async ({ configure, sw }) => {
   await configure({ translationProvider: 'deepl', deeplApiKey: 'k:fx', targetLanguage: 'en', subtitleLanguage: 'ko' });

@@ -16,16 +16,19 @@
     "package": "npm run build:prod && web-ext build --source-dir=dist",
     "prebuild:prod": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
     "prebuild:dev": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
-    "test:e2e": "npm run build:prod && playwright test --project=ui --project=captions",
+    "test:e2e": "npm run build:prod && playwright test --project=ui --project=captions --project=subtitles",
     "test:e2e:ui": "npm run build && playwright test --project=ui",
-    "test:live": "npm run build && playwright test --project=live",
+    "test:live": "npm run build:prod && playwright test --project=live",
     "perf:stt": "npm run build && playwright test --project=perf",
     "verify": "npm run type-check && npm run lint && npm test && npm run test:e2e && playwright test --project=live",
     "audio:fixtures": "powershell -ExecutionPolicy Bypass -File e2e/scripts/generate-audio.ps1",
-    "test:e2e:chrome": "npm run build:prod && cross-env-shell E2E_BROWSER=chrome playwright test --project=ui --project=captions",
-    "fixtures:video": "node e2e/scripts/fixtures-video.mjs"
+    "test:e2e:chrome": "npm run build:prod && cross-env-shell E2E_BROWSER=chrome playwright test --project=ui --project=captions --project=subtitles",
+    "fixtures:video": "node e2e/scripts/fixtures-video.mjs",
+    "e2e:youtube": "npm run build:prod && cross-env-shell E2E_BROWSER=chrome playwright test --project=youtube",
+    "e2e:judge": "cross-env-shell E2E_JUDGE=1 playwright test --project=judge"
   },
   "devDependencies": {
+    "@anthropic-ai/sdk": "^1.8.0",
     "@playwright/test": "^1.56.1",
     "@types/chrome": "^0.0.268",
     "@types/jest": "^29.5.14",

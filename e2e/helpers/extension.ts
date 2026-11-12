@@ -29,12 +29,15 @@ export interface ExtensionOptions {
   mockTranslation: boolean;
   /** Extra Chromium switches. */
   extraArgs: string[];
+  /** Force a headed browser (e.g. sites that stop playback in headless mode). */
+  headed: boolean;
 }
 
 export const test = base.extend<ExtensionFixtures & ExtensionOptions, { server: FixtureServer }>({
   profileDir: [undefined, { option: true }],
   mockTranslation: [true, { option: true }],
   extraArgs: [[], { option: true }],
+  headed: [false, { option: true }],
 
   server: [
     async ({}, use) => {
@@ -55,14 +58,14 @@ export const test = base.extend<ExtensionFixtures & ExtensionOptions, { server: 
     await use(id);
   },
 
-  context: async ({ extensionId, profileDir, extraArgs }, use, testInfo) => {
+  context: async ({ extensionId, profileDir, extraArgs, headed }, use, testInfo) => {
     const dir = profileDir ?? fs.mkdtempSync(path.join(os.tmpdir(), 'ast-e2e-'));
     fs.mkdirSync(dir, { recursive: true });
     const launched = await launchExtensionBrowser({
       profileDir: dir,
       extensionId,
       extraArgs,
-      headless: !process.env.HEADED,
+      headless: !(headed || process.env.HEADED),
     });
     const context = launched.context;
     // Collect console output from every page so failures come with logs attached.
@@ -98,6 +101,9 @@ export const test = base.extend<ExtensionFixtures & ExtensionOptions, { server: 
           base => chrome.storage.local.set({ devEndpointOverrides: { deepl: `${base}/mock/deepl`, google: `${base}/mock/google` } }),
           server.url
         );
+      } else {
+        // Persistent profiles may still hold a previous run's mock endpoints.
+        await sw.evaluate(() => chrome.storage.local.remove('devEndpointOverrides'));
       }
       await use(server.translationCalls);
     },
