@@ -58,3 +58,44 @@ Neighbouring-line context is the single largest quality gain.
 | **PaddleOCR PP-OCRv5 mobile + box-relative size filter** | **2.3%** | **0 / 18** | 49 ms |
 | PaddleOCR, no size filter | 34.9% | 1 / 18 | 54 ms |
 | Tesseract kor (best), binarized | 17.4% | 17 / 18 | 74 ms |
+
+In the extension (E2E, `e2e/tests/subtitle-ocr.spec.ts`): same 2.3% CER and
+0 false positives through the real content-script → iframe → worker path;
+median **21 ms per crop in Chrome with WebGPU**, 88 ms on the wasm fallback.
+
+### Live path — `e2e/tests/subtitle-mode.spec.ts` (stretch s1, 29 lines, read-ahead off)
+
+| Browser | Lines shown in time | OCR CER | Latency p50 / p90 (subtitle appears → English shown) |
+|---|---|---|---|
+| Chrome 157, WebGPU | 29 / 29 | 2.6% | **0.20 s / 0.26 s** (mock translation) |
+| Chromium, wasm | 29 / 29 | 2.0% | 0.25 s / 0.36 s (mock translation) |
+| Chrome, **real DeepL** (`live-subtitles.spec.ts`) | 28 / 29 | — | **0.50 s / 0.59 s** including the DeepL round trip |
+
+The one line missed with real DeepL lasts 0.57 s — shorter than a live
+OCR + network round trip; read-ahead covers it in the default configuration.
+
+### Read-ahead — `e2e/tests/subtitle-readahead.spec.ts` (stretch s2, 29 lines)
+
+Fixture buffers ~30 s ahead like YouTube.
+
+| Browser | Translated before they appear | Median lead | Live OCR calls in steady playback |
+|---|---|---|---|
+| Chrome 157 | **29 / 29** | 28.0 s | 0 |
+| Chromium | **29 / 29** | 27.9 s | 0 |
+| Read-ahead disabled (same test) | 0 / 29 | 0 s | 204 |
+
+### Real YouTube — `npm run e2e:youtube`
+
+Installed Chrome, test profile, AV1 stream. YouTube stops automated playback
+after ~40 s ("Something went wrong") in every automated configuration tried
+(headless, headed off-screen); within that window: **12/12 lines shown, OCR
+CER 1.8%, read-ahead lead 28 s, 14/15 lines translated before they appeared**.
+Report and a stitched run video: `e2e/.perf/youtube/`.
+
+### Translation quality end to end (real DeepL, default configuration)
+
+All 29 lines translated; key terms present in 9/11 lines that have them
+(82%). Both misses start as OCR slips DeepL can't recover from (뽀삐 → "뿐 삐",
+렙차 → 럽차). Claude-as-judge score of the displayed translations: **0.60**
+(`npm run e2e:judge`) — consistent with the translation benchmark above; the
+translation-engine piece (Claude with context) targets this.

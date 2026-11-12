@@ -1,273 +1,77 @@
-# Auto Subtitle Translator Extension
+# Auto Subtitle Translator
 
-A Chrome browser extension that automatically generates subtitles from audio and translates them to your preferred language in real-time.
+A Chrome (MV3) extension that translates what you watch, live:
 
-## Features
+- **Subtitles mode** — draw a box around subtitles that are *burned into* a
+  video (e.g. Korean subtitles on a League of Legends stream) and the English
+  appears on top of them, in place, as the video plays. Works on YouTube and
+  other `<video>` pages.
+- **Audio mode** — live captions from the tab's speech, translated.
+- **Screen Translate** — drag a box over text on any page for a one-shot
+  translation.
 
-- 🎧 **Real-time Audio Capture**: Captures audio from any browser tab
-- 🗣️ **Speech Recognition**: Converts speech to text using cloud APIs
-- 🌍 **Translation**: Translates subtitles to your preferred language
-- 🎨 **Customizable Display**: Adjustable position, size, and styling
-- 📱 **Cross-Platform**: Works on any website with audio/video content
-- 🔒 **Privacy Options**: Configurable API usage and data handling
+Speech recognition and OCR run **locally in your browser** (no key, no server).
+Translation uses DeepL or Google Cloud Translation with your own API key.
 
-## Installation
-
-### Development Setup
-
-1. **Clone the repository**
-   ```bash
-   git clone <your-repo-url>
-   cd auto-subtitle-translator
-   ```
-
-2. **Install dependencies**
-   ```bash
-   npm install
-   ```
-
-3. **Build the extension**
-   ```bash
-   npm run build:dev
-   ```
-
-4. **Load in Chrome**
-   - Open Chrome and navigate to `chrome://extensions/`
-   - Enable "Developer mode"
-   - Click "Load unpacked" and select the `dist` folder
-
-### Production Build
+## Install (developer build)
 
 ```bash
-npm run build:prod
-npm run package
+npm install
+npm run build          # dev build into dist/   (npm run build:prod for minified)
 ```
 
-## Configuration
+Chrome → `chrome://extensions` → enable Developer mode → **Load unpacked** →
+select `dist/`. Open the popup and paste a DeepL (free keys end in `:fx`) or
+Google Translate API key.
 
-### API Setup
+## Use
 
-You'll need to configure API keys for speech recognition and translation services:
+**Subtitles mode** — on the video page open the popup → **Subtitles** →
+pick the subtitle language → **Draw subtitle box** → drag a box around where
+the subtitles appear. The box is remembered per video (**Start (saved box)**
+next time). The English sits on a see-through tint over the original line and
+updates as the subtitles change; nothing is shown when there's no subtitle.
 
-1. **Google Cloud Speech-to-Text API**
-   - Go to [Google Cloud Console](https://console.cloud.google.com/)
-   - Enable Speech-to-Text API
-   - Create credentials and get your API key
+**Audio mode** — popup → **Audio** → **Start Subtitles**. The first run
+downloads the speech model (~209 MB on GPUs with WebGPU, 80 MB otherwise).
 
-2. **Translation Service**
-   - Choose from Google Translate API, Azure Translator, or DeepL API
-   - Get your API key from the respective service
+Only one mode runs at a time. Position/size settings in the popup apply to
+audio captions.
 
-3. **Configure in Extension**
-   - Click the extension icon
-   - Enter your API key in the popup
-   - Select source and target languages
+## How it works
 
-## Usage
+| Piece | Where |
+|---|---|
+| Subtitle mode controller: frame sampling → change detection → OCR → translation → per-video timeline → overlay | `src/subtitle/` |
+| Read-ahead: taps the player's MSE stream (main world), decodes buffered video ahead of playback with WebCodecs, so most subtitles are translated before they appear | `src/subtitle/readAhead/` |
+| OCR: PaddleOCR PP-OCRv5 (ONNX Runtime Web, WebGPU → wasm fallback) in a worker inside a hidden extension iframe; saved timelines live in that extension-origin iframe | `src/ocr/` |
+| Live captions: tab capture → offscreen VAD → Whisper (transformers.js) worker | `src/offscreen.ts`, `src/whisper.worker.ts` |
+| Translation (DeepL / Google, neighbouring-line context, live-before-read-ahead priority) | `src/services/apiService.ts`, `src/background.ts` |
+| Popup | `popup.html`, `src/popup.ts` |
 
-1. **Start Subtitles**
-   - Navigate to any page with audio/video content
-   - Click the extension icon
-   - Click "Start Subtitles"
+Design docs and decision records: `docs/superpowers/`. Benchmarks:
+[docs/performance.md](docs/performance.md).
 
-2. **Customize Display**
-   - Choose subtitle position (top, center, bottom)
-   - Adjust font size
-   - Select target language for translation
+## Testing
 
-3. **Stop Subtitles**
-   - Click "Stop Subtitles" in the popup
-   - Or navigate away from the page
-
-## Architecture
-
-### Core Components
-
-- **Background Script (`background.js`)**
-  - Manages audio capture using Chrome's tabCapture API
-  - Handles API calls for speech recognition and translation
-  - Coordinates between content scripts and popup
-
-- **Content Script (`content.js`)**
-  - Injects subtitle overlay into web pages
-  - Manages video element detection and event handling
-  - Displays subtitles with customizable styling
-
-- **Popup (`popup.html/js`)**
-  - User interface for controlling the extension
-  - Settings management and API key configuration
-  - Real-time status updates
-
-### Data Flow
-
-1. **Audio Capture**: Background script captures tab audio
-2. **Speech Recognition**: Audio chunks sent to speech API
-3. **Translation**: Text translated if needed
-4. **Display**: Subtitles shown via content script overlay
-
-## API Integration
-
-### Speech Recognition
-
-Currently configured for Google Cloud Speech-to-Text, but easily adaptable:
-
-```javascript
-// Example API call structure
-const response = await fetch('https://your-backend-api.com/speech-to-text', {
-  method: 'POST',
-  headers: {
-    'Content-Type': 'application/json',
-    'Authorization': `Bearer ${apiKey}`
-  },
-  body: JSON.stringify({
-    audio: audioData,
-    language: sourceLanguage
-  })
-});
-```
-
-### Translation
-
-Supports multiple translation providers:
-
-```javascript
-// Translation API call
-const response = await fetch('https://your-backend-api.com/translate', {
-  method: 'POST',
-  headers: {
-    'Content-Type': 'application/json',
-    'Authorization': `Bearer ${apiKey}`
-  },
-  body: JSON.stringify({
-    text: transcript,
-    targetLanguage: targetLang
-  })
-});
-```
-
-## Customization
-
-### Adding New Languages
-
-Edit the language options in `popup.html`:
-
-```html
-<option value="your-lang-code">Your Language</option>
-```
-
-### Styling Subtitles
-
-Modify `subtitle-overlay.css` to customize appearance:
-
-```css
-.subtitle-text {
-  background: rgba(0, 0, 0, 0.85);
-  color: white;
-  font-size: 18px;
-  /* Add your custom styles */
-}
-```
-
-### Site-Specific Compatibility
-
-Add site-specific CSS rules for better integration:
-
-```css
-/* Example for YouTube */
-.ytd-player .subtitle-overlay {
-  bottom: 15% !important;
-}
-```
-
-## Development
-
-### File Structure
-
-```
-auto-subtitle-translator/
-├── manifest.json           # Extension manifest
-├── background.js          # Service worker
-├── content.js            # Content script
-├── popup.html           # Popup interface
-├── popup.js            # Popup logic
-├── subtitle-overlay.css # Subtitle styling
-├── package.json        # Node.js dependencies
-├── webpack.config.js   # Build configuration
-└── icons/             # Extension icons
-```
-
-### Scripts
-
-- `npm run build:dev` - Development build with source maps
-- `npm run build:prod` - Production build (minified)
-- `npm run watch` - Development build with file watching
-- `npm run lint` - Code linting
-- `npm run test` - Run tests
-- `npm run package` - Create extension package
-
-### Testing
+Everything is verified automatically — Playwright drives a real browser with
+the extension loaded (Chromium by default, installed Chrome with
+`E2E_BROWSER=chrome` for real WebGPU).
 
 ```bash
-# Run unit tests
-npm test
-
-# Manual testing
-npm run build:dev
-# Load extension in Chrome and test on various sites
+npm run fixtures:video   # once: downloads the test video + cuts fixtures (Python venv in e2e/.cache)
+npm run verify           # types + lint + unit + e2e (ui, captions, subtitles) + live DeepL
 ```
 
-## Troubleshooting
+| Command | What |
+|---|---|
+| `npm test` | Jest unit tests |
+| `npm run test:e2e` | Browser tests: popup, Screen Translate, live captions, subtitle mode (OCR, overlay, live path, read-ahead) |
+| `npm run test:live` | Real DeepL (needs `DEEPL_API_KEY` in `.env`) |
+| `npm run e2e:youtube` | Subtitle mode on real YouTube (installed Chrome, opt-in) |
+| `npm run e2e:judge` | Claude scores displayed translations (opt-in, Anthropic credentials) |
+| `npm run perf:stt` | Speech-model benchmark |
 
-### Common Issues
-
-1. **No Audio Capture**
-   - Check if site allows audio access
-   - Verify tabCapture permissions
-   - Try refreshing the page
-
-2. **API Errors**
-   - Verify API key is correct
-   - Check API quotas and billing
-   - Monitor network requests in DevTools
-
-3. **Subtitles Not Showing**
-   - Check if content script loaded properly
-   - Verify CSS z-index conflicts
-   - Test on different websites
-
-### Debug Mode
-
-Enable debug logging by setting:
-
-```javascript
-// In background.js
-const DEBUG = true;
-```
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
-## License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## Acknowledgments
-
-- Chrome Extensions API documentation
-- Web Speech API contributors
-- Translation service providers
-- Open source community
-
-## Roadmap
-
-- [ ] Local speech recognition models
-- [ ] Improved accuracy for noisy audio
-- [ ] Subtitle history and export
-- [ ] Multiple speaker detection
-- [ ] Mobile browser support
-- [ ] Offline translation capabilities
+Test pages, audio and the frame-labelled subtitle timeline are in
+`e2e/fixtures/`; reports land in `e2e/.perf/`. See `CLAUDE.md` for harness
+details and gotchas.
