@@ -8,6 +8,8 @@ describe('ApiService.translateText', () => {
     apiService = new ApiService();
     (globalThis as any).chrome = {
       storage: {
+        // Keys now live in storage.local (settings.ts); this mock serves both areas.
+        local: { get: (...a: unknown[]) => (globalThis as any).chrome.storage.sync.get(...a) },
         sync: {
           get: jest.fn().mockResolvedValue({ googleTranslateApiKey: 'test-key' })
         }
@@ -97,6 +99,8 @@ describe('ApiService.translateText via DeepL', () => {
   function mockStorage(overrides: Record<string, unknown>) {
     (globalThis as any).chrome = {
       storage: {
+        // Keys now live in storage.local (settings.ts); this mock serves both areas.
+        local: { get: (...a: unknown[]) => (globalThis as any).chrome.storage.sync.get(...a) },
         sync: {
           get: jest.fn().mockResolvedValue({ translationProvider: 'deepl', ...overrides })
         }
@@ -201,6 +205,8 @@ describe('ApiService.translateText with subtitle context', () => {
   function useProvider(provider: 'deepl' | 'google') {
     (globalThis as any).chrome = {
       storage: {
+        // Keys now live in storage.local (settings.ts); this mock serves both areas.
+        local: { get: (...a: unknown[]) => (globalThis as any).chrome.storage.sync.get(...a) },
         sync: {
           get: jest.fn().mockResolvedValue({ translationProvider: provider, deeplApiKey: 'k:fx', googleTranslateApiKey: 'g' }),
         },

@@ -2,7 +2,7 @@
 
 import { ExtensionMessage, CaptureResponse, APIError } from './types';
 import { apiService } from './services/apiService';
-import { DEFAULT_SETTINGS, getSettings } from './settings';
+import { DEFAULT_SETTINGS, getSettings, migrateSecretsFromSync, saveSettings } from './settings';
 import { PriorityRunner, JobPriority } from './utils/priorityRunner';
 
 // At most 4 translation requests in flight; lines on screen now go first.
@@ -67,6 +67,7 @@ class SubtitleService {
   }
 
   private async initializeSettings(): Promise<void> {
+    await migrateSecretsFromSync();
     const existingSettings = await chrome.storage.sync.get(Object.keys(DEFAULT_SETTINGS));
     const missingKeys = Object.keys(DEFAULT_SETTINGS).filter(key => !(key in existingSettings));
     if (missingKeys.length > 0) {
@@ -93,7 +94,7 @@ class SubtitleService {
           return await getSettings();
 
         case 'UPDATE_SETTINGS':
-          await chrome.storage.sync.set(message.settings);
+          await saveSettings(message.settings);
           return { success: true };
 
         case 'TRANSLATE_TEXT':

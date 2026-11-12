@@ -31,9 +31,13 @@ test.describe('Popup', () => {
     await popup.locator('#deeplApiKey').blur();
     await popup.selectOption('#targetLanguage', 'fr');
 
+    // API keys are saved to local storage, never sync (sync uploads them to Google).
     await expect
-      .poll(() => sw.evaluate(() => chrome.storage.sync.get(['translationProvider', 'deeplApiKey', 'targetLanguage'])))
-      .toEqual({ translationProvider: 'deepl', deeplApiKey: 'abc:fx', targetLanguage: 'fr' });
+      .poll(() => sw.evaluate(() => chrome.storage.sync.get(['translationProvider', 'targetLanguage'])))
+      .toEqual({ translationProvider: 'deepl', targetLanguage: 'fr' });
+    await expect.poll(() => sw.evaluate(() => chrome.storage.local.get('deeplApiKey'))).toEqual({ deeplApiKey: 'abc:fx' });
+    const synced = await sw.evaluate(() => chrome.storage.sync.get(null));
+    for (const key of ['deeplApiKey', 'googleTranslateApiKey', 'anthropicApiKey', 'claudeGatewayToken']) expect(synced).not.toHaveProperty(key);
 
     await popup.screenshot({ path: test.info().outputPath('popup.png') });
     await popup.close();

@@ -1,7 +1,7 @@
 // popup.ts - Popup interface logic
 
 import { ExtensionSettings } from './types';
-import { DEFAULT_SETTINGS } from './settings';
+import { DEFAULT_SETTINGS, getSecrets } from './settings';
 
 interface PopupElements {
   toggleButton: HTMLButtonElement;
@@ -241,14 +241,15 @@ class PopupController {
   async loadSettings() {
     try {
       const settings = (await chrome.storage.sync.get(DEFAULT_SETTINGS)) as ExtensionSettings;
+      const secrets = await getSecrets();
 
       this.elements.sourceLanguage.value = settings.sourceLanguage;
       this.elements.targetLanguage.value = settings.targetLanguage;
       this.elements.subtitleStyle.value = settings.subtitleStyle;
       this.elements.fontSize.value = settings.fontSize;
       this.elements.translationProvider.value = settings.translationProvider;
-      this.elements.googleTranslateApiKey.value = settings.googleTranslateApiKey;
-      this.elements.deeplApiKey.value = settings.deeplApiKey;
+      this.elements.googleTranslateApiKey.value = secrets.googleTranslateApiKey;
+      this.elements.deeplApiKey.value = secrets.deeplApiKey;
       this.elements.subtitleLanguage.value = settings.subtitleLanguage;
       this.updateApiKeyVisibility();
 

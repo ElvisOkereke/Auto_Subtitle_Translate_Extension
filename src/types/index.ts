@@ -174,11 +174,17 @@ export interface ExtensionSettings {
   subtitleStyle: SubtitlePosition;
   fontSize: FontSize;
   enabled: boolean;
-  googleTranslateApiKey: string;
+  /** Fast engine (API keys live in chrome.storage.local - see settings.ts SECRET_KEYS). */
   translationProvider: 'google' | 'deepl';
-  deeplApiKey: string;
   /** Language of burned-in subtitles read by subtitle mode (OCR model choice). */
   subtitleLanguage: import('../subtitle/types').SubtitleLanguage;
+  /** Fast engine first then Claude ('fast-then-best'), fast engine only, or Claude only. */
+  translationEngineMode: 'fast-then-best' | 'fast' | 'best';
+  claudeModel: 'claude-opus-5-5' | 'claude-sonnet-5-5' | 'claude-haiku-5-5';
+  /** Anthropic API key (direct) or an Anthropic-compatible gateway (base URL + token). */
+  claudeAccess: 'key' | 'gateway';
+  claudeGatewayUrl: string;
+  claudeGatewayAuth: 'x-api-key' | 'bearer';
 }
 
 export type SubtitlePosition = 'top' | 'center' | 'bottom';

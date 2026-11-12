@@ -1,5 +1,6 @@
 // apiService.ts - Client for the Google Cloud Translation API and the DeepL API
 import { APIError } from '../types';
+import { getSecrets } from '../settings';
 
 const GOOGLE_TRANSLATE_ENDPOINT = 'https://translation.googleapis.com/language/translate/v2';
 const DEEPL_FREE_ENDPOINT = 'https://api-free.deepl.com/v2/translate';
@@ -79,14 +80,15 @@ function isRetryable(error: unknown): boolean {
 
 export class ApiService {
   private async getSettings(): Promise<TranslationSettings> {
-    const [settings, overrides] = await Promise.all([
-      chrome.storage.sync.get(['translationProvider', 'googleTranslateApiKey', 'deeplApiKey']),
+    const [settings, secrets, overrides] = await Promise.all([
+      chrome.storage.sync.get(['translationProvider']),
+      getSecrets(),
       getEndpointOverrides()
     ]);
     return {
       translationProvider: settings.translationProvider === 'deepl' ? 'deepl' : 'google',
-      googleTranslateApiKey: settings.googleTranslateApiKey || '',
-      deeplApiKey: settings.deeplApiKey || '',
+      googleTranslateApiKey: secrets.googleTranslateApiKey,
+      deeplApiKey: secrets.deeplApiKey,
       endpoints: {
         google: overrides.google ?? GOOGLE_TRANSLATE_ENDPOINT,
         deeplFree: overrides.deepl ?? DEEPL_FREE_ENDPOINT,

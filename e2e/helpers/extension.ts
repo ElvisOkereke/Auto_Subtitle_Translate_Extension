@@ -15,7 +15,7 @@ export interface ExtensionFixtures {
   fixtureURL: string;
   /** Requests the extension made to the mock translation APIs during this test. */
   translationCalls: TranslationCall[];
-  /** Write settings straight into chrome.storage.sync. */
+  /** Write settings like the extension does: API keys to chrome.storage.local, the rest to sync. */
   configure: (settings: Record<string, unknown>) => Promise<void>;
   /** Open popup.html bound to the given page's tab (as if the toolbar icon was clicked there). */
   openPopup: (target: Page) => Promise<Page>;
@@ -112,7 +112,13 @@ export const test = base.extend<ExtensionFixtures & ExtensionOptions, { server: 
 
   configure: async ({ sw }, use) => {
     await use(async settings => {
-      await sw.evaluate(s => chrome.storage.sync.set(s), settings);
+      // API keys go to storage.local like the extension stores them (settings.ts SECRET_KEYS).
+      await sw.evaluate(s => {
+        const secretKeys = ['deeplApiKey', 'googleTranslateApiKey', 'anthropicApiKey', 'claudeGatewayToken'];
+        const secrets = Object.fromEntries(Object.entries(s).filter(([k]) => secretKeys.includes(k)));
+        const rest = Object.fromEntries(Object.entries(s).filter(([k]) => !secretKeys.includes(k)));
+        return Promise.all([chrome.storage.local.set(secrets), chrome.storage.sync.set(rest)]);
+      }, settings);
     });
   },
 
