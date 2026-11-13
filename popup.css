@@ -30,7 +30,7 @@
   --primary-bg: #171a21;
   --primary-text: #ffd23f;
   --primary-hover: #2a2f3a;
-  --good: #1e8e5a;
+  --good: #17744a;
   --bad: #c23a3a;
   --bad-bg: #fbeaea;
   --focus: #2f6fe4;
@@ -231,11 +231,19 @@ select {
   color: var(--bad);
 }
 
+/* A toast at the bottom of the popup, so it shows from the settings view too. */
 #status:not(:empty) {
+  position: fixed;
+  left: 16px;
+  right: 16px;
+  bottom: 12px;
+  margin: 0;
   padding: 8px 10px;
   border-radius: var(--radius-field);
   background: var(--surface);
   border: 1px solid var(--line);
+  box-shadow: 0 6px 20px rgba(16, 18, 24, 0.18);
+  z-index: 10;
 }
 
 #status.error:not(:empty) {

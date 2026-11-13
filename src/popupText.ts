@@ -16,7 +16,8 @@ export interface PopupState {
 /** One subtitle-like line saying what is happening and what to do next. */
 export function captionText(s: PopupState): string {
   if (s.screenTranslate === 'armed') return 'Drag a box around text on the page';
-  if (s.mode === 'audio') {
+  // Running live captions are worth saying on either tab (only one mode runs at a time).
+  if (s.mode === 'audio' || (s.audioRunning && s.subtitleState === 'off')) {
     if (!s.audioRunning) return 'Start live captions to translate speech in this tab';
     return s.speechLanguage === 'Detect automatically' || !s.speechLanguage
       ? `Live captions on, translating into ${s.targetLanguage}`
@@ -42,13 +43,19 @@ export interface EngineForm {
   engineMode: 'fast-then-best' | 'fast' | 'best';
   /** e.g. "Claude Opus 5.5" */
   modelLabel: string;
+  /** Hosted account state; only read when translating with the subscription. */
+  account?: 'signed-out' | 'not-subscribed' | 'active';
 }
 
 const PROVIDER_NAMES: Record<string, string> = { deepl: 'DeepL', google: 'Google Translate', subscription: 'Your subscription' };
 
 /** What will translate, in plain words; says what is missing instead of pretending. */
 export function engineSummaryText(f: EngineForm): string {
-  if (f.translateWith === 'subscription') return f.engineMode === 'fast' ? 'Your subscription' : `Your subscription, ${f.modelLabel}`;
+  if (f.translateWith === 'subscription') {
+    if (f.account === 'signed-out') return 'Sign in to use your subscription';
+    if (f.account === 'not-subscribed') return 'Subscribe to translate with your account';
+    return f.engineMode === 'fast' ? 'Your subscription' : `Your subscription, ${f.modelLabel}`;
+  }
   const fast = PROVIDER_NAMES[f.provider] ?? f.provider;
   if (!f.hasFastKey && !f.hasClaude) return 'Add a translation key to start';
   if (f.engineMode === 'fast' || !f.hasClaude) {

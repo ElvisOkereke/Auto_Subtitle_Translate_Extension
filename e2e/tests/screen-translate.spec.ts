@@ -138,5 +138,44 @@ test.describe('Screen Translate', () => {
       await page.screenshot({ path: test.info().outputPath(`screen-translate-${theme}.png`), clip: { x: Math.max(0, box.x - 40), y: Math.max(0, box.y - 90), width: 420, height: box.height + 130 } });
     });
   }
+
+  test('page styles cannot restyle the translation panel', async ({ context, fixtureURL, openPopup, configure }) => {
+    await configure({ theme: 'light' });
+    const page = await context.newPage();
+    await page.goto(`${fixtureURL}/screen-translate.html`);
+    // A site whose own rules hit every p/div/button (e.g. a dark site styling text near-white).
+    await page.addStyleTag({ content: 'p, div, span, button { color: rgb(250, 250, 250); text-transform: uppercase; letter-spacing: 6px; box-shadow: 0 0 0 4px red; }' });
+    const popup = await openPopup(page);
+    await popup.click('#screenTranslateButton');
+    await page.bringToFront();
+    await expect.poll(() => page.evaluate(() => document.body.style.cursor)).toBe('crosshair');
+    await dragOver(page, '#target');
+    const translated = overlay(page).locator('[data-role="translated-text"]');
+    await expect(translated).toContainText('[EN-US]');
+    const style = await translated.evaluate(el => {
+      const cs = getComputedStyle(el);
+      return { color: cs.color, transform: cs.textTransform, spacing: cs.letterSpacing };
+    });
+    expect(style).toEqual({ color: 'rgb(23, 26, 33)', transform: 'none', spacing: 'normal' });
+    const closeShadow = await overlay(page).locator('button[id^="close-"]').evaluate(el => getComputedStyle(el).boxShadow);
+    expect(closeShadow).toBe('none');
+  });
+
+  test('a selection near the bottom of the window keeps the whole panel on screen', async ({ context, fixtureURL, openPopup }) => {
+    const page = await context.newPage();
+    await page.goto(`${fixtureURL}/screen-translate.html`);
+    const target = (await page.locator('#target').boundingBox())!;
+    const height = Math.ceil(target.y + target.height + 30);
+    await page.setViewportSize({ width: 900, height });
+    const popup = await openPopup(page);
+    await popup.click('#screenTranslateButton');
+    await page.bringToFront();
+    await expect.poll(() => page.evaluate(() => document.body.style.cursor)).toBe('crosshair');
+    await dragOver(page, '#target');
+    await expect(overlay(page).locator('[data-role="original-text"]')).toBeVisible();
+    const box = (await overlay(page).boundingBox())!;
+    expect(box.y).toBeGreaterThanOrEqual(0);
+    expect(box.y + box.height).toBeLessThanOrEqual(height);
+  });
 });
 

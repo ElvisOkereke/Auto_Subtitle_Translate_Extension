@@ -23,7 +23,6 @@
 
     <!-- The current state, drawn like the subtitles this extension puts on videos -->
     <p id="captionBar" class="caption-bar" role="status" aria-live="polite">Pick a mode to start</p>
-    <div id="status" class="message hidden" role="alert"></div>
 
     <div class="mode-switch" role="tablist" aria-label="What to translate">
         <button id="modeSubtitles" class="mode-button" role="tab" type="button">
@@ -287,6 +286,9 @@
     </section>
     <p class="version">Subtitle Translator 1.0</p>
 </section>
+
+<!-- Feedback for actions in either view (settings saved, errors) -->
+<div id="status" class="message hidden" role="alert"></div>
 
 <script src="popup.js"></script>
 </body>

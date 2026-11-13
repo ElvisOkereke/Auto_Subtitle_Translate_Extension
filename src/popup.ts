@@ -187,6 +187,7 @@ class PopupController {
   private screenTranslateActionCount = 0;
   private signedIn = false;
   private hostedAvailable = false;
+  private accountActive = false;
   private subtitleState: PopupState['subtitleState'] = 'off';
   private hasBox = false;
   private screenState: PopupState['screenTranslate'] = 'inactive';
@@ -227,6 +228,7 @@ class PopupController {
       hasClaude,
       engineMode: e.engineMode.value as 'fast-then-best' | 'fast' | 'best',
       modelLabel: this.optionText(e.claudeModel).replace(/\s*\(.*\)$/, ''),
+      account: !this.signedIn ? 'signed-out' : this.accountActive ? 'active' : 'not-subscribed',
     });
   }
 
@@ -300,20 +302,22 @@ class PopupController {
     if (r && !r.success && r.error) this.setAccountStatus(r.error);
   }
 
-  /** Hides the account section and Subscription options while no hosted service is configured. */
+  /** Hides the account section while no hosted service is configured. The Subscription options in the
+   * engine dropdowns stay hidden either way: "Translate with" is the one place to choose the subscription. */
   private setHostedAvailable(available: boolean) {
     this.hostedAvailable = available;
     document.getElementById('accountSection')?.classList.toggle('hidden', !available);
     this.elements.accountSummary.classList.toggle('hidden', !available);
     this.renderTranslateWith();
     for (const select of [this.elements.claudeAccess, this.elements.translationProvider]) {
-      for (const option of select.options) if (option.value === 'subscription') option.hidden = !available;
+      for (const option of select.options) if (option.value === 'subscription') option.hidden = true;
     }
   }
 
   private renderAccount(account: AccountView | null) {
     const e = this.elements;
     this.signedIn = !!account;
+    this.accountActive = !!account?.active;
     e.signedOutView.classList.toggle('hidden', !!account);
     e.signedInView.classList.toggle('hidden', !account);
     if (account) {
@@ -447,7 +451,8 @@ class PopupController {
     }
     const stored = await chrome.storage.local?.get('popupMode').catch(() => ({}));
     this.subtitleModeRunning = state.mode === 'subtitles';
-    this.setMode(this.subtitleModeRunning || (stored as any)?.popupMode === 'subtitles' ? 'subtitles' : 'audio');
+    const preferSubtitles = this.subtitleModeRunning || (!this.isActive && (stored as any)?.popupMode === 'subtitles');
+    this.setMode(preferSubtitles ? 'subtitles' : 'audio');
     this.renderSubtitleMode(!!state.hasBox, state.state);
   }
 
@@ -510,6 +515,8 @@ class PopupController {
       this.isActive = false;
     }
     this.updateToggleButton();
+    // Live captions are running: open on the mode that can stop them.
+    if (this.isActive && !this.subtitleModeRunning && this.currentMode !== 'audio') this.setMode('audio');
   }
 
   initializeElements() {
@@ -545,6 +552,9 @@ class PopupController {
       this.updateApiKeyVisibility();
     });
     this.elements.claudeAccess.addEventListener('change', () => this.updateClaudeFields());
+    for (const select of [this.elements.claudeAccess, this.elements.translationProvider]) {
+      select.addEventListener('change', () => this.renderTranslateWith());
+    }
     this.elements.openSettings.addEventListener('click', () => this.showView('settings'));
     this.elements.closeSettings.addEventListener('click', () => this.showView('main'));
     for (const summary of [this.elements.engineSummary, this.elements.accountSummary]) {
@@ -559,7 +569,7 @@ class PopupController {
     for (const select of [this.elements.subtitleLanguage, this.elements.sourceLanguage, this.elements.targetLanguage]) {
       select.addEventListener('change', () => this.renderCaption());
     }
-    for (const field of [this.elements.translationProvider, this.elements.engineMode, this.elements.claudeModel, this.elements.deeplApiKey,
+    for (const field of [this.elements.translationProvider, this.elements.claudeAccess, this.elements.engineMode, this.elements.claudeModel, this.elements.deeplApiKey,
       this.elements.googleTranslateApiKey, this.elements.anthropicApiKey, this.elements.claudeGatewayUrl, this.elements.claudeGatewayToken]) {
       field.addEventListener('change', () => this.renderEngineSummary());
     }
@@ -732,18 +742,18 @@ class PopupController {
         // The content script couldn't start capture; it shows the reason on the page.
         this.isActive = response.active;
         this.updateToggleButton();
-        this.showStatus('Could not start subtitles - see the message on the page', 'error');
+        this.showStatus('Could not start live captions. The page says why.', 'error');
         return;
       }
 
       this.showStatus(
-        this.isActive ? 'Subtitles activated' : 'Subtitles deactivated',
+        this.isActive ? 'Live captions on' : 'Live captions off',
         'success'
       );
 
     } catch (error) {
-      console.error('Failed to toggle subtitles:', error);
-      this.showStatus('Failed to toggle subtitles: ' + describeTabError(error), 'error');
+      console.error('Failed to toggle live captions:', error);
+      this.showStatus('Could not switch live captions: ' + describeTabError(error), 'error');
       this.isActive = !this.isActive;
       this.updateToggleButton();
     }

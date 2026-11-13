@@ -91,7 +91,8 @@ describe('popup modes', () => {
 });
 
 describe('popup translation engine settings', () => {
-  async function loadPopup(syncData: Record<string, unknown> = {}, localData: Record<string, unknown> = {}, sessionData: Record<string, unknown> = {}) {
+  async function loadPopup(syncData: Record<string, unknown> = {}, localData: Record<string, unknown> = {}, sessionData: Record<string, unknown> = {},
+    runtimeReply?: (msg: any) => unknown, tabReply?: (msg: any) => unknown) {
     const html = fs.readFileSync(path.join(__dirname, '../../popup.html'), 'utf8');
     document.documentElement.innerHTML = html.replace(/<script[\s\S]*?<\/script>/g, '');
     const chromeMock = installChromeMock(syncData);
@@ -102,13 +103,16 @@ describe('popup translation engine settings', () => {
       if (msg.type === 'GET_SUBTITLE_MODE_STATE') return { mode: 'off', state: 'stopped', videoId: 'v1', hasBox: false };
       if (msg.type === 'GET_SCREEN_TRANSLATE_STATE') return { state: 'inactive' };
       if (msg.type === 'GET_SUBTITLE_STATE') return { active: false };
-      return { success: true };
+      return tabReply?.(msg) ?? { success: true };
     });
+    if (runtimeReply) chromeMock.runtime.sendMessage.mockImplementation(async (msg: any) => runtimeReply(msg) ?? { success: true });
     jest.isolateModules(() => require('../popup'));
     document.dispatchEvent(new Event('DOMContentLoaded'));
     await new Promise(r => setTimeout(r, 20));
     return chromeMock;
   }
+  const hosted = (account: Record<string, unknown> | null) => (msg: any) =>
+    msg.type === 'ACCOUNT_STATUS' ? { success: true, available: true, signedIn: !!account, account } : undefined;
   const el = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
   const savedSettings = (chromeMock: any) =>
     chromeMock.runtime.sendMessage.mock.calls.map((c: any[]) => c[0]).filter((m: any) => m.type === 'UPDATE_SETTINGS').map((m: any) => m.settings);
@@ -232,6 +236,64 @@ describe('popup translation engine settings', () => {
   it('the audio button reads Start live captions / Stop live captions', async () => {
     await loadPopup();
     expect(el('toggleButton').textContent).toBe('Start live captions');
+  });
+
+  it('with the hosted service, the subscription is chosen only through Translate with', async () => {
+    await loadPopup({ translationProvider: 'deepl', claudeAccess: 'key', translationEngineMode: 'fast-then-best' }, { deeplApiKey: 'd', anthropicApiKey: 'a' }, {}, hosted(null));
+    for (const id of ['translationProvider', 'claudeAccess']) {
+      const option = [...el<HTMLSelectElement>(id).options].find(o => o.value === 'subscription')!;
+      expect(option.hidden).toBe(true);
+    }
+    expect(el('engineSummaryValue').textContent).toBe('DeepL, then Claude Opus 5.5');
+    el<HTMLSelectElement>('claudeAccess').value = 'gateway';
+    el('claudeAccess').dispatchEvent(new Event('change'));
+    expect(el('engineSummaryValue').textContent).toBe('DeepL (add Claude access for best quality)');
+  });
+
+  it('the Engine row says to sign in when the subscription is chosen while signed out', async () => {
+    await loadPopup({ translationProvider: 'subscription', claudeAccess: 'subscription' }, {}, {}, hosted(null));
+    expect(el('engineSummaryValue').textContent).toBe('Sign in to use your subscription');
+  });
+
+  it('save feedback is visible from the settings view', async () => {
+    await loadPopup();
+    el('openSettings').click();
+    el<HTMLSelectElement>('themeChoice').value = 'dark';
+    el('themeChoice').dispatchEvent(new Event('change'));
+    await new Promise(r => setTimeout(r, 10));
+    expect(el('status').textContent).toBe('Settings saved');
+    expect(el('status').closest('.hidden')).toBeNull();
+  });
+
+  it('starting live captions confirms with the live captions name', async () => {
+    await loadPopup();
+    el('toggleButton').click();
+    await new Promise(r => setTimeout(r, 10));
+    expect(el('status').textContent).toBe('Live captions on');
+    el('toggleButton').click();
+    await new Promise(r => setTimeout(r, 10));
+    expect(el('status').textContent).toBe('Live captions off');
+  });
+
+  it('reopening while live captions run shows the Audio mode even if Subtitles was last picked', async () => {
+    const html = fs.readFileSync(path.join(__dirname, '../../popup.html'), 'utf8');
+    document.documentElement.innerHTML = html.replace(/<script[\s\S]*?<\/script>/g, '');
+    const chromeMock = installChromeMock({});
+    (chromeMock as any).storage.local.get = jest.fn(async () => ({ popupMode: 'subtitles' }));
+    (chromeMock as any).storage.session = { get: jest.fn(async () => ({})) };
+    chromeMock.tabs.query.mockResolvedValue([{ id: 1 }]);
+    chromeMock.tabs.sendMessage.mockImplementation(async (_id: number, msg: any) => {
+      if (msg.type === 'GET_SUBTITLE_MODE_STATE') return { mode: 'off', state: 'stopped', hasBox: false };
+      if (msg.type === 'GET_SCREEN_TRANSLATE_STATE') return { state: 'inactive' };
+      if (msg.type === 'GET_SUBTITLE_STATE') return { active: true };
+      return { success: true };
+    });
+    jest.isolateModules(() => require('../popup'));
+    document.dispatchEvent(new Event('DOMContentLoaded'));
+    await new Promise(r => setTimeout(r, 20));
+    expect(el('audioPanel').classList.contains('hidden')).toBe(false);
+    expect(el('toggleButton').textContent).toBe('Stop live captions');
+    expect(el('captionBar').textContent).toBe('Live captions on, translating into English');
   });
 
   it('the caption bar shows the current state', async () => {

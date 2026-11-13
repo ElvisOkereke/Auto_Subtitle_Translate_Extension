@@ -72,7 +72,9 @@ Settings view (replaces the main view; back button):
   Translation — "Translate with": [My subscription | My own keys]
       own keys: fast engine + key, Claude access + key/gateway; engine mode; model
   Account — sign in / plan / usage / subscribe / manage / sign out
-  Live captions — speech language, position, size
+  Live captions — position, size
+  (amended during build: "Speech in" sits in the Audio panel on the main view,
+  beside the start button, as the per-mode counterpart of "Subtitles in")
   Glossary for this video
   Appearance — theme: System / Light / Dark
 ```
@@ -89,8 +91,10 @@ fields 8 px, buttons 10 px.
 captions", "Draw subtitle box" / "Redraw box", "Use saved box", "Translate text
 on this page" / "Stop", errors that say what to do.
 
-**On-page panels** (Screen Translate result, caption notices, box selection hint)
+**On-page panels** (Screen Translate result, its loading/error chips, box selection)
 use the same tokens and follow the theme setting (System follows the OS).
+(Amended during build: live-caption notices keep the caption look, since they sit
+over video.)
 The subtitle overlay (style C) and the live-caption lines stay as they are: they
 are the product's output, designed for legibility over video in any theme.
 
@@ -100,7 +104,7 @@ are the product's output, designed for legibility over video in any theme.
   panels; System follows `prefers-color-scheme`.
 - Every control maps to a working feature; the mismatches above are gone
   (one "Translate with" choice; caption settings under Live captions; speech
-  language only there).
+  language in the Audio panel only).
 - Keyboard: every control reachable, visible focus ring; contrast ≥ 4.5:1 for text
   in both themes.
 - Screenshots of the popup (main + settings) and the Screen Translate panel in

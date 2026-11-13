@@ -23,6 +23,10 @@ describe('caption bar', () => {
     expect(captionText({ ...base, mode: 'audio', audioRunning: true, speechLanguage: 'Japanese' })).toBe('Live captions on, Japanese into English');
   });
 
+  it('running live captions are mentioned on the Subtitles tab too', () => {
+    expect(captionText({ ...base, audioRunning: true })).toBe('Live captions on, translating into English');
+  });
+
   it('Screen Translate takes over while a box is being drawn', () => {
     expect(captionText({ ...base, screenTranslate: 'armed' })).toBe('Drag a box around text on the page');
   });
@@ -50,5 +54,8 @@ describe('engine summary', () => {
     expect(engineSummaryText({ ...form, hasClaude: false })).toBe('DeepL (add Claude access for best quality)');
     expect(engineSummaryText({ ...form, hasFastKey: false, hasClaude: false })).toBe('Add a translation key to start');
     expect(engineSummaryText({ ...form, hasFastKey: false })).toBe('Claude Opus 5.5 (add a DeepL key for instant lines)');
+    expect(engineSummaryText({ ...form, translateWith: 'subscription', account: 'signed-out' })).toBe('Sign in to use your subscription');
+    expect(engineSummaryText({ ...form, translateWith: 'subscription', account: 'not-subscribed' })).toBe('Subscribe to translate with your account');
+    expect(engineSummaryText({ ...form, translateWith: 'subscription', account: 'active' })).toBe('Your subscription, Claude Opus 5.5');
   });
 });

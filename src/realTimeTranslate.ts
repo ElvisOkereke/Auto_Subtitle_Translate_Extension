@@ -9,6 +9,7 @@ import {
   ROIData
 } from './types';
 import { ensurePageStyles, themePageElement } from './ui/pageTheme';
+import { placePanel } from './ui/placement';
 
 function extractTextAtRect(rect: DOMRect): string | null {
   const centerX = rect.x + rect.width / 2;
@@ -263,9 +264,11 @@ class RealTimeTranslator {
   }
 
   /** Places an on-page element next to the selected area, kept inside the viewport. */
-  private placeNear(el: HTMLElement, rect: DOMRect, width = 320): void {
-    el.style.top = `${Math.min(rect.bottom + 6, window.innerHeight - 60)}px`;
-    el.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - width - 8))}px`;
+  /** Call after the element is in the page, so its real size is known. */
+  private placeNear(el: HTMLElement, rect: DOMRect): void {
+    const { top, left } = placePanel(rect, { width: el.offsetWidth, height: el.offsetHeight }, { width: window.innerWidth, height: window.innerHeight });
+    el.style.top = `${top}px`;
+    el.style.left = `${left}px`;
   }
 
   private showLoadingIndicator(rect: DOMRect): void {
@@ -275,9 +278,9 @@ class RealTimeTranslator {
     loader.className = 'ast-ui ast-chip ast-chip--busy';
     loader.setAttribute('role', 'status');
     loader.textContent = 'Translating…';
-    this.placeNear(loader, rect, 120);
     void themePageElement(loader);
     document.body.appendChild(loader);
+    this.placeNear(loader, rect);
   }
 
   private hideLoadingIndicator(): void {
@@ -296,7 +299,6 @@ class RealTimeTranslator {
     overlay.setAttribute('data-rtt-owned', '');
     overlay.setAttribute('role', 'dialog');
     overlay.setAttribute('aria-label', 'Translation');
-    this.placeNear(overlay, rect);
     void themePageElement(overlay);
 
     // Translation first (what the reader came for), the original underneath.
@@ -331,6 +333,7 @@ class RealTimeTranslator {
     overlay.append(head, translated, original);
 
     document.body.appendChild(overlay);
+    this.placeNear(overlay, rect);
     this.translationOverlays.set(overlayId, overlay);
     this.overlayRects.set(overlayId, rect);
 
@@ -416,10 +419,10 @@ class RealTimeTranslator {
     errorDiv.className = 'ast-ui ast-chip ast-chip--error';
     errorDiv.setAttribute('data-rtt-owned', '');
     errorDiv.setAttribute('role', 'alert');
-    this.placeNear(errorDiv, rect, 260);
     void themePageElement(errorDiv);
     errorDiv.textContent = message;
     document.body.appendChild(errorDiv);
+    this.placeNear(errorDiv, rect);
 
     setTimeout(() => {
       if (errorDiv.parentNode) {
