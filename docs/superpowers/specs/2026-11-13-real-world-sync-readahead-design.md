@@ -250,7 +250,10 @@ the previous step.
   - Report both, labelled. A blocked run is reported, never hidden.
 - **Targets (my call):** each step must meet these on the benchmark set, or
   record a ruling explaining why not.
-  - **Lines shown while paused:** 0.
+  - **Lines shown while paused:** 0. (Amended during build: counted as stale lines,
+    meaning a line that isn't the subtitle on screen at that moment. In Subtitles
+    mode, a translation of the subtitle visible in the paused frame may still
+    land during a pause.)
   - **Path:** the expected path ran (read-ahead on YouTube).
   - **Subtitles coverage:**
     - ≥ 97% of lines on screen ≥ 0.5 s

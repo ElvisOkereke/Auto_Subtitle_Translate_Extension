@@ -49,6 +49,10 @@ pick the subtitle language → **Draw subtitle box** → drag a box around where
 the subtitles appear. The box is remembered per video (**Use saved box**
 next time). The English sits on a see-through tint over the original line and
 updates as the subtitles change; nothing is shown when there's no subtitle.
+Each line stays up long enough to read: at least 1.5 s (longer for long lines,
+about 15 characters a second, up to 6 s) even when the original flashes by. A
+new subtitle replaces it at once, and pausing the video freezes it. On YouTube
+both video formats it serves (AV1/MP4 and VP9/WebM) are read ahead.
 
 **Audio mode** — popup → **Audio** → **Start live captions**. The first run
 downloads the speech model (~209 MB on GPUs with WebGPU, 80 MB otherwise).
