@@ -2,6 +2,9 @@
 // tests. Pure functions over what the overlay showed (ShownRecord, recorded by
 // e2e/helpers/subtitles.ts recordOverlay) and a reference timeline.
 import { charErrorRate } from '../helpers/cer';
+import { minDisplaySeconds } from '../../src/subtitle/displayPolicy';
+
+export { minDisplaySeconds };
 
 /** One overlay appearance. Times are video seconds; `wall*` are performance.now() in the page. */
 export interface ShownRecord {
@@ -12,6 +15,8 @@ export interface ShownRecord {
   pausedAtShow: boolean;
   wallShownAt: number;
   wallHiddenAt: number | null;
+  /** 'fast' (DeepL/Google) or 'better' (Claude), from the overlay. */
+  quality?: string;
 }
 
 /** A reference subtitle line (absolute video seconds). `h`: text height in px at 1080p, when known. */
@@ -91,9 +96,17 @@ export function missesBySize(matches: LineMatch[]): Record<SizeBucket, number> {
   return out;
 }
 
-/** Spec: max(1.5 s, characters / 15 per s) of the translated text, capped at 6 s. */
-export function minDisplaySeconds(text: string): number {
-  return Math.min(6, Math.max(1.5, [...text].length / 15));
+
+/** Consecutive appearances of the same line (e.g. DeepL replaced in place by Claude) as one span. */
+function spans(shown: ShownRecord[]): ShownRecord[] {
+  const out: ShownRecord[] = [];
+  for (const s of shown) {
+    const last = out[out.length - 1];
+    if (last && last.lineStart === s.lineStart && last.hiddenAt !== null && Math.abs(s.shownAt - last.hiddenAt) <= 0.05) {
+      out[out.length - 1] = { ...last, hiddenAt: s.hiddenAt, text: s.text, quality: s.quality };
+    } else out.push(s);
+  }
+  return out;
 }
 
 /**
@@ -101,19 +114,26 @@ export function minDisplaySeconds(text: string): number {
  * replaced by the next line. Lines still on screen at the end are not checked.
  */
 export function timeOnScreen(shown: ShownRecord[]): { checked: number; tooShort: number } {
-  let checked = 0;
+  const lines = spans(shown);
   let tooShort = 0;
-  shown.forEach((s, i) => {
-    if (s.hiddenAt === null) {
-      checked++;
-      return;
-    }
-    checked++;
-    const next = shown[i + 1];
+  lines.forEach((s, i) => {
+    if (s.hiddenAt === null) return;
+    const next = lines[i + 1];
     const replaced = !!next && Math.abs(next.shownAt - s.hiddenAt) <= 0.05;
     if (!replaced && s.hiddenAt - s.shownAt < minDisplaySeconds(stripTag(s.text)) - 0.05) tooShort++;
   });
-  return { checked, tooShort };
+  return { checked: lines.length, tooShort };
+}
+
+/** Lines first shown with a fast translation and upgraded in place to Claude's. */
+export function upgradesOnScreen(shown: ShownRecord[]): number {
+  const upgraded = new Set<number>();
+  const fastSeen = new Set<number>();
+  for (const s of shown) {
+    if (s.quality === 'fast') fastSeen.add(s.lineStart);
+    else if (s.quality === 'better' && fastSeen.has(s.lineStart)) upgraded.add(s.lineStart);
+  }
+  return upgraded.size;
 }
 
 /** Lines that appeared while the video was paused (must be 0). */

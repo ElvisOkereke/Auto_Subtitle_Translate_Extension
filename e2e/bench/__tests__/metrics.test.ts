@@ -7,6 +7,7 @@ import {
   readyBeforeShown,
   shownWhilePaused,
   timeOnScreen,
+  upgradesOnScreen,
   type RefLine,
   type ShownRecord,
 } from '../metrics';
@@ -72,10 +73,19 @@ describe('benchmark metrics', () => {
   });
 
   it('a replaced line is not too short; one that vanished early is', () => {
-    const replaced = [rec({ shownAt: 10, hiddenAt: 10.4, text: 'Hi' }), rec({ shownAt: 10.4, hiddenAt: 12, text: 'Next line' })];
+    const replaced = [rec({ lineStart: 10, shownAt: 10, hiddenAt: 10.4, text: 'Hi' }), rec({ lineStart: 10.4, shownAt: 10.4, hiddenAt: 12, text: 'Next line' })];
     expect(timeOnScreen(replaced)).toEqual({ checked: 2, tooShort: 0 });
-    const vanished = [rec({ shownAt: 10, hiddenAt: 10.4, text: 'Hi' })];
+    const vanished = [rec({ lineStart: 10, shownAt: 10, hiddenAt: 10.4, text: 'Hi' })];
     expect(timeOnScreen(vanished)).toEqual({ checked: 1, tooShort: 1 });
+  });
+
+  it('an in-place upgrade (DeepL -> Claude) of the same line counts as one span', () => {
+    const upgraded = [
+      rec({ lineStart: 10, shownAt: 10, hiddenAt: 10.8, text: 'Fast line', quality: 'fast' }),
+      rec({ lineStart: 10, shownAt: 10.8, hiddenAt: 11.6, text: 'Better line', quality: 'better' }),
+    ];
+    expect(timeOnScreen(upgraded)).toEqual({ checked: 1, tooShort: 0 });
+    expect(upgradesOnScreen(upgraded)).toBe(1);
   });
 
   it('counts lines shown while paused', () => {

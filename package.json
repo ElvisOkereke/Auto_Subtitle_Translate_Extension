@@ -30,6 +30,8 @@
     "test:e2e:chrome": "npm run build:prod && cross-env-shell E2E_BROWSER=chrome playwright test --project=ui --project=captions --project=subtitles",
     "fixtures:video": "node e2e/scripts/fixtures-video.mjs",
     "e2e:youtube": "npm run build:prod && cross-env-shell E2E_BROWSER=chrome playwright test --project=youtube",
+    "bench:youtube": "npm run build:prod && cross-env-shell E2E_BROWSER=chrome playwright test --project=youtube youtube-bench",
+    "bench:local": "npm run build:prod && playwright test --project=youtube youtube-bench -g \"local copies\"",
     "e2e:judge": "cross-env-shell E2E_JUDGE=1 playwright test --project=judge",
     "server:test": "npm run server:build && jest --selectProjects server",
     "server:build": "esbuild server/src/main.ts server/src/admin.ts --bundle --platform=node --target=node22 --format=cjs --outdir=server/dist --external:node:sqlite",

@@ -25,7 +25,7 @@ export default defineConfig({
     { name: 'perf', testMatch: /perf|spike/, workers: 1, timeout: 1_800_000 },
     { name: 'live', testMatch: /live/, workers: 1, timeout: 600_000 },
     // Real YouTube (installed Chrome only, opt-in): npm run e2e:youtube
-    { name: 'youtube', testMatch: /youtube-real/, workers: 1, timeout: 900_000 },
+    { name: 'youtube', testMatch: /youtube-(real|bench)/, workers: 1, timeout: 900_000 },
     // Claude-as-judge translation scoring (opt-in, Fuelix/Anthropic credentials): E2E_JUDGE=1
     { name: 'judge', testMatch: /judge|domain-bench/, workers: 1, timeout: 900_000 },
   ],

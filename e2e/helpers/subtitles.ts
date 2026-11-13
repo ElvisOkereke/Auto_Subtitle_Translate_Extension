@@ -75,6 +75,7 @@ export async function recordOverlay(page: Page): Promise<void> {
           pausedAtShow: !!video?.paused,
           wallShownAt: performance.now(),
           wallHiddenAt: null,
+          quality: el.dataset.quality,
         });
       }
     }).observe(document.documentElement, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['style', 'data-shown-at'] });

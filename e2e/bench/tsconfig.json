@@ -1,5 +1,5 @@
 {
   "extends": "../../tsconfig.json",
-  "compilerOptions": { "types": ["jest", "node"], "rootDir": "..", "outDir": "../.cache/bench-tsc" },
+  "compilerOptions": { "types": ["jest", "node"], "rootDir": "../..", "outDir": "../.cache/bench-tsc" },
   "include": ["./**/*.ts", "../helpers/cer.ts"]
 }
