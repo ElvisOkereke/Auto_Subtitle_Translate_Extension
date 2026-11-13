@@ -87,7 +87,22 @@ export const test = base.extend<ExtensionFixtures & ExtensionOptions, { server: 
 
   sw: async ({ context, extensionId }, use) => {
     const isOurs = (w: Worker) => w.url().startsWith(`chrome-extension://${extensionId}/`);
-    const sw = context.serviceWorkers().find(isOurs) ?? (await context.waitForEvent('serviceworker', { predicate: isOurs }));
+    // In a persistent profile the extension is already installed, so its MV3 worker only
+    // starts when an event wakes it; occasionally nothing does and waiting would hang the
+    // test until its timeout. If it hasn't appeared shortly, wake it with an extension page
+    // (the popup messages the background on load).
+    let sw = context.serviceWorkers().find(isOurs);
+    if (!sw) {
+      sw = await context.waitForEvent('serviceworker', { predicate: isOurs, timeout: 5000 }).catch(() => undefined);
+    }
+    if (!sw) {
+      const waking = context.waitForEvent('serviceworker', { predicate: isOurs, timeout: 30_000 }).catch(() => undefined);
+      const page = await context.newPage();
+      await page.goto(`chrome-extension://${extensionId}/popup.html`);
+      sw = context.serviceWorkers().find(isOurs) ?? (await waking);
+      await page.close();
+      if (!sw) throw new Error('The extension service worker did not start, even after opening an extension page');
+    }
     // Extension APIs are bound slightly after the worker script starts.
     await expect.poll(() => sw.evaluate(() => typeof chrome !== 'undefined' && !!chrome.storage)).toBe(true);
     await use(sw);
