@@ -1,6 +1,7 @@
 import { chromium, BrowserContext } from '@playwright/test';
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
+import path from 'node:path';
 import { DIST } from './paths';
 
 export interface LaunchOptions {
@@ -37,6 +38,30 @@ function baseArgs(o: LaunchOptions): string[] {
 }
 
 /**
+ * Persistent profiles can keep running a cached service-worker script even
+ * after the extension version changes (seen in Chromium too: a new background
+ * message type went unanswered). Drop the registrations once per build version
+ * (global setup bumps it every run); the Cache API data next to them
+ * (downloaded models) is kept. Not on every launch: wiping the registration
+ * database each time sometimes left the extension's worker unstarted.
+ */
+function clearStaleWorker(profileDir: string): void {
+  let version = '';
+  try {
+    version = JSON.parse(fs.readFileSync(path.join(DIST, 'manifest.json'), 'utf8')).version;
+  } catch {
+    // no dist yet: clear every time
+  }
+  const marker = path.join(profileDir, '.ast-sw-cleared');
+  if (version && fs.existsSync(marker) && fs.readFileSync(marker, 'utf8') === version) return;
+  for (const dir of ['Database', 'ScriptCache']) {
+    fs.rmSync(path.join(profileDir, 'Default', 'Service Worker', dir), { recursive: true, force: true });
+  }
+  fs.mkdirSync(profileDir, { recursive: true });
+  if (version) fs.writeFileSync(marker, version);
+}
+
+/**
  * Launches a browser with the extension from dist/ loaded.
  *
  * - chromium (default): Playwright's bundled Chromium via --load-extension.
@@ -47,13 +72,7 @@ function baseArgs(o: LaunchOptions): string[] {
  *   Windows) it ships the D3D12 shader compiler WebGPU needs.
  */
 export async function launchExtensionBrowser(o: LaunchOptions): Promise<LaunchedBrowser> {
-  // Persistent profiles can keep running a cached service-worker script even
-  // after the extension version changes (seen in Chromium too: a new background
-  // message type went unanswered). Drop the registrations before every launch;
-  // the Cache API data next to them (downloaded models) is kept.
-  for (const dir of ['Database', 'ScriptCache']) {
-    fs.rmSync(`${o.profileDir}/Default/Service Worker/${dir}`, { recursive: true, force: true });
-  }
+  clearStaleWorker(o.profileDir);
   if (browserKind() === 'chromium') {
     const context = await chromium.launchPersistentContext(o.profileDir, {
       channel: 'chromium',
@@ -73,9 +92,6 @@ export async function launchExtensionBrowser(o: LaunchOptions): Promise<Launched
   // and script in a persistent profile even when loadUnpacked installs a newer
   // build (and a version bump doesn't help here). Drop the registrations; the
   // Cache API data next to them (downloaded models) is kept.
-  for (const dir of ['Database', 'ScriptCache']) {
-    fs.rmSync(`${o.profileDir}/Default/Service Worker/${dir}`, { recursive: true, force: true });
-  }
   const proc = spawn(
     exe,
     [

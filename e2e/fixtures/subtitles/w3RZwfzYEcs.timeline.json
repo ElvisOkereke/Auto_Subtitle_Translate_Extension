@@ -1,0 +1,536 @@
+{
+ "video": "w3RZwfzYEcs",
+ "labelledBy": "extension OCR at 10 fps, hand-checked: 46 corrections (drops, merges, text fixes)",
+ "note": "Times are relative to the benchmark cut w3RZwfzYEcs.b.webm, which starts at 91.291 s of the video.",
+ "stretches": [
+  {
+   "id": "b",
+   "start": 91.291,
+   "end": 221.291,
+   "file": "w3RZwfzYEcs.b.webm"
+  }
+ ],
+ "lines": [
+  {
+   "stretch": "b",
+   "start": 1,
+   "end": 1.7,
+   "ko": "핵 창 맞았어",
+   "h": 8,
+   "segments": [
+    5
+   ]
+  },
+  {
+   "stretch": "b",
+   "start": 2.8,
+   "end": 4.1,
+   "ko": "창 아퍼",
+   "h": 8,
+   "segments": [
+    11,
+    12,
+    14,
+    17,
+    18,
+    19
+   ]
+  },
+  {
+   "stretch": "b",
+   "start": 5,
+   "end": 6.3,
+   "ko": "창 무지 아파",
+   "h": 8,
+   "segments": [
+    24,
+    26,
+    27,
+    28
+   ]
+  },
+  {
+   "stretch": "b",
+   "start": 7.8,
+   "end": 8.3,
+   "ko": "으아ㅏ아!!",
+   "h": 1,
+   "segments": [
+    31
+   ]
+  },
+  {
+   "stretch": "b",
+   "start": 9.1,
+   "end": 9.6,
+   "ko": "무지 아퍼!",
+   "h": 0,
+   "segments": [
+    34
+   ]
+  },
+  {
+   "stretch": "b",
+   "start": 10.6,
+   "end": 11.4,
+   "ko": "재네들 무지 아퍼!",
+   "h": 0,
+   "segments": [
+    36
+   ]
+  },
+  {
+   "stretch": "b",
+   "start": 13.1,
+   "end": 14.1,
+   "ko": "아프긴 하다..",
+   "h": 2,
+   "segments": [
+    39,
+    40,
+    41,
+    42,
+    43,
+    44,
+    45,
+    46
+   ]
+  },
+  {
+   "stretch": "b",
+   "start": 23.2,
+   "end": 23.7,
+   "ko": "우와아아;;",
+   "h": 0,
+   "segments": [
+    65,
+    66,
+    67,
+    68
+   ]
+  },
+  {
+   "stretch": "b",
+   "start": 23.7,
+   "end": 24.7,
+   "ko": "진짜 무지 아프다;",
+   "h": 1,
+   "segments": [
+    69,
+    70,
+    71,
+    72,
+    73,
+    74,
+    75
+   ]
+  },
+  {
+   "stretch": "b",
+   "start": 30.6,
+   "end": 31.2,
+   "ko": "야 뭐야",
+   "h": 2,
+   "segments": [
+    92
+   ]
+  },
+  {
+   "stretch": "b",
+   "start": 31.2,
+   "end": 32.3,
+   "ko": "뭔 딜이야? 도대체 재네들",
+   "h": 2,
+   "segments": [
+    93
+   ]
+  },
+  {
+   "stretch": "b",
+   "start": 59.2,
+   "end": 59.9,
+   "ko": "아이 야발",
+   "h": 0,
+   "segments": [
+    274,
+    275
+   ]
+  },
+  {
+   "stretch": "b",
+   "start": 59.9,
+   "end": 61,
+   "ko": "이거 하는거 아니였어",
+   "h": 0,
+   "segments": [
+    276,
+    277,
+    278
+   ]
+  },
+  {
+   "stretch": "b",
+   "start": 61.2,
+   "end": 62.2,
+   "ko": "으허허허허헝ㅎ헝",
+   "h": 2,
+   "segments": [
+    280,
+    281
+   ]
+  },
+  {
+   "stretch": "b",
+   "start": 62.6,
+   "end": 63.1,
+   "ko": "아닝ㅎㅋㅋ",
+   "h": 2,
+   "segments": [
+    285,
+    286,
+    287
+   ]
+  },
+  {
+   "stretch": "b",
+   "start": 63.2,
+   "end": 63.7,
+   "ko": "야발",
+   "h": 2,
+   "segments": [
+    289
+   ]
+  },
+  {
+   "stretch": "b",
+   "start": 63.7,
+   "end": 64.6,
+   "ko": "이거 하는거 아니였어",
+   "h": 1,
+   "segments": [
+    290,
+    291,
+    292
+   ]
+  },
+  {
+   "stretch": "b",
+   "start": 65.5,
+   "end": 66.4,
+   "ko": "개같은 챔프...",
+   "h": 0,
+   "segments": [
+    295
+   ]
+  },
+  {
+   "stretch": "b",
+   "start": 67.7,
+   "end": 69.3,
+   "ko": "뭐야 어떻게 된거야?",
+   "h": 2,
+   "segments": [
+    298,
+    299
+   ]
+  },
+  {
+   "stretch": "b",
+   "start": 72.2,
+   "end": 73.8,
+   "ko": "흐어어엉 재네들 무서워ㅠㅠㅠ",
+   "h": 0,
+   "segments": [
+    305
+   ]
+  },
+  {
+   "stretch": "b",
+   "start": 74.4,
+   "end": 75.3,
+   "ko": "허아앙아악!!",
+   "h": 3,
+   "segments": [
+    312,
+    313,
+    314,
+    315,
+    316
+   ]
+  },
+  {
+   "stretch": "b",
+   "start": 77.4,
+   "end": 78.4,
+   "ko": "개 짜증나...",
+   "h": 0,
+   "segments": [
+    324
+   ]
+  },
+  {
+   "stretch": "b",
+   "start": 85.3,
+   "end": 85.7,
+   "ko": "야악!!!",
+   "h": 1,
+   "segments": [
+    356
+   ]
+  },
+  {
+   "stretch": "b",
+   "start": 87.4,
+   "end": 88.4,
+   "ko": "재네 무지 쎄!",
+   "h": 2,
+   "segments": [
+    361,
+    362
+   ]
+  },
+  {
+   "stretch": "b",
+   "start": 88.8,
+   "end": 89.4,
+   "ko": "훙항하",
+   "h": 1,
+   "segments": [
+    364
+   ]
+  },
+  {
+   "stretch": "b",
+   "start": 89.7,
+   "end": 90.8,
+   "ko": "미친듯이 털리는데?",
+   "h": 1,
+   "segments": [
+    366
+   ]
+  },
+  {
+   "stretch": "b",
+   "start": 91.4,
+   "end": 92.2,
+   "ko": "봇 똥싼다~",
+   "h": 1,
+   "segments": [
+    368,
+    369
+   ]
+  },
+  {
+   "stretch": "b",
+   "start": 94.2,
+   "end": 95.1,
+   "ko": "싼다싼다싼다",
+   "h": 7,
+   "segments": [
+    372
+   ]
+  },
+  {
+   "stretch": "b",
+   "start": 102.7,
+   "end": 104.4,
+   "ko": "와 저게 안 맞는다고?",
+   "h": 2,
+   "segments": [
+    392
+   ]
+  },
+  {
+   "stretch": "b",
+   "start": 104.7,
+   "end": 105.9,
+   "ko": "뭐야? 판정 왜저래?",
+   "h": 2,
+   "segments": [
+    395
+   ]
+  },
+  {
+   "stretch": "b",
+   "start": 106.2,
+   "end": 106.5,
+   "ko": "판정..",
+   "h": 2,
+   "segments": [
+    399,
+    400
+   ]
+  },
+  {
+   "stretch": "b",
+   "start": 107.6,
+   "end": 108.2,
+   "ko": "개.. 똥인데..?",
+   "h": 0,
+   "segments": [
+    407,
+    408,
+    409,
+    410,
+    411
+   ]
+  },
+  {
+   "stretch": "b",
+   "start": 108.9,
+   "end": 109.5,
+   "ko": "어어ㅓ아!",
+   "h": 7,
+   "segments": [
+    419,
+    420,
+    421,
+    422,
+    423,
+    424
+   ]
+  },
+  {
+   "stretch": "b",
+   "start": 110.2,
+   "end": 111.1,
+   "ko": "아 개아파;;",
+   "h": 2,
+   "segments": [
+    429,
+    430,
+    431
+   ]
+  },
+  {
+   "stretch": "b",
+   "start": 112.3,
+   "end": 113.1,
+   "ko": "창이잖아",
+   "h": 2,
+   "segments": [
+    436,
+    437,
+    438
+   ]
+  },
+  {
+   "stretch": "b",
+   "start": 113.3,
+   "end": 114.3,
+   "ko": "당연히 아프지",
+   "h": 2,
+   "segments": [
+    440,
+    441,
+    442
+   ]
+  },
+  {
+   "stretch": "b",
+   "start": 114.4,
+   "end": 115.4,
+   "ko": "내가 아무리 바보라도",
+   "h": 2,
+   "segments": [
+    444
+   ]
+  },
+  {
+   "stretch": "b",
+   "start": 115.6,
+   "end": 116.7,
+   "ko": "이 창은 안맞는다",
+   "h": 2,
+   "segments": [
+    446,
+    447
+   ]
+  },
+  {
+   "stretch": "b",
+   "start": 118.4,
+   "end": 120.2,
+   "ko": "아 게임하기 매우 싫다..",
+   "h": 0,
+   "segments": [
+    451
+   ]
+  },
+  {
+   "stretch": "b",
+   "start": 121.2,
+   "end": 121.8,
+   "ko": "가자 얼른..",
+   "h": 2,
+   "segments": [
+    458
+   ]
+  },
+  {
+   "stretch": "b",
+   "start": 122.6,
+   "end": 122.8,
+   "ko": "그랭..",
+   "h": 0,
+   "segments": [
+    462
+   ]
+  },
+  {
+   "stretch": "b",
+   "start": 122.9,
+   "end": 123.4,
+   "ko": "어어ㅓㅓ어",
+   "h": 0,
+   "segments": [
+    464
+   ]
+  },
+  {
+   "stretch": "b",
+   "start": 123.4,
+   "end": 123.9,
+   "ko": "야야ㅑ야ㅑ야",
+   "h": 0,
+   "segments": [
+    465,
+    466
+   ]
+  },
+  {
+   "stretch": "b",
+   "start": 123.9,
+   "end": 124.5,
+   "ko": "안되겠다 안되겠다",
+   "h": 0,
+   "segments": [
+    467,
+    468
+   ]
+  },
+  {
+   "stretch": "b",
+   "start": 124.5,
+   "end": 125.1,
+   "ko": "안되겠다",
+   "h": 0,
+   "segments": [
+    469,
+    470
+   ]
+  },
+  {
+   "stretch": "b",
+   "start": 125.2,
+   "end": 127.3,
+   "ko": "하하학ㅋㅋㅎ하황ㅋㅋㅋ학",
+   "h": 0,
+   "segments": [
+    472,
+    473
+   ]
+  }
+ ],
+ "corrected": true
+}
