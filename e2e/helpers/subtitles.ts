@@ -38,16 +38,8 @@ export interface ModeStats {
   videoId: string | null;
 }
 
-/** One overlay appearance. Times are video seconds; `wall*` are performance.now() in the page. */
-export interface ShownRecord {
-  shownAt: number;
-  hiddenAt: number | null;
-  lineStart: number;
-  text: string;
-  pausedAtShow: boolean;
-  wallShownAt: number;
-  wallHiddenAt: number | null;
-}
+export type { ShownRecord } from '../bench/metrics';
+import type { ShownRecord } from '../bench/metrics';
 
 /**
  * Records every overlay appearance in the page's main world (the DOM is shared

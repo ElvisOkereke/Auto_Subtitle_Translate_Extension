@@ -1,0 +1,16 @@
+{
+  "note": "Fixed benchmark set (spec 2026-11-13). Times are absolute video seconds; references live in e2e/fixtures/subtitles/.",
+  "videos": [
+    {
+      "id": "_zIrbXw-SVs",
+      "mode": "subtitles",
+      "lang": "ko",
+      "start": 540,
+      "duration": 120,
+      "box": { "x": 0.2, "y": 0.75, "w": 0.6, "h": 0.14 },
+      "reference": "_zIrbXw-SVs.timeline.json",
+      "referenceStretch": "s2",
+      "notes": "Korean League video with burned-in subtitles; hand-labelled reference (stretch s2 starts at 535.77 s)."
+    }
+  ]
+}
