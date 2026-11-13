@@ -180,14 +180,9 @@ YouTube / any <video> page
 
 - **Spec-driven, test-gated.** Each piece starts from a written design
   (intent, goals, anti-goals, acceptance), then an implementation plan with
-  exact interfaces and tests. It is built test-first and closed by a
-  fresh-context review of the whole branch, followed by a fix pass.
+  exact interfaces and tests. It is built test-first and closed by an
+  independent review of the whole branch, followed by a fix pass.
   Decisions made during the build are recorded with their reasoning.
-- **Built with an AI pair-programmer.** Development used Claude Code as an
-  agentic pair-programmer under the author's direction. The author owned the
-  product vision, scope, priorities and acceptance criteria, and directed the
-  research, design and verification. Commits co-authored by the agent are
-  marked as such in the history.
 - **Measured, not assumed.** Model choices (OCR engine, Whisper size and
   precision, translation engine) and the subscription pricing all come from
   benchmarks in the repo (`docs/performance.md`, `docs/pricing.md`).
