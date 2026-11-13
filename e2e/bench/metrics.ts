@@ -58,6 +58,40 @@ export function matchLines(ref: RefLine[], shown: ShownRecord[], opts: { early?:
 
 const duration = (l: RefLine) => l.end - l.start;
 
+export type MissCause = 'not-read' | 'misread' | 'read-not-shown' | 'shown-outside-window';
+
+/**
+ * Why each unmatched reference line was missed: nothing was read in its window,
+ * what was read is too far from it (CER > 0.5), it was read but never shown
+ * (e.g. a late translation dropped), or shown only outside its window.
+ */
+export function classifyMisses(
+  matches: LineMatch[],
+  timeline: Array<{ start: number; end: number | null; source: string }>,
+  shown: ShownRecord[]
+): { counts: Record<MissCause, number>; examples: Array<{ cause: MissCause; ref: string; at: number; read?: string; cer?: number }> } {
+  const counts: Record<MissCause, number> = { 'not-read': 0, misread: 0, 'read-not-shown': 0, 'shown-outside-window': 0 };
+  const examples: Array<{ cause: MissCause; ref: string; at: number; read?: string; cer?: number }> = [];
+  for (const m of matches) {
+    if (m.shown) continue;
+    const near = timeline.filter(t => t.start <= m.ref.end && (t.end ?? t.start + 1) >= m.ref.start - 0.6);
+    let cause: MissCause = 'not-read';
+    let best: { source: string; start: number; cer: number } | null = null;
+    for (const t of near) {
+      const { errors, length } = charErrorRate(m.ref.ko, stripTag(t.source));
+      const cer = length ? errors / length : 1;
+      if (!best || cer < best.cer) best = { source: t.source, start: t.start, cer };
+    }
+    if (best) {
+      if (best.cer > 0.5) cause = 'misread';
+      else cause = shown.some(s => Math.abs(s.lineStart - best!.start) < 0.002) ? 'shown-outside-window' : 'read-not-shown';
+    }
+    counts[cause]++;
+    examples.push({ cause, ref: m.ref.ko, at: m.ref.start, ...(best ? { read: best.source, cer: Math.round(best.cer * 100) / 100 } : {}) });
+  }
+  return { counts, examples };
+}
+
 function ratio(matches: LineMatch[]) {
   const matched = matches.filter(m => m.shown).length;
   return { lines: matches.length, matched, ratio: matches.length ? matched / matches.length : 1 };

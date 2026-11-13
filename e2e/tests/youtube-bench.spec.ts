@@ -15,6 +15,7 @@ import { benchVideos, referenceLines, referenceStretch, type BenchVideo } from '
 import {
   coverageByDuration,
   matchLines,
+  classifyMisses,
   missBuckets,
   missesBySize,
   readyBeforeShown,
@@ -145,6 +146,7 @@ async function report(run: string, mode: EngineMode, video: BenchVideo, r: RunRe
     missBuckets: missBuckets(matches),
     missesBySize: missesBySize(matches),
     misses: matches.filter(m => !m.shown).map(m => `${m.ref.start.toFixed(2)}-${m.ref.end.toFixed(2)} ${m.ref.ko}`),
+    missCauses: classifyMisses(matches, r.timeline, r.records),
     readyBeforeShown: readyBeforeShown(r.timeline, ref),
     claudeReadyBeforeShown: ref.length ? claudeReady / ref.length : null,
     waitP50: waits.length ? waits[Math.floor(waits.length / 2)] : 0,

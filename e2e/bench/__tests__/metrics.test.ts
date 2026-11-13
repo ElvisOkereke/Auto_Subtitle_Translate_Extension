@@ -1,6 +1,7 @@
 import {
   coverageByDuration,
   matchLines,
+  classifyMisses,
   minDisplaySeconds,
   missBuckets,
   missesBySize,
@@ -104,6 +105,24 @@ describe('benchmark metrics', () => {
     expect(staleWhilePaused([current, open], timeline)).toBe(0);
     expect(staleWhilePaused([stale], timeline)).toBe(1);
     expect(staleWhilePaused([rec({ lineStart: 50, shownAt: 51, pausedAtShow: true })], timeline)).toBe(1); // unknown line
+  });
+
+  it('classifies why each reference line was missed', () => {
+    const refs: RefLine[] = [
+      { start: 10, end: 12, ko: '첫번째문장입니다' }, // nothing read there
+      { start: 20, end: 22, ko: '두번째문장입니다' }, // read, translated, never shown
+      { start: 30, end: 32, ko: '세번째문장입니다' }, // misread
+      { start: 40, end: 42, ko: '네번째문장입니다' }, // shown
+    ];
+    const timeline = [
+      { start: 20.1, end: 22, source: '두번째문장입니다' },
+      { start: 30.1, end: 32, source: '완전히다른글자' },
+      { start: 40.1, end: 42, source: '네번째문장입니다' },
+    ];
+    const shown = [rec({ lineStart: 40.1, shownAt: 40.1, text: '네번째문장입니다' })];
+    const out = classifyMisses(matchLines(refs, shown), timeline, shown);
+    expect(out.counts).toEqual({ 'not-read': 1, misread: 1, 'read-not-shown': 1, 'shown-outside-window': 0 });
+    expect(out.examples.map(e => e.cause)).toEqual(['not-read', 'read-not-shown', 'misread']);
   });
 
   it('ratio of reference lines translated before they appeared', () => {
