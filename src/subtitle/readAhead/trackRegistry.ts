@@ -2,11 +2,12 @@
 // names, which fMP4 video tracks were seen, and pruning so a long session (or a
 // page that churns players) never accumulates streams it no longer plays.
 import { Fmp4Fragment, Fmp4Init, Fmp4Parser } from './fmp4';
+import { MediaParser, WebmParser } from './webm';
 
 export interface TapTrack<M> {
   mediaSource: M;
   codec: string;
-  parser: Fmp4Parser;
+  parser: MediaParser;
   init: Fmp4Init | null;
   fragments: Fmp4Fragment[];
   bytes: number;
@@ -37,8 +38,9 @@ export class TrackRegistry<M extends object> {
     if (!inUse) this.urls.delete(url);
   }
 
-  addTrack(mediaSource: M, codec: string): TapTrack<M> {
-    const track: TapTrack<M> = { mediaSource, codec, parser: new Fmp4Parser(), init: null, fragments: [], bytes: 0 };
+  addTrack(mediaSource: M, codec: string, container: 'mp4' | 'webm' = 'mp4'): TapTrack<M> {
+    const parser = container === 'webm' ? new WebmParser() : new Fmp4Parser();
+    const track: TapTrack<M> = { mediaSource, codec, parser, init: null, fragments: [], bytes: 0 };
     this.tracks.push(track);
     return track;
   }

@@ -6,7 +6,7 @@ import { CACHE, FIXTURES, ROOT } from '../helpers/paths';
 import { browserKind } from '../helpers/launch';
 import { astTest } from '../helpers/bridge';
 import { charErrorRate } from '../helpers/cer';
-import { clearTranslationState } from '../helpers/subtitles';
+import { clearTranslationState, recordOverlay, shownRecords } from '../helpers/subtitles';
 
 // Read-ahead: the fixture plays stretch s2 through MSE with ~30 s buffered ahead
 // (like YouTube); the extension decodes that buffer and translates subtitles
@@ -20,7 +20,7 @@ const lines: Line[] = JSON.parse(fs.readFileSync(path.join(FIXTURES, 'subtitles/
   (l: Line) => l.stretch === 's2'
 );
 interface TLine { start: number; end: number | null; source: string; translation: string | null; translatedAt: number | null; betterAt: number | null }
-interface Stats { state: string; ocrCalls: number; raOcrCalls: number; readAheadLead: number }
+interface Stats { state: string; ocrCalls: number; raOcrCalls: number; readAheadLead: number; readAheadFrames: number }
 
 async function drawBox(page: Page) {
   const r = await page.evaluate(b => {
@@ -33,7 +33,8 @@ async function drawBox(page: Page) {
   await page.mouse.up();
 }
 
-test('subtitles are translated before they appear', async ({ context, fixtureURL, openPopup, configure, sw }) => {
+// Both containers YouTube uses for video: fMP4 (AV1 there; VP9 here) and WebM (VP9).
+for (const container of ['mp4', 'webm'] as const) test(`subtitles are translated before they appear (${container})`, async ({ context, fixtureURL, openPopup, configure, sw }) => {
   test.setTimeout(420_000);
   // Both tiers (mock DeepL + mock Claude): read-ahead should get Claude's version in before lines appear too.
   await configure({ translationProvider: 'deepl', deeplApiKey: 'k:fx', anthropicApiKey: 'sk-test', targetLanguage: 'en', subtitleLanguage: 'ko', translationEngineMode: 'fast-then-best' });
@@ -41,7 +42,7 @@ test('subtitles are translated before they appear', async ({ context, fixtureURL
   await sw.evaluate(off => chrome.storage.local.set({ devSubtitle: { readAhead: !off } }), !!process.env.READAHEAD_OFF);
 
   const page = await context.newPage();
-  await page.goto(`${fixtureURL}/video-subs.html?v=_zIrbXw-SVs&stretch=s2`);
+  await page.goto(`${fixtureURL}/video-subs.html?v=_zIrbXw-SVs&stretch=s2&container=${container}`);
   await page.waitForFunction(() => (window as any).__fixture.video.readyState >= 1);
   await astTest(page, 'timeline.clear'); // measure read-ahead itself, not lines saved by earlier tests
   const popup = await openPopup(page);
@@ -65,6 +66,7 @@ test('subtitles are translated before they appear', async ({ context, fixtureURL
   }
   const end = await astTest<Stats>(page, 'mode.stats');
   const timeline = await astTest<TLine[]>(page, 'mode.timeline');
+  const tapStats = await page.evaluate(() => (window as any).__astTapStats ?? null);
 
   const notReady: string[] = [];
   let ready = 0;
@@ -80,7 +82,9 @@ test('subtitles are translated before they appear', async ({ context, fixtureURL
   const steadyLines = lines.filter(l => l.start >= 20).length;
   const report = {
     browser: browserKind(),
+    container,
     readAhead: !process.env.READAHEAD_OFF,
+    readAheadFrames: end.readAheadFrames,
     lines: lines.length,
     readyBeforeShown: ready,
     readyBeforeShownRatio: ready / lines.length,
@@ -90,12 +94,44 @@ test('subtitles are translated before they appear', async ({ context, fixtureURL
     liveOcrCallsSteady: end.ocrCalls - (atSteady?.ocrCalls ?? 0),
     steadyLines,
     readAheadOcrCalls: end.raOcrCalls,
+    tapStats,
   };
   console.log(JSON.stringify(report, null, 1));
   fs.mkdirSync(path.join(ROOT, 'e2e/.perf'), { recursive: true });
-  fs.writeFileSync(path.join(ROOT, `e2e/.perf/subtitle-readahead-${browserKind()}.json`), JSON.stringify(report, null, 2));
+  fs.writeFileSync(path.join(ROOT, `e2e/.perf/subtitle-readahead-${browserKind()}-${container}.json`), JSON.stringify(report, null, 2));
 
   expect(report.readyBeforeShownRatio).toBeGreaterThanOrEqual(0.9);
   if (!process.env.READAHEAD_OFF) expect(report.claudeReadyBeforeShownRatio).toBeGreaterThanOrEqual(0.9);
   expect(report.liveOcrCallsSteady).toBeLessThanOrEqual(Math.ceil(0.1 * steadyLines));
+  if (!process.env.READAHEAD_OFF) expect(report.readAheadFrames).toBeGreaterThan(0);
+});
+
+test('a codec the browser cannot decode leaves read-ahead off and the live path running', async ({ context, fixtureURL, openPopup, configure, sw }) => {
+  test.setTimeout(300_000);
+  await configure({ translationProvider: 'deepl', deeplApiKey: 'k:fx', targetLanguage: 'en', subtitleLanguage: 'ko' });
+  await clearTranslationState(sw);
+  await sw.evaluate(() => chrome.storage.local.set({ devSubtitle: { readAhead: true } }));
+  const page = await context.newPage();
+  const errors: string[] = [];
+  page.on('pageerror', e => errors.push(e.message));
+  await page.addInitScript(() => {
+    (window as any).VideoDecoder.isConfigSupported = async () => ({ supported: false, config: {} });
+  });
+  await page.goto(`${fixtureURL}/video-subs.html?v=_zIrbXw-SVs&stretch=s1&container=webm`);
+  await page.waitForFunction(() => (window as any).__fixture.video.readyState >= 1);
+  await astTest(page, 'timeline.clear');
+  await recordOverlay(page);
+  const popup = await openPopup(page);
+  await popup.click('#modeSubtitles');
+  await popup.click('#drawSubtitleBox');
+  await page.bringToFront();
+  await expect.poll(() => page.evaluate(() => document.body.style.cursor)).toBe('crosshair');
+  await drawBox(page);
+  await expect.poll(async () => (await astTest<Stats>(page, 'mode.stats')).state, { timeout: 120_000 }).toBe('running');
+  await page.evaluate(() => (window as any).__fixture.video.play());
+  await page.waitForFunction(() => (window as any).__fixture.video.currentTime >= 30, null, { timeout: 90_000, polling: 500 });
+  const stats = await astTest<Stats>(page, 'mode.stats');
+  expect(stats.readAheadFrames).toBe(0);
+  expect((await shownRecords(page)).length).toBeGreaterThan(3); // live path showed lines
+  expect(errors).toEqual([]);
 });
