@@ -11,10 +11,6 @@ A Chrome (MV3) extension that translates what you watch, live:
 - **Screen Translate** — drag a box over text on any page for a one-shot
   translation.
 
-> **Project overview, status and roadmap:** [docs/project-overview.md](docs/project-overview.md)
-> covers the vision, what's built, measured results, architecture and what's
-> next. Measured wins are in [docs/milestones.md](docs/milestones.md).
-
 Speech recognition and OCR run **locally in your browser** (no key, no server).
 Translation is **fast then best**: DeepL (or Google) puts a translation up
 immediately, then Claude replaces it with a context-aware one that knows what
@@ -22,6 +18,75 @@ the video is about (title, channel, description) and keeps names and jargon
 consistent with a learned glossary. Either **bring your own keys** (a
 DeepL/Google key and an Anthropic API key, or any Anthropic-compatible gateway)
 or **sign in and subscribe** to use the hosted service with no keys at all.
+
+## Highlights
+
+The vision: watch anything, in any language, as if it had been subtitled for
+you. Every number below comes from an automated run in a real browser.
+
+**Burned-in subtitle translation**
+- **0.20 s** from a subtitle appearing to its translation on screen, or
+  0.48 s including a real DeepL round trip.
+- On-device OCR: PaddleOCR on WebGPU via ONNX Runtime Web, at **2.3%
+  character error and 22 ms per frame**. Tesseract was benchmarked and
+  rejected at 17.4% error.
+- **Read-ahead:** the extension taps the YouTube player's Media Source stream
+  and decodes the buffered video ahead of playback with WebCodecs. **29 of 29
+  lines** were translated before they appeared, about 28 s early, with no
+  extra network traffic.
+
+**Context-aware translation**
+- Claude with video context, topic summary and a learned glossary was judged
+  **0.93 vs 0.50 for DeepL** on Korean League of Legends subtitles, with names
+  and slang kept consistent.
+- In a blind comparison on real subtitles, Claude beat DeepL on Spanish
+  football, Japanese anime and a Korean drama.
+
+**On-device speech recognition**
+- Whisper runs in the browser: **1.05 s** from end of speech to translated
+  caption.
+- The model download was cut **from 971 MB to 209 MB**, and inference made
+  **5× faster**.
+
+**Hosted subscription service**
+- Built with Node, Hono and SQLite: email-code auth, Stripe billing, and a
+  metered translation proxy with per-plan budgets.
+- Priced from measured cost: **~$3.40 per hour of video** with Claude Opus.
+- Docker on Google Cloud with least-privilege service accounts.
+
+**Verification:** 371 automated tests and 17 Playwright suites, which drive a
+real Chrome with the extension loaded. They cover real tab audio, real video
+frames, real DeepL and Claude calls, and real YouTube; Claude scores the
+translation quality.
+
+**Stack:** TypeScript, Chrome MV3 (service worker, offscreen document,
+content scripts), WebGPU, WebCodecs and Media Source Extensions, ONNX Runtime
+Web, transformers.js, the Claude API, DeepL, Node, Hono, SQLite, Stripe,
+Docker, GCP, Playwright and Jest.
+
+## Status and roadmap
+
+- **Done:**
+  - Subtitles mode with read-ahead
+  - Audio mode
+  - Screen Translate
+  - Context-aware Claude translation with glossary
+  - Hosted subscription service
+  - Redesigned light and dark UI
+- **In progress:** a real-world benchmark on 8 YouTube videos in 5 subtitle
+  languages (League, football, TV drama), running in all three engine modes.
+  The fixes it drives:
+  - a minimum reading time;
+  - read-ahead for YouTube's VP9 format;
+  - fewer missed lines.
+- **Next:**
+  - audio read-ahead timed to the video;
+  - automatic subtitle detection;
+  - deploying the service and publishing on the Chrome Web Store.
+
+More detail: [project overview](docs/project-overview.md) (vision,
+architecture, full status) and [milestones](docs/milestones.md) (measured
+wins, newest first).
 
 ## Install (developer build)
 
