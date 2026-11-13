@@ -136,7 +136,21 @@ export function upgradesOnScreen(shown: ShownRecord[]): number {
   return upgraded.size;
 }
 
-/** Lines that appeared while the video was paused (must be 0). */
+/**
+ * Lines that appeared while paused and were NOT the subtitle on screen at that
+ * moment (stale content: must be 0). A translation of the subtitle visible in
+ * the paused frame arriving during the pause is fine.
+ */
+export function staleWhilePaused(shown: ShownRecord[], timeline: Array<{ start: number; end: number | null }>): number {
+  return shown.filter(s => {
+    if (!s.pausedAtShow) return false;
+    const entry = timeline.find(t => Math.abs(t.start - s.lineStart) < 0.002);
+    if (!entry) return true;
+    return !(s.shownAt >= entry.start - 0.05 && (entry.end === null || s.shownAt <= entry.end + 0.05));
+  }).length;
+}
+
+/** Lines that appeared while the video was paused (any). */
 export function shownWhilePaused(shown: ShownRecord[]): number {
   return shown.filter(s => s.pausedAtShow).length;
 }

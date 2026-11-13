@@ -6,6 +6,7 @@ import {
   missesBySize,
   readyBeforeShown,
   shownWhilePaused,
+  staleWhilePaused,
   timeOnScreen,
   upgradesOnScreen,
   type RefLine,
@@ -90,6 +91,19 @@ describe('benchmark metrics', () => {
 
   it('counts lines shown while paused', () => {
     expect(shownWhilePaused([rec({ pausedAtShow: true }), rec({}), rec({ pausedAtShow: true })])).toBe(2);
+  });
+
+  it('a line appearing while paused is stale only if it is not the subtitle on screen then', () => {
+    const timeline = [
+      { start: 79.5, end: 82 },
+      { start: 90, end: null },
+    ];
+    const current = rec({ lineStart: 79.5, shownAt: 80.4, pausedAtShow: true }); // translation of the visible subtitle
+    const stale = rec({ lineStart: 79.5, shownAt: 85, pausedAtShow: true }); // that subtitle ended at 82
+    const open = rec({ lineStart: 90, shownAt: 95, pausedAtShow: true }); // still on screen (no end yet)
+    expect(staleWhilePaused([current, open], timeline)).toBe(0);
+    expect(staleWhilePaused([stale], timeline)).toBe(1);
+    expect(staleWhilePaused([rec({ lineStart: 50, shownAt: 51, pausedAtShow: true })], timeline)).toBe(1); // unknown line
   });
 
   it('ratio of reference lines translated before they appeared', () => {

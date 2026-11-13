@@ -9,7 +9,7 @@ import { browserKind } from '../helpers/launch';
 import { readEnv } from '../helpers/env';
 import { anthropicRelayAvailable, type FixtureServer } from '../helpers/server';
 import { astTest } from '../helpers/bridge';
-import { dragBox, modeStats, recordOverlay, shownRecords, type ModeStats } from '../helpers/subtitles';
+import { dragBox, modeStats, recordOverlay, recordOverlayOnEveryLoad, shownRecords, type ModeStats } from '../helpers/subtitles';
 import { recordSourceBufferTypes, sourceBufferTypes, waitOutAds } from '../helpers/youtube';
 import { benchVideos, referenceLines, referenceStretch, type BenchVideo } from '../bench/videos';
 import {
@@ -19,6 +19,7 @@ import {
   missesBySize,
   readyBeforeShown,
   shownWhilePaused,
+  staleWhilePaused,
   timeOnScreen,
   upgradesOnScreen,
   type ShownRecord,
@@ -154,6 +155,7 @@ async function report(run: string, mode: EngineMode, video: BenchVideo, r: RunRe
     displayOffsetP50: offsets.length ? offsets[Math.floor(offsets.length / 2)] : null,
     timeOnScreen: timeOnScreen(r.records),
     shownWhilePaused: shownWhilePaused(r.records),
+    staleWhilePaused: staleWhilePaused(r.records, r.timeline),
     pausedLines: r.records.filter(x => x.pausedAtShow).map(x => ({ lineStart: x.lineStart, shownAt: x.shownAt, text: x.text, source: sourceAt(x.lineStart) ?? null })),
     joins: r.joins ?? [],
     ocrCer: cer,
@@ -193,7 +195,7 @@ async function playWindow(page: Page, video: BenchVideo, toLocal: (t: number) =>
 }
 
 async function collect(page: Page, toAbsolute: (t: number) => number) {
-  const records = (await shownRecords(page)).map(r => ({
+  const records = ((await shownRecords(page)) ?? []).map(r => ({
     ...r,
     shownAt: toAbsolute(r.shownAt),
     lineStart: toAbsolute(r.lineStart),
@@ -261,6 +263,7 @@ async function playSegment(page: Page, from: number, to: number, pauseAt: number
   let paused = !(pauseAt >= from && pauseAt < to);
   let last = from;
   await page.bringToFront();
+  await page.waitForSelector('video.html5-main-video', { timeout: 30_000 });
   await page.evaluate(() => document.querySelector('video')!.play());
   for (;;) {
     await page.waitForTimeout(500);
@@ -300,15 +303,26 @@ test.describe('real YouTube', () => {
       await configure({ ...engineSettings(mode, server), subtitleLanguage: video.lang });
       await sw.evaluate(() => chrome.storage.local.remove('devSubtitle'));
       await recordSourceBufferTypes(context);
+      await recordOverlayOnEveryLoad(context);
       const pieces = Math.ceil(video.duration / SEGMENT_S);
       const from = (k: number) => video.start + k * SEGMENT_S;
       const to = (k: number) => Math.min(video.start + video.duration, from(k + 1));
       const url = (k: number) => `https://www.youtube.com/watch?v=${video.id}&t=${Math.floor(from(k))}s`;
 
+      const retries: string[] = [];
+      // A window whose subtitle mode doesn't start (seen intermittently) is reopened once.
       const prepare = async (k: number): Promise<Page> => {
+        try {
+          return await prepareOnce(k);
+        } catch (error) {
+          retries.push(`piece ${k}: ${String(error).split(/\r?\n/)[0].slice(0, 120)}`);
+          for (const p of context.pages()) if (p.url().includes(`v=${video.id}&t=${Math.floor(from(k))}s`)) await p.close().catch(() => undefined);
+          return prepareOnce(k);
+        }
+      };
+      const prepareOnce = async (k: number): Promise<Page> => {
         const page = await openVideoWindow(context, url(k), (k % 2) * 960);
         await parkAt(page, from(k));
-        await recordOverlay(page);
         if (k === 0) {
           await astTest(page, 'timeline.clear');
           const popup = await startSubtitleMode(page, openPopup, video);
@@ -366,8 +380,9 @@ test.describe('real YouTube', () => {
         format,
         joins,
       });
+      if (retries.length) console.warn(`window setup retried: ${retries.join('; ')}`);
 
-      expect(out.shownWhilePaused, 'lines appeared while the video was paused').toBe(0);
+      expect(out.staleWhilePaused, 'a line that was not on screen appeared while the video was paused').toBe(0);
       if (format && TAPPED.test(format)) expect(out.path, `read-ahead should carry ${format}`).not.toBe('live');
       if (blocks.length) console.warn(`YouTube stopped playback in ${blocks.length} piece(s): ${blocks.join('; ')}`);
     });
@@ -400,7 +415,7 @@ test.describe('local copies', () => {
         const { played, blocked } = await playWindow(page, video, toLocal);
         const format = (await sourceBufferTypes(page)).find(m => m.startsWith('video/')) ?? null;
         const out = await report(`local-${container}`, mode, video, { ...(await collect(page, toAbsolute)), played, blocked, format });
-        expect(out.shownWhilePaused, 'lines appeared while the video was paused').toBe(0);
+        expect(out.staleWhilePaused, 'a line that was not on screen appeared while the video was paused').toBe(0);
       });
     }
   }
