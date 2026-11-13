@@ -205,6 +205,8 @@ export interface ExtensionSettings {
   claudeAccess: 'key' | 'gateway' | 'subscription';
   claudeGatewayUrl: string;
   claudeGatewayAuth: 'x-api-key' | 'bearer';
+  /** Popup and on-page panels: follow the OS, or force light/dark. */
+  theme: import('../theme').ThemeChoice;
 }
 
 export type SubtitlePosition = 'top' | 'center' | 'bottom';

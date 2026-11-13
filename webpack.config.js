@@ -54,6 +54,9 @@ module.exports = (env, argv) => {
         patterns: [
           { from: 'manifest.json', to: 'manifest.json' },
           { from: 'popup.html', to: 'popup.html' },
+          { from: 'popup.css', to: 'popup.css' },
+          { from: 'node_modules/@fontsource/atkinson-hyperlegible/files/atkinson-hyperlegible-latin-400-normal.woff2', to: 'fonts/atkinson-400.woff2' },
+          { from: 'node_modules/@fontsource/atkinson-hyperlegible/files/atkinson-hyperlegible-latin-700-normal.woff2', to: 'fonts/atkinson-700.woff2' },
           { from: 'offscreen.html', to: 'offscreen.html' },
           { from: 'ocr-frame.html', to: 'ocr-frame.html' },
           { from: 'src/ocr/charsets/', to: 'ocr/charsets/' },

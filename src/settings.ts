@@ -25,7 +25,8 @@ export const DEFAULT_SETTINGS: ExtensionSettings = {
   claudeModel: 'claude-opus-5-5',
   claudeAccess: 'key',
   claudeGatewayUrl: '',
-  claudeGatewayAuth: 'bearer'
+  claudeGatewayAuth: 'bearer',
+  theme: 'system'
 };
 
 /**
