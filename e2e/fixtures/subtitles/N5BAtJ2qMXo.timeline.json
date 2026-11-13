@@ -1,0 +1,370 @@
+{
+ "video": "N5BAtJ2qMXo",
+ "labelledBy": "extension OCR at 10 fps, hand-checked: 5 corrections (drops, merges, text fixes); boundaries refined by per-frame OCR at 10 fps",
+ "note": "Times are relative to the benchmark cut N5BAtJ2qMXo.b.webm, which starts at 24.024 s of the video.",
+ "stretches": [
+  {
+   "id": "b",
+   "start": 24.024,
+   "end": 154.024,
+   "file": "N5BAtJ2qMXo.b.webm"
+  }
+ ],
+ "lines": [
+  {
+   "stretch": "b",
+   "start": 0,
+   "end": 0.8,
+   "ko": "Ah vraiment?",
+   "h": 17,
+   "segments": [
+    0,
+    1,
+    2,
+    3
+   ]
+  },
+  {
+   "stretch": "b",
+   "start": 8.8,
+   "end": 9.6,
+   "ko": "Sasuke",
+   "h": 13,
+   "segments": [
+    45,
+    46
+   ]
+  },
+  {
+   "stretch": "b",
+   "start": 9.6,
+   "end": 10.4,
+   "ko": "Oui?",
+   "h": 13,
+   "segments": [
+    47
+   ]
+  },
+  {
+   "stretch": "b",
+   "start": 12.1,
+   "end": 14.1,
+   "ko": "Puis-je prendre ceci?",
+   "h": 19,
+   "segments": [
+    52,
+    53,
+    54,
+    55,
+    56
+   ]
+  },
+  {
+   "stretch": "b",
+   "start": 14.1,
+   "end": 15.1,
+   "ko": "Quoi donc?",
+   "h": 13,
+   "segments": [
+    57,
+    58,
+    59
+   ]
+  },
+  {
+   "stretch": "b",
+   "start": 16.6,
+   "end": 19.1,
+   "ko": "Cette rame là.",
+   "h": 14,
+   "segments": [
+    65,
+    66,
+    67,
+    68,
+    69,
+    70,
+    71
+   ]
+  },
+  {
+   "stretch": "b",
+   "start": 19.1,
+   "end": 21.3,
+   "ko": "Ce n'est pas que j'en ai besoin",
+   "h": 19,
+   "segments": [
+    72,
+    73,
+    74,
+    75,
+    76
+   ]
+  },
+  {
+   "stretch": "b",
+   "start": 21.3,
+   "end": 22.9,
+   "ko": "mais pourquoi?",
+   "h": 15,
+   "segments": [
+    77,
+    78,
+    79,
+    80,
+    81,
+    82
+   ]
+  },
+  {
+   "stretch": "b",
+   "start": 24.1,
+   "end": 25.9,
+   "ko": "Ça a l'air utile.",
+   "h": 15,
+   "segments": [
+    87,
+    88,
+    89,
+    90,
+    91
+   ]
+  },
+  {
+   "stretch": "b",
+   "start": 36,
+   "end": 37.5,
+   "ko": "Musashi",
+   "h": 27,
+   "segments": [
+    142
+   ]
+  },
+  {
+   "stretch": "b",
+   "start": 37.8,
+   "end": 41,
+   "ko": "Tu es en retard ou c'était planifié?",
+   "h": 19,
+   "segments": [
+    143
+   ]
+  },
+  {
+   "stretch": "b",
+   "start": 42,
+   "end": 44,
+   "ko": "Quoi qu'il en soit, je trouve ça lâche!",
+   "h": 35,
+   "segments": [
+    144,
+    145
+   ]
+  },
+  {
+   "stretch": "b",
+   "start": 44,
+   "end": 47,
+   "ko": "Ne pas respecter délibérément l'heure convenue et...",
+   "h": 28,
+   "segments": [
+    146,
+    147,
+    148
+   ]
+  },
+  {
+   "stretch": "b",
+   "start": 47.7,
+   "end": 51.1,
+   "ko": "Tirer parti de l'imprudence de l'ennemi fait partie de tes tactiques.",
+   "h": 48,
+   "segments": [
+    151,
+    152,
+    153
+   ]
+  },
+  {
+   "stretch": "b",
+   "start": 52.8,
+   "end": 55.8,
+   "ko": "Mais cela ne te servira à rien aujourd'hui.",
+   "h": 15,
+   "segments": [
+    155
+   ]
+  },
+  {
+   "stretch": "b",
+   "start": 58.4,
+   "end": 61.4,
+   "ko": "Viens ici Musashi!",
+   "h": 15,
+   "segments": [
+    157
+   ]
+  },
+  {
+   "stretch": "b",
+   "start": 63.5,
+   "end": 66.5,
+   "ko": "Kojiro, tu as déjà perdu!",
+   "h": 19,
+   "segments": [
+    161,
+    162,
+    163,
+    164,
+    165,
+    166
+   ]
+  },
+  {
+   "stretch": "b",
+   "start": 67.1,
+   "end": 68.4,
+   "ko": "Pas du tout",
+   "h": 50,
+   "segments": [
+    169,
+    170,
+    171
+   ]
+  },
+  {
+   "stretch": "b",
+   "start": 68.4,
+   "end": 71.3,
+   "ko": "L'issue de ce duel est déjà scellée!",
+   "h": 20,
+   "segments": [
+    172,
+    173,
+    174,
+    175,
+    176,
+    177
+   ]
+  },
+  {
+   "stretch": "b",
+   "start": 71.3,
+   "end": 73.7,
+   "ko": "Ta défaite est inévitable!",
+   "h": 15,
+   "segments": [
+    178,
+    179,
+    180
+   ]
+  },
+  {
+   "stretch": "b",
+   "start": 73.7,
+   "end": 76.6,
+   "ko": "Tais-toi ! Qu'est-ce que c'est que ces bêtises...?",
+   "h": 19,
+   "segments": [
+    181,
+    182,
+    183
+   ]
+  },
+  {
+   "stretch": "b",
+   "start": 76.6,
+   "end": 79.9,
+   "ko": "Si tu voulais gagner, pourquoi as-tu lâché le fourreau?",
+   "h": 22,
+   "segments": [
+    184,
+    185,
+    186,
+    187
+   ]
+  },
+  {
+   "stretch": "b",
+   "start": 80.1,
+   "end": 83.1,
+   "ko": "Le fourreau, c'est ta vie, et tu l'as jeté!",
+   "h": 35,
+   "segments": [
+    188,
+    189,
+    190,
+    191,
+    192,
+    193,
+    194,
+    195,
+    196
+   ]
+  },
+  {
+   "stretch": "b",
+   "start": 84.5,
+   "end": 85.8,
+   "ko": "Quelle connerie!",
+   "h": 50,
+   "segments": [
+    202,
+    203
+   ]
+  },
+  {
+   "stretch": "b",
+   "start": 86.3,
+   "end": 88.5,
+   "ko": "Quel dommage Kojiro!",
+   "h": 39,
+   "segments": [
+    205,
+    206,
+    207,
+    208,
+    209
+   ]
+  },
+  {
+   "stretch": "b",
+   "start": 88.8,
+   "end": 89.8,
+   "ko": "Tu veux mourir?",
+   "h": 36,
+   "segments": [
+    210,
+    211,
+    212
+   ]
+  },
+  {
+   "stretch": "b",
+   "start": 91,
+   "end": 93.3,
+   "ko": "Tu es pressé de mourir?",
+   "h": 45,
+   "segments": [
+    215,
+    216,
+    217,
+    218,
+    219
+   ]
+  },
+  {
+   "stretch": "b",
+   "start": 94.8,
+   "end": 95.7,
+   "ko": "Viens!",
+   "h": 14,
+   "segments": [
+    222,
+    223
+   ]
+  }
+ ],
+ "corrected": true,
+ "timingRefined": 2
+}

@@ -1,6 +1,6 @@
 {
  "video": "x8YWHt8giVY",
- "labelledBy": "extension OCR at 10 fps, hand-checked: 9 corrections (drops, merges, text fixes)",
+ "labelledBy": "extension OCR at 10 fps, hand-checked: 9 corrections (drops, merges, text fixes); boundaries refined by per-frame OCR at 10 fps",
  "note": "Times are relative to the benchmark cut x8YWHt8giVY.b.webm, which starts at 391.267 s of the video.",
  "stretches": [
   {
@@ -30,7 +30,7 @@
   },
   {
    "stretch": "b",
-   "start": 30.2,
+   "start": 30.3,
    "end": 31.9,
    "ko": "여러분들 제 목표 정했습니다!",
    "h": 25,
@@ -106,7 +106,7 @@
   {
    "stretch": "b",
    "start": 40.5,
-   "end": 43.2,
+   "end": 42,
    "ko": "1렙 때도 블라디가..",
    "h": 53,
    "segments": [
@@ -406,5 +406,6 @@
    ]
   }
  ],
- "corrected": true
+ "corrected": true,
+ "timingRefined": 2
 }

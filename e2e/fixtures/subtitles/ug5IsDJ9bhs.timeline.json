@@ -1,6 +1,6 @@
 {
  "video": "ug5IsDJ9bhs",
- "labelledBy": "extension OCR at 10 fps, hand-checked: 2 corrections (drops, merges, text fixes)",
+ "labelledBy": "extension OCR at 10 fps, hand-checked: 2 corrections (drops, merges, text fixes); boundaries refined by per-frame OCR at 10 fps",
  "note": "Times are relative to the benchmark cut ug5IsDJ9bhs.b.webm, which starts at 290.4 s of the video.",
  "stretches": [
   {
@@ -106,7 +106,7 @@
   },
   {
    "stretch": "b",
-   "start": 94.1,
+   "start": 93.9,
    "end": 94.4,
    "ko": "플 있나?",
    "h": 53,
@@ -118,7 +118,7 @@
   {
    "stretch": "b",
    "start": 119.5,
-   "end": 120.5,
+   "end": 121.4,
    "ko": "(상당히 불리한 게임)",
    "h": 1,
    "segments": [
@@ -149,5 +149,6 @@
    ]
   }
  ],
- "corrected": true
+ "corrected": true,
+ "timingRefined": 2
 }

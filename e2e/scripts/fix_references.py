@@ -37,6 +37,58 @@ FIXES = {
     },
 }
 
+# Diverse videos (2026-11-13). Line numbers refer to the candidates written with
+# the final boxes in videos.json. Watermark/scene text (channel marks, match
+# clocks, kit sponsors) is not subtitle text: removed or the line dropped.
+FIXES.update({
+    'IM-v1aW_AtI': {
+        'drop': [],
+        'merge': [(18, 20, 'Ты вовсе не выглядишь потухшим в связи с его переходом. Это очень здорово.'),
+                  (30, 34, '«Интер» — большой клуб. И особенно в этом году нам нужна борьба\\конкуренция на каждой позиции.'),
+                  (36, 37, 'Как я и сказал ранее: мы сделали всё, что могли, чтобы победить сегодня.')],
+        'text': {4: 'До игры мы чувствовали, что сможем победить.',
+                 5: 'Даже несмотря на то, что мы играли на выезде, мы хотели вернуться с тремя очками.',
+                 8: 'И мы сохранили спокойствие даже после того, как они повели в счёте.',
+                 14: 'Мы будем праздновать только тогда, когда математика точно скажет, что мы вышли в 1\\16-ую ЛЧ.',
+                 28: 'Вы оба — красавчики.'},
+    },
+    'N5BAtJ2qMXo': {
+        'drop': [], 'merge': [],
+        'text': {11: "Quoi qu'il en soit, je trouve ça lâche!", 12: "Ne pas respecter délibérément l'heure convenue et...",
+                 21: 'Si tu voulais gagner, pourquoi as-tu lâché le fourreau?', 22: "Le fourreau, c'est ta vie, et tu l'as jeté!",
+                 25: 'Tu veux mourir?'},
+    },
+    'dcbt04jp7B8': {
+        'drop': [14, 20, 23, 31, 35, 37, 40, 42, 44, 47],
+        'merge': [(1, 2, 'Boa tarde a todos, é um prazer estar aqui'), (16, 17, 'Quando você está em um time e dá tudo por ele')],
+        'text': {0: '[Ronaldo] : Olá, boa tarde', 4: '[Guti]: Você se lembra de quando nós estávamos aí?',
+                 10: 'E como você se sente, que recordações tem num dia tão especial como de um Clássico?',
+                 13: 'E eu já estive nos dois lados', 18: 'E tenta ganhar', 19: 'No entanto, se vive uma semana muito especial',
+                 21: 'Guti, você que jogou com Ronaldo, o que pode dizer de Ronaldo Nazário?', 22: 'Sim, eu tive esse prazer',
+                 24: 'De jogar com o Ronnie, a verdade é que...', 25: 'Que era magnífico!',
+                 26: 'Nós sempre falávamos: "Não corra muito, não trabalhe defensivamente"', 27: '"Não roube bolas"',
+                 28: 'Porque queremos você com gás para os últimos momentos', 29: 'E no final, nos dava o que ele nos dava',
+                 30: 'Sua arrancadas e seus gols', 32: 'Decidiam as partidas, não é?', 33: 'A verdade é que foi um luxo',
+                 34: 'E eu sempre disse a ele, eu acho que...', 36: 'Ronnie foi o melhor jogador com quem eu joguei no futebol',
+                 38: 'Ronaldo, e Guti? Era especial? Tinha algo de especial?', 39: 'Era muito mais que especial',
+                 41: 'Era tão inteligente em campo e também como pessoa', 43: 'Era incrível como ele entendia os movimentos',
+                 45: 'Isso desde que eu cheguei, não é que tínhamos muito tempo que...', 46: 'Treinávamos ou falavamos de futebol',
+                 48: 'Tinha uma inteligência dentro de campo', 49: 'Uma habilidade com a bola', 50: 'Era espetacular jogar com ele',
+                 54: 'E para mim, eu sempre disse, como atacante central', 59: 'E bem, na véspera da partida...'},
+    },
+    'Ac-5H_Wgk7I': {
+        'drop': [4, 5, 15, 17, 19, 21, 22, 25, 26, 30, 35, 49, 56, 87],
+        'merge': [(11, 12, '我相信还有一颗特别闪亮的星星'), (40, 42, '失利者落寞的陪伴之下'), (45, 48, '在这样的情感交织当中'),
+                  (59, 61, '处放在显微镜下去'), (65, 66, '却是主旋律'), (67, 75, '但是如何面对失败'), (77, 81, '有的人会被失败击垮')],
+        'text': {1: '看似不经意的小事', 3: '一次看似普通的再见其实就是永别', 13: '我们也祝他能够', 14: '夜幕之下的马拉卡纳',
+                 16: '迎来了他的第二次世界杯决赛', 18: '科科瓦多山顶的救世基督', 20: '在俯看着红尘俯看着众生',
+                 23: '所有的悲欢离合都没有什么大不了', 31: '人的脆弱和坚强都超乎了自己的想象', 32: '有时候可能脆弱的一句话就泪流满面',
+                 33: '有时候你发现自己咬着牙', 57: '充满野心', 63: '你说你守天下难不难', 83: '我想真正的成熟应该并不是追求完美',
+                 84: '而是直面自己的缺憾', 85: '这才是生活的本质', 86: '罗曼罗兰说过的', 88: '这个世上只有一种真正的英雄主义',
+                 89: '那就是认清生活的真相', 90: '并且仍然热爱他西班牙队从头再来吧'},
+    },
+})
+
 
 def main() -> None:
     for vid, fix in FIXES.items():

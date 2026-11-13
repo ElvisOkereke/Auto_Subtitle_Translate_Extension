@@ -48,8 +48,8 @@ const MODES = (process.env.BENCH_MODES || 'fast-then-best').split(',').map(m => 
 const DEEPL_KEY = readEnv('DEEPL_API_KEY');
 const CLAUDE_MODEL = process.env.CLAUDE_MODEL ?? 'claude-opus-5-5';
 const JUDGE_INSTRUCTIONS =
-  'Score each English subtitle translation of a Korean League of Legends video subtitle. ' +
-  'Use 2 = correct and natural (League terms right), 1 = gist right but a notable error, 0 = wrong or misleading. ' +
+  'Score each English translation of a video subtitle (the video is described first). ' +
+  'Use 2 = correct and natural (names and domain terms right), 1 = gist right but a notable error, 0 = wrong or misleading. ' +
   'A reference, when given, is one good translation, not the only acceptable one. ' +
   'Reply with only a JSON array of integers, one per item, in order.';
 
@@ -69,9 +69,11 @@ function engineSettings(mode: EngineMode, server: FixtureServer) {
 }
 
 /** Claude's 0..1 quality score of the shown translations (BENCH_JUDGE=1; costs money). */
-async function judge(pairs: { ko: string; en: string; reference?: string }[]): Promise<number | null> {
+async function judge(video: BenchVideo, pairs: { ko: string; en: string; reference?: string }[]): Promise<number | null> {
   if (process.env.BENCH_JUDGE !== '1' || !pairs.length) return null;
-  const items = pairs.map((p, i) => `${i + 1}. Korean: ${p.ko}\n   Reference: ${p.reference ?? '(none)'}\n   Candidate: ${p.en}`).join('\n');
+  const items =
+    `Video: ${video.notes ?? video.id} (subtitle language: ${video.lang})\n\n` +
+    pairs.map((p, i) => `${i + 1}. Source: ${p.ko}\n   Reference: ${p.reference ?? '(none)'}\n   Candidate: ${p.en}`).join('\n');
   const response = await new Anthropic().messages.create({
     model: 'claude-opus-5-5',
     max_tokens: 16000,
@@ -147,11 +149,12 @@ async function report(run: string, mode: EngineMode, video: BenchVideo, r: RunRe
     waitP50: waits.length ? waits[Math.floor(waits.length / 2)] : 0,
     waitP90: waits.length ? waits[Math.floor(waits.length * 0.9)] : 0,
     upgradesOnScreen: upgradesOnScreen(r.records),
-    judgeScore: await judge(pairs),
+    judgeScore: await judge(video, pairs),
     sample: pairs.slice(0, 5),
     displayOffsetP50: offsets.length ? offsets[Math.floor(offsets.length / 2)] : null,
     timeOnScreen: timeOnScreen(r.records),
     shownWhilePaused: shownWhilePaused(r.records),
+    pausedLines: r.records.filter(x => x.pausedAtShow).map(x => ({ lineStart: x.lineStart, shownAt: x.shownAt, text: x.text, source: sourceAt(x.lineStart) ?? null })),
     joins: r.joins ?? [],
     ocrCer: cer,
     stats: r.stats,

@@ -1,6 +1,6 @@
 {
  "video": "w3RZwfzYEcs",
- "labelledBy": "extension OCR at 10 fps, hand-checked: 46 corrections (drops, merges, text fixes)",
+ "labelledBy": "extension OCR at 10 fps, hand-checked: 46 corrections (drops, merges, text fixes); boundaries refined by per-frame OCR at 10 fps",
  "note": "Times are relative to the benchmark cut w3RZwfzYEcs.b.webm, which starts at 91.291 s of the video.",
  "stretches": [
   {
@@ -171,7 +171,7 @@
   {
    "stretch": "b",
    "start": 61.2,
-   "end": 62.2,
+   "end": 61.9,
    "ko": "으허허허허헝ㅎ헝",
    "h": 2,
    "segments": [
@@ -215,8 +215,8 @@
   },
   {
    "stretch": "b",
-   "start": 65.5,
-   "end": 66.4,
+   "start": 66,
+   "end": 66.2,
    "ko": "개같은 챔프...",
    "h": 0,
    "segments": [
@@ -261,7 +261,7 @@
   {
    "stretch": "b",
    "start": 77.4,
-   "end": 78.4,
+   "end": 78.2,
    "ko": "개 짜증나...",
    "h": 0,
    "segments": [
@@ -291,8 +291,8 @@
   },
   {
    "stretch": "b",
-   "start": 88.8,
-   "end": 89.4,
+   "start": 88.6,
+   "end": 89.1,
    "ko": "훙항하",
    "h": 1,
    "segments": [
@@ -332,7 +332,7 @@
   },
   {
    "stretch": "b",
-   "start": 102.7,
+   "start": 103.1,
    "end": 104.4,
    "ko": "와 저게 안 맞는다고?",
    "h": 2,
@@ -377,7 +377,7 @@
   },
   {
    "stretch": "b",
-   "start": 108.9,
+   "start": 109,
    "end": 109.5,
    "ko": "어어ㅓ아!",
    "h": 7,
@@ -523,7 +523,7 @@
   {
    "stretch": "b",
    "start": 125.2,
-   "end": 127.3,
+   "end": 126.8,
    "ko": "하하학ㅋㅋㅎ하황ㅋㅋㅋ학",
    "h": 0,
    "segments": [
@@ -532,5 +532,6 @@
    ]
   }
  ],
- "corrected": true
+ "corrected": true,
+ "timingRefined": 2
 }
