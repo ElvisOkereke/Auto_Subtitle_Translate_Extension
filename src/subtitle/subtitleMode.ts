@@ -5,6 +5,7 @@
 // with no OCR or translation.
 import { FrameHandler, FrameSampler, adShowing } from './frameSampler';
 import { LineTracker } from './lineTracker';
+import { LineDisplay } from './displayPolicy';
 import { SubtitleOverlay } from './overlay';
 import { Timeline, TimelineLine, TimelineStorage } from './timeline';
 import { isSameLine } from './textSimilarity';
@@ -68,6 +69,9 @@ export class SubtitleMode {
   linesFromReadAhead = 0;
   linesFromLive = 0;
   private readonly shownLines = new WeakSet<TimelineLine>();
+  /** What is on screen and until when (reading time, video time). */
+  private readonly display = new LineDisplay();
+  private displayedLine: TimelineLine | null = null;
   /** Video time at which each line's translation arrived, keyed by line start. */
   readonly translatedAt = new Map<number, number>();
   /** Video time at which each line's Claude ('better') translation arrived. */
@@ -210,7 +214,7 @@ export class SubtitleMode {
       this.epoch++;
       this.pending = null;
       this.current = null;
-      this.overlay.clear();
+      this.clearNow();
     } else if (!ad && this.state === 'paused-ad') {
       this.state = 'running';
       this.tracker.reset();
@@ -234,18 +238,42 @@ export class SubtitleMode {
     this.pending = null;
     this.tracker.reset();
     this.current = null;
-    this.overlay.clear();
+    this.clearNow();
   }
 
   /** Shows a line the timeline already knows (seek back, rewatch, read-ahead). */
   /** Puts a translated line on screen and counts which path first showed it. */
-  private showLine(line: TimelineLine): void {
+  private showLine(line: TimelineLine, at: number = Math.max(line.start, this.video.currentTime)): void {
     if (!line.translation) return;
     this.overlay.show(line.translation, { lineStart: line.start, quality: line.quality === 'better' ? 'better' : 'fast' });
+    // A better translation of the line on screen keeps its timing; a different line replaces it.
+    if (this.displayedLine !== line) {
+      this.displayedLine = line;
+      this.display.replace(line.translation, at);
+      if (line.end !== null) this.display.sourceEnded(line.end);
+    }
     if (this.shownLines.has(line)) return;
     this.shownLines.add(line);
     if (line.origin === 'read-ahead') this.linesFromReadAhead++;
     else this.linesFromLive++;
+  }
+
+  /** The source subtitle of the line on screen ended: it stays for its reading time. */
+  private sourceEnded(at: number): void {
+    this.display.sourceEnded(at);
+    this.tick(at);
+  }
+
+  /** Clears the line once its time is up (video time). */
+  private tick(at: number): void {
+    if (this.displayedLine && this.display.tick(at) === 'clear') this.clearNow();
+  }
+
+  /** Seek, ad, stop: nothing of the old position may stay on screen. */
+  private clearNow(): void {
+    this.display.reset();
+    this.displayedLine = null;
+    this.overlay.clear();
   }
 
   private showKnown(t: number): boolean {
@@ -253,7 +281,7 @@ export class SubtitleMode {
     if (!known || known.end === null || !known.translation) return false;
     if (this.current !== known) {
       this.current = known;
-      this.showLine(known);
+      this.showLine(known, t);
     }
     return true;
   }
@@ -261,6 +289,7 @@ export class SubtitleMode {
   private onFrame(sig: Uint8Array, t: number, grab: () => Promise<ImageBitmap>): void {
     if (this.state !== 'running') return;
     this.lastFrameAt = t;
+    this.tick(t);
     // A closed, translated line on the timeline covers this moment: no OCR needed.
     if (this.showKnown(t)) return;
     if (this.readAheadCovers(t)) {
@@ -275,23 +304,26 @@ export class SubtitleMode {
       if (line?.translation) {
         if (this.current !== line) {
           this.current = line;
-          this.showLine(line);
+          this.showLine(line, t);
         }
       } else if (!line && this.current) {
+        const ended = this.current.end ?? t;
         this.current = null;
-        this.overlay.clear();
+        this.sourceEnded(ended);
       }
       return;
     }
     if (this.current && this.current.end !== null && t >= this.current.end) {
+      const ended = this.current.end;
       this.current = null;
-      this.overlay.clear();
+      this.sourceEnded(ended);
     }
     const event = this.tracker.push(sig, t);
     if (event) this.requestRead(event.at, grab());
   }
 
   private recheck(): void {
+    if (this.state === 'running' && !this.video.paused) this.tick(this.video.currentTime);
     if (this.state !== 'running' || this.video.paused || !this.current || this.reading || this.current.end !== null) return;
     if (performance.now() - this.lastReadAt < RECHECK_MS) return;
     const frame = this.sampler.sampleNow();
@@ -423,7 +455,7 @@ export class SubtitleMode {
         if (this.current.end === null) this.timeline.close(this.current.start, t);
         this.current = null;
       }
-      this.overlay.clear();
+      this.sourceEnded(t);
       return;
     }
     if (this.current && isSameLine(text, this.current.source)) return; // same subtitle still on screen

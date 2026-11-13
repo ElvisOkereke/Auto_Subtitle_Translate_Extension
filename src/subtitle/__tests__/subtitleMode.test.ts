@@ -169,6 +169,61 @@ describe('SubtitleMode', () => {
     expect({ readAhead: h.mode.linesFromReadAhead, live: h.mode.linesFromLive }).toEqual({ readAhead: 1, live: 1 });
   });
 
+  describe('reading time', () => {
+    /** A subtitle at 20.0 (confirmed 20.1) whose source disappears at 20.4 (confirmed 20.5). */
+    async function flashLine(h: Harness) {
+      await liveLine(h, SIG(200), 20.0, text(1));
+      expect(h.overlayText()).toBe(`EN ${text(1)}`);
+      h.liveText = '';
+      (h.video as any).currentTime = 20.4;
+      h.onFrame(SIG(0), 20.4, async () => crop(-1));
+      h.onFrame(SIG(0), 20.5, async () => crop(-1));
+      await flush();
+    }
+    const frame = (h: Harness, t: number) => {
+      (h.video as any).currentTime = t;
+      h.onFrame(SIG(0), t, async () => crop(-1));
+    };
+
+    it('a short subtitle lingers for its reading time, in video time', async () => {
+      const h = (current = await harness({ readAhead: false }));
+      await flashLine(h);
+      expect(h.overlayText()).toBe(`EN ${text(1)}`); // source gone, translation stays
+      // Paused: no frames for a while, the line stays.
+      (h.video as any).paused = true;
+      await new Promise(r => setTimeout(r, 300));
+      expect(h.overlayText()).toBe(`EN ${text(1)}`);
+      (h.video as any).paused = false;
+      for (let t = 20.6; t < 21.55; t += 0.1) frame(h, t);
+      expect(h.overlayText()).toBe(`EN ${text(1)}`); // shown 20.1, minimum 1.5 s -> until 21.6
+      frame(h, 21.65);
+      expect(h.overlayText()).toBeNull();
+    });
+
+    it('a newer subtitle replaces a lingering one at once', async () => {
+      const h = (current = await harness({ readAhead: false }));
+      await flashLine(h);
+      await liveLine(h, SIG(120), 20.7, text(2));
+      expect(h.overlayText()).toBe(`EN ${text(2)}`);
+    });
+
+    it('seek clears a lingering line', async () => {
+      const h = (current = await harness({ readAhead: false }));
+      await flashLine(h);
+      (h.video as any).currentTime = 50;
+      h.video.dispatchEvent(new Event('seeking'));
+      expect(h.overlayText()).toBeNull();
+    });
+
+    it('an ad clears a lingering line', async () => {
+      const h = (current = await harness({ readAhead: false }));
+      await flashLine(h);
+      h.video.closest('.html5-video-player')!.classList.add('ad-showing');
+      await flush();
+      expect(h.overlayText()).toBeNull();
+    });
+  });
+
   it('seeking closes the line that was on screen (it must not stretch over the rest of the video)', async () => {
     const h = (current = await harness({ readAhead: false }));
     await liveLine(h, SIG(200), 10, text(1));
