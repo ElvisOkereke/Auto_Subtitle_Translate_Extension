@@ -2,14 +2,14 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import type { BrowserContext, Page } from '@playwright/test';
-import { test, expect } from '../helpers/extension';
+import { test, expect, keepPage } from '../helpers/extension';
 import { CACHE, ROOT } from '../helpers/paths';
 import Anthropic from '@anthropic-ai/sdk';
 import { browserKind } from '../helpers/launch';
 import { readEnv } from '../helpers/env';
 import { anthropicRelayAvailable, type FixtureServer } from '../helpers/server';
 import { astTest } from '../helpers/bridge';
-import { dragBox, modeStats, recordOverlay, recordOverlayOnEveryLoad, shownRecords, type ModeStats } from '../helpers/subtitles';
+import { clearTranslationState, dragBox, modeStats, recordOverlay, recordOverlayOnEveryLoad, shownRecords, type ModeStats } from '../helpers/subtitles';
 import { recordSourceBufferTypes, sourceBufferTypes, waitOutAds } from '../helpers/youtube';
 import { benchVideos, referenceLines, referenceStretch, type BenchVideo } from '../bench/videos';
 import {
@@ -214,7 +214,35 @@ async function collect(page: Page, toAbsolute: (t: number) => number) {
   return { records, stats, timeline };
 }
 
+/** Waits until the video has frames and its on-screen rect stops moving (the page is still laying out while it loads). */
+async function waitForSettledPlayer(page: Page): Promise<void> {
+  let last = '';
+  let stable = 0;
+  const deadline = Date.now() + 30_000;
+  while (stable < 4 && Date.now() < deadline) {
+    const now = await page.evaluate(() => {
+      const v = document.querySelector('video');
+      if (!v || v.readyState < 2) return 'loading';
+      const r = v.getBoundingClientRect();
+      return `${Math.round(r.x)},${Math.round(r.y)},${Math.round(r.width)},${Math.round(r.height)}`;
+    });
+    stable = now !== 'loading' && now === last ? stable + 1 : 0;
+    last = now;
+    await page.waitForTimeout(250);
+  }
+}
+
+/** The box the extension saved for this page's video (normalized), if any. */
+async function savedBox(page: Page, sw: { evaluate: Function }): Promise<{ x: number; y: number; w: number; h: number } | null> {
+  const videoKey = await page.evaluate(() => {
+    const u = new URL(location.href);
+    return u.hostname.endsWith('youtube.com') ? u.searchParams.get('v') : `${u.origin}${u.pathname}?v=${encodeURIComponent(u.searchParams.get('v') ?? '')}`;
+  });
+  return (await (sw.evaluate as any)((key: string) => chrome.storage.local.get(key).then(r => r[key] ?? null), `subtitleBox:${videoKey}`)) as any;
+}
+
 async function startSubtitleMode(page: Page, openPopup: (p: Page) => Promise<Page>, video: BenchVideo): Promise<Page> {
+  await waitForSettledPlayer(page);
   const popup = await openPopup(page);
   await popup.click('#modeSubtitles');
   await popup.selectOption('#subtitleLanguage', video.lang);
@@ -226,7 +254,22 @@ async function startSubtitleMode(page: Page, openPopup: (p: Page) => Promise<Pag
   return popup;
 }
 
-test.use({ mockTranslation: false });
+/** Draws the box, then checks the saved box matches the intended one (redraws once if the layout moved). */
+async function startSubtitleModeChecked(page: Page, openPopup: (p: Page) => Promise<Page>, video: BenchVideo, sw: { evaluate: Function }): Promise<void> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const popup = await startSubtitleMode(page, openPopup, video);
+    await popup.close();
+    await page.bringToFront();
+    const saved = await savedBox(page, sw);
+    const want = video.box!;
+    const off = saved ? Math.max(Math.abs(saved.x - want.x), Math.abs(saved.y - want.y), Math.abs(saved.w - want.w), Math.abs(saved.h - want.h)) : 1;
+    if (off <= 0.02) return;
+    console.warn(`saved box off by ${off.toFixed(3)} (${JSON.stringify(saved)}), redrawing`);
+  }
+  throw new Error('the subtitle box could not be drawn in the intended place');
+}
+
+test.use({ mockTranslation: false, reuseBrowser: true });
 test.skip(!DEEPL_KEY, 'DEEPL_API_KEY not set in .env');
 test.skip(!anthropicRelayAvailable(), 'no Anthropic credentials (ANTHROPIC_AUTH_TOKEN or ANTHROPIC_API_KEY)');
 
@@ -238,14 +281,28 @@ test.skip(!anthropicRelayAvailable(), 'no Anthropic credentials (ANTHROPIC_AUTH_
 // frames in covered windows. Each window scores only the lines of its own piece.
 const SEGMENT_S = 30;
 
-async function openVideoWindow(context: BrowserContext, url: string, left: number): Promise<Page> {
+const SLOT_W = 1280;
+const SLOT_H = 720;
+const slots = new WeakMap<BrowserContext, Page[]>();
+
+/**
+ * The window for a piece: two windows per worker, side by side, kept for the
+ * whole run (the next piece navigates the window's tab). Worker N uses row N
+ * of a grid on the main screen so parallel workers never cover each other.
+ */
+async function slotPage(context: BrowserContext, slot: number, row: number): Promise<Page> {
+  const pages = slots.get(context) ?? [];
+  slots.set(context, pages);
+  if (pages[slot] && !pages[slot].isClosed()) return pages[slot];
   const cdp = await context.browser()!.newBrowserCDPSession();
   const opened = context.waitForEvent('page');
-  const { targetId } = (await cdp.send('Target.createTarget', { url, newWindow: true })) as { targetId: string };
+  const { targetId } = (await cdp.send('Target.createTarget', { url: 'about:blank', newWindow: true })) as { targetId: string };
   const page = await opened;
   const { windowId } = (await cdp.send('Browser.getWindowForTarget', { targetId })) as { windowId: number };
-  await cdp.send('Browser.setWindowBounds', { windowId, bounds: { left, top: 0, width: 960, height: 760, windowState: 'normal' } });
+  await cdp.send('Browser.setWindowBounds', { windowId, bounds: { left: slot * SLOT_W, top: row * SLOT_H, width: SLOT_W, height: SLOT_H, windowState: 'normal' } });
   await cdp.detach();
+  keepPage(page);
+  pages[slot] = page;
   return page;
 }
 
@@ -300,10 +357,12 @@ test.describe('real YouTube', () => {
   test.skip(browserKind() !== 'chrome', 'real YouTube runs use installed Chrome (E2E_BROWSER=chrome)');
 
   for (const mode of MODES) for (const video of subtitleVideos) {
-    test(`benchmark ${video.id} [${mode}]`, async ({ context, openPopup, configure, sw, server, tabIdOf }) => {
+    test(`benchmark ${video.id} [${mode}]`, async ({ context, openPopup, configure, sw, server, tabIdOf }, testInfo) => {
       test.setTimeout(900_000);
       await configure({ ...engineSettings(mode, server), subtitleLanguage: video.lang });
       await sw.evaluate(() => chrome.storage.local.remove('devSubtitle'));
+      await clearTranslationState(sw); // no glossary or topic summary carried over from an earlier run
+      const row = testInfo.parallelIndex % 2;
       await recordSourceBufferTypes(context);
       await recordOverlayOnEveryLoad(context);
       const pieces = Math.ceil(video.duration / SEGMENT_S);
@@ -318,17 +377,16 @@ test.describe('real YouTube', () => {
           return await prepareOnce(k);
         } catch (error) {
           retries.push(`piece ${k}: ${String(error).split(/\r?\n/)[0].slice(0, 120)}`);
-          for (const p of context.pages()) if (p.url().includes(`v=${video.id}&t=${Math.floor(from(k))}s`)) await p.close().catch(() => undefined);
           return prepareOnce(k);
         }
       };
       const prepareOnce = async (k: number): Promise<Page> => {
-        const page = await openVideoWindow(context, url(k), (k % 2) * 960);
+        const page = await slotPage(context, k % 2, row);
+        await page.goto(url(k));
         await parkAt(page, from(k));
         if (k === 0) {
           await astTest(page, 'timeline.clear');
-          const popup = await startSubtitleMode(page, openPopup, video);
-          await popup.close();
+          await startSubtitleModeChecked(page, openPopup, video, sw);
         } else {
           const tabId = await tabIdOf(page);
           await expect
@@ -367,12 +425,12 @@ test.describe('real YouTube', () => {
         if (k + 1 < pieces) {
           const next = await pending!;
           joins.push(to(k));
-          await page.close();
+          await page.goto('about:blank'); // stop this piece's playback and mode; the window stays
           page = next;
           pending = k + 2 < pieces ? prepare(k + 2) : null;
         }
       }
-      await page.close();
+      await page.goto('about:blank');
       const out = await report('youtube', mode, video, {
         records: records.sort((a, b) => a.shownAt - b.shownAt),
         stats: sumStats(stats),
@@ -394,12 +452,13 @@ test.describe('real YouTube', () => {
 test.describe('local copies', () => {
   for (const mode of MODES) for (const container of ['mp4', 'webm'] as const) {
     for (const video of subtitleVideos) {
-      test(`benchmark ${video.id} (${container}) [${mode}]`, async ({ context, fixtureURL, openPopup, configure, server }) => {
+      test(`benchmark ${video.id} (${container}) [${mode}]`, async ({ context, fixtureURL, openPopup, configure, server, sw }) => {
         const stretch = referenceStretch(video);
         const fileId = stretch.file.split('.')[0];
         const file = path.join(CACHE, 'videos', `${fileId}.${stretch.id}.video.${container}`);
         test.skip(!fs.existsSync(file), `${file} missing: npm run fixtures:video`);
         await configure({ ...engineSettings(mode, server), subtitleLanguage: video.lang });
+        await clearTranslationState(sw);
         const page = await context.newPage();
         await recordSourceBufferTypes(page);
         await page.goto(`${fixtureURL}/video-subs.html?v=${video.id}&file=${fileId}&stretch=${stretch.id}&container=${container}`);

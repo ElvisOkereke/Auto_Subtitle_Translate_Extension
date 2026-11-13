@@ -34,7 +34,49 @@ export interface ExtensionOptions {
   extraArgs: string[];
   /** Force a headed browser (e.g. sites that stop playback in headless mode). */
   headed: boolean;
+  /**
+   * Keep one browser per worker across tests (tests open tabs in it) instead of
+   * launching one per test. Pages marked with keepPage() survive between tests;
+   * other pages are closed after each test.
+   */
+  reuseBrowser: boolean;
 }
+
+/** Pages that should stay open between tests when the browser is reused. */
+const keptPages = new WeakSet<Page>();
+export const keepPage = (page: Page) => keptPages.add(page);
+
+const SKIP_ON_COPY = new Set(['SingletonLock', 'SingletonCookie', 'SingletonSocket', 'DevToolsActivePort', 'lockfile', 'LOCK']);
+
+/** Best-effort copy of a browser profile (locked files are skipped). */
+function copyProfile(from: string, to: string): void {
+  fs.mkdirSync(to, { recursive: true });
+  for (const entry of fs.readdirSync(from, { withFileTypes: true })) {
+    if (SKIP_ON_COPY.has(entry.name)) continue;
+    const src = path.join(from, entry.name);
+    const dst = path.join(to, entry.name);
+    try {
+      if (entry.isDirectory()) copyProfile(src, dst);
+      else fs.copyFileSync(src, dst);
+    } catch {
+      // in use by another browser: skip
+    }
+  }
+}
+
+/**
+ * Persistent profiles can't be shared by browsers running at the same time:
+ * parallel worker N > 0 gets its own copy (made once from the base profile, so
+ * downloaded models and a signed-in session carry over).
+ */
+function profileForWorker(profileDir: string, parallelIndex: number): string {
+  if (parallelIndex === 0) return profileDir;
+  const dir = `${profileDir}-w${parallelIndex}`;
+  if (!fs.existsSync(dir) && fs.existsSync(profileDir)) copyProfile(profileDir, dir);
+  return dir;
+}
+
+type Launched = Awaited<ReturnType<typeof launchExtensionBrowser>>;
 
 /**
  * Waits for the extension's service worker: briefly on its own, then woken by
@@ -52,11 +94,22 @@ async function extensionWorkerStarts(context: BrowserContext, extensionId: strin
   return started;
 }
 
-export const test = base.extend<ExtensionFixtures & ExtensionOptions, { server: FixtureServer }>({
+export const test = base.extend<ExtensionFixtures & ExtensionOptions, { server: FixtureServer; browserPool: Map<string, Launched> }>({
   profileDir: [undefined, { option: true }],
   mockTranslation: [true, { option: true }],
   extraArgs: [[], { option: true }],
   headed: [false, { option: true }],
+  reuseBrowser: [false, { option: true }],
+
+  // Browsers kept for the whole worker (reuseBrowser), closed when the worker ends.
+  browserPool: [
+    async ({}, use) => {
+      const pool = new Map<string, Launched>();
+      await use(pool);
+      for (const launched of pool.values()) await launched.close().catch(() => undefined);
+    },
+    { scope: 'worker' },
+  ],
 
   server: [
     async ({}, use) => {
@@ -77,8 +130,24 @@ export const test = base.extend<ExtensionFixtures & ExtensionOptions, { server: 
     await use(id);
   },
 
-  context: async ({ extensionId, profileDir, extraArgs, headed }, use, testInfo) => {
-    const dir = profileDir ?? fs.mkdtempSync(path.join(os.tmpdir(), 'ast-e2e-'));
+  context: async ({ extensionId, profileDir, extraArgs, headed, reuseBrowser, browserPool }, use, testInfo) => {
+    const persistent = profileDir ? profileForWorker(profileDir, testInfo.parallelIndex) : undefined;
+    const poolKey = persistent ?? `temp-${testInfo.parallelIndex}`;
+    const reused = reuseBrowser ? browserPool.get(poolKey) : undefined;
+    if (reused && reused.context.browser()?.isConnected() !== false) {
+      const logs: string[] = [];
+      const onConsole = (m: any) => logs.push(`[${m.page()?.url() ?? 'worker'}] ${m.type()}: ${m.text()}`);
+      reused.context.on('console', onConsole);
+      await use(reused.context);
+      reused.context.off('console', onConsole);
+      if (logs.length && testInfo.status !== testInfo.expectedStatus) {
+        await testInfo.attach('console.log', { body: logs.join('\n'), contentType: 'text/plain' });
+        if (process.env.E2E_PRINT_LOGS) console.log(logs.join('\n'));
+      }
+      for (const page of reused.context.pages()) if (!keptPages.has(page)) await page.close().catch(() => undefined);
+      return;
+    }
+    const dir = persistent ?? fs.mkdtempSync(path.join(os.tmpdir(), 'ast-e2e-'));
     fs.mkdirSync(dir, { recursive: true });
     const launch = () =>
       launchExtensionBrowser({
@@ -99,6 +168,23 @@ export const test = base.extend<ExtensionFixtures & ExtensionOptions, { server: 
       }
     }
     const context = launched.context;
+    if (reuseBrowser) {
+      // First test of this worker: keep the browser for the next ones (and its first
+      // tab: Chrome may quit when its last window closes).
+      browserPool.set(poolKey, launched);
+      keptPages.add(context.pages()[0] ?? (await context.newPage()));
+      const logs: string[] = [];
+      const onConsole = (m: any) => logs.push(`[${m.page()?.url() ?? 'worker'}] ${m.type()}: ${m.text()}`);
+      context.on('console', onConsole);
+      await use(context);
+      context.off('console', onConsole);
+      if (logs.length && testInfo.status !== testInfo.expectedStatus) {
+        await testInfo.attach('console.log', { body: logs.join('\n'), contentType: 'text/plain' });
+        if (process.env.E2E_PRINT_LOGS) console.log(logs.join('\n'));
+      }
+      for (const page of context.pages()) if (!keptPages.has(page)) await page.close().catch(() => undefined);
+      return;
+    }
     // Collect console output from every page so failures come with logs attached.
     const logs: string[] = [];
     const stamp = () => new Date().toISOString().slice(17, 23);
