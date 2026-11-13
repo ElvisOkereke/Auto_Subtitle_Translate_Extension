@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import type { Page } from '@playwright/test';
+import type { BrowserContext, Page } from '@playwright/test';
 import { test, expect } from '../helpers/extension';
 import { CACHE, ROOT } from '../helpers/paths';
 import Anthropic from '@anthropic-ai/sdk';
@@ -101,6 +101,8 @@ interface RunResult {
   played: number; // seconds of the window that played
   blocked: string | null;
   format: string | null;
+  /** Real YouTube: where one sliding window handed over to the next (absolute seconds). */
+  joins?: number[];
 }
 
 async function report(run: string, mode: EngineMode, video: BenchVideo, r: RunResult) {
@@ -150,6 +152,7 @@ async function report(run: string, mode: EngineMode, video: BenchVideo, r: RunRe
     displayOffsetP50: offsets.length ? offsets[Math.floor(offsets.length / 2)] : null,
     timeOnScreen: timeOnScreen(r.records),
     shownWhilePaused: shownWhilePaused(r.records),
+    joins: r.joins ?? [],
     ocrCer: cer,
     stats: r.stats,
   };
@@ -204,7 +207,7 @@ async function collect(page: Page, toAbsolute: (t: number) => number) {
   return { records, stats, timeline };
 }
 
-async function startSubtitleMode(page: Page, openPopup: (p: Page) => Promise<Page>, video: BenchVideo) {
+async function startSubtitleMode(page: Page, openPopup: (p: Page) => Promise<Page>, video: BenchVideo): Promise<Page> {
   const popup = await openPopup(page);
   await popup.click('#modeSubtitles');
   await popup.selectOption('#subtitleLanguage', video.lang);
@@ -213,41 +216,157 @@ async function startSubtitleMode(page: Page, openPopup: (p: Page) => Promise<Pag
   await expect.poll(() => page.evaluate(() => document.body.style.cursor)).toBe('crosshair');
   await dragBox(page, video.box);
   await expect.poll(async () => (await modeStats(page)).state, { timeout: 120_000 }).toBe('running');
+  return popup;
 }
 
 test.use({ mockTranslation: false });
 test.skip(!DEEPL_KEY, 'DEEPL_API_KEY not set in .env');
 test.skip(!anthropicRelayAvailable(), 'no Anthropic credentials (ANTHROPIC_AUTH_TOKEN or ANTHROPIC_API_KEY)');
 
+// Real YouTube stops automated playback after ~40 s of a page's playback, so the
+// window is played as a sliding window: 30 s pieces, each in its own browser
+// window opened at its timestamp. While one plays, the next is prepared (loaded,
+// ads waited out, paused at its start, subtitle mode running with the saved box,
+// read-ahead already reading). Windows sit side by side: Chrome stops presenting
+// frames in covered windows. Each window scores only the lines of its own piece.
+const SEGMENT_S = 30;
+
+async function openVideoWindow(context: BrowserContext, url: string, left: number): Promise<Page> {
+  const cdp = await context.browser()!.newBrowserCDPSession();
+  const opened = context.waitForEvent('page');
+  const { targetId } = (await cdp.send('Target.createTarget', { url, newWindow: true })) as { targetId: string };
+  const page = await opened;
+  const { windowId } = (await cdp.send('Browser.getWindowForTarget', { targetId })) as { windowId: number };
+  await cdp.send('Browser.setWindowBounds', { windowId, bounds: { left, top: 0, width: 960, height: 760, windowState: 'normal' } });
+  await cdp.detach();
+  return page;
+}
+
+async function parkAt(page: Page, t: number): Promise<void> {
+  await page.waitForSelector('video.html5-main-video', { timeout: 30_000 });
+  await waitOutAds(page);
+  await page.evaluate(at => {
+    (document.getElementById('movie_player') as any)?.setPlaybackQualityRange?.('hd1080', 'hd1080');
+    const v = document.querySelector('video.html5-main-video') as HTMLVideoElement;
+    v.pause();
+    v.currentTime = at;
+  }, t);
+}
+
+/** Plays one piece [from, to); pauses PAUSE_WALL_MS once when it passes pauseAt. */
+async function playSegment(page: Page, from: number, to: number, pauseAt: number): Promise<{ played: number; blocked: string | null }> {
+  let paused = !(pauseAt >= from && pauseAt < to);
+  let last = from;
+  await page.bringToFront();
+  await page.evaluate(() => document.querySelector('video')!.play());
+  for (;;) {
+    await page.waitForTimeout(500);
+    const st = await page.evaluate(() => {
+      const v = document.querySelector('video')!;
+      return { t: v.currentTime, ad: !!document.querySelector('#movie_player.ad-showing'), error: document.querySelector('.ytp-error')?.textContent?.trim() ?? null };
+    });
+    if (st.error) return { played: last - from, blocked: st.error };
+    if (st.ad) await waitOutAds(page);
+    last = st.t;
+    if (!paused && st.t >= pauseAt) {
+      paused = true;
+      await page.evaluate(() => document.querySelector('video')!.pause());
+      await page.waitForTimeout(PAUSE_WALL_MS);
+      await page.evaluate(() => document.querySelector('video')!.play());
+    }
+    if (st.t >= to) {
+      await page.evaluate(() => document.querySelector('video')!.pause());
+      return { played: to - from, blocked: null };
+    }
+  }
+}
+
+function sumStats(all: ModeStats[]): ModeStats {
+  const out = { ...all[0] } as any;
+  for (const key of Object.keys(out)) if (typeof out[key] === 'number') out[key] = all.reduce((n, s: any) => n + (s[key] ?? 0), 0);
+  return out;
+}
+
 test.describe('real YouTube', () => {
   test.use({ profileDir: path.join(CACHE, 'profile-youtube'), headed: true });
   test.skip(browserKind() !== 'chrome', 'real YouTube runs use installed Chrome (E2E_BROWSER=chrome)');
 
   for (const mode of MODES) for (const video of subtitleVideos) {
-    test(`benchmark ${video.id} [${mode}]`, async ({ context, openPopup, configure, sw, server }) => {
+    test(`benchmark ${video.id} [${mode}]`, async ({ context, openPopup, configure, sw, server, tabIdOf }) => {
+      test.setTimeout(900_000);
       await configure({ ...engineSettings(mode, server), subtitleLanguage: video.lang });
       await sw.evaluate(() => chrome.storage.local.remove('devSubtitle'));
-      const page = await context.newPage();
-      await recordSourceBufferTypes(page);
-      await page.goto(`https://www.youtube.com/watch?v=${video.id}&t=${video.start}s`);
-      await page.waitForSelector('video.html5-main-video', { timeout: 30_000 });
-      await waitOutAds(page);
-      await page.evaluate(start => {
-        (document.getElementById('movie_player') as any)?.setPlaybackQualityRange?.('hd1080', 'hd1080');
-        const v = document.querySelector('video.html5-main-video') as HTMLVideoElement;
-        v.pause();
-        v.currentTime = start;
-      }, video.start);
-      await recordOverlay(page);
-      await astTest(page, 'timeline.clear');
-      await startSubtitleMode(page, openPopup, video);
-      const { played, blocked } = await playWindow(page, video, t => t);
-      const format = (await sourceBufferTypes(page)).find(m => m.startsWith('video/')) ?? null;
-      const out = await report('youtube', mode, video, { ...(await collect(page, t => t)), played, blocked, format });
+      await recordSourceBufferTypes(context);
+      const pieces = Math.ceil(video.duration / SEGMENT_S);
+      const from = (k: number) => video.start + k * SEGMENT_S;
+      const to = (k: number) => Math.min(video.start + video.duration, from(k + 1));
+      const url = (k: number) => `https://www.youtube.com/watch?v=${video.id}&t=${Math.floor(from(k))}s`;
+
+      const prepare = async (k: number): Promise<Page> => {
+        const page = await openVideoWindow(context, url(k), (k % 2) * 960);
+        await parkAt(page, from(k));
+        await recordOverlay(page);
+        if (k === 0) {
+          await astTest(page, 'timeline.clear');
+          const popup = await startSubtitleMode(page, openPopup, video);
+          await popup.close();
+        } else {
+          const tabId = await tabIdOf(page);
+          await expect
+            .poll(async () => {
+              const r = await sw.evaluate(id => chrome.tabs.sendMessage(id, { type: 'START_SUBTITLE_MODE' }).catch(e => ({ success: false, error: String(e) })), tabId);
+              return (r as any)?.success === true || (await modeStats(page)).state === 'running';
+            }, { timeout: 60_000 })
+            .toBe(true);
+        }
+        await expect.poll(async () => (await modeStats(page)).state, { timeout: 120_000 }).toBe('running');
+        return page;
+      };
+
+      const records: ShownRecord[] = [];
+      const timeline = new Map<number, TimelineEntry>();
+      const stats: ModeStats[] = [];
+      const joins: number[] = [];
+      const blocks: string[] = [];
+      let played = 0;
+      let format: string | null = null;
+      let page = await prepare(0);
+      let pending: Promise<Page> | null = pieces > 1 ? prepare(1) : null;
+      for (let k = 0; k < pieces; k++) {
+        const r = await playSegment(page, from(k), to(k), video.start + PAUSE_AFTER_S);
+        played += r.played;
+        if (r.blocked) blocks.push(`${from(k) + r.played}: ${r.blocked}`);
+        const got = await collect(page, t => t);
+        records.push(...got.records.filter(x => x.shownAt >= from(k) && x.shownAt < to(k)));
+        for (const e of got.timeline) {
+          const key = Math.round(e.start * 1000);
+          const known = timeline.get(key);
+          if (!known || (!known.translation && e.translation) || (known.quality !== 'better' && e.quality === 'better')) timeline.set(key, e);
+        }
+        stats.push(got.stats);
+        format ??= (await sourceBufferTypes(page)).find(m => m.startsWith('video/')) ?? null;
+        if (k + 1 < pieces) {
+          const next = await pending!;
+          joins.push(to(k));
+          await page.close();
+          page = next;
+          pending = k + 2 < pieces ? prepare(k + 2) : null;
+        }
+      }
+      await page.close();
+      const out = await report('youtube', mode, video, {
+        records: records.sort((a, b) => a.shownAt - b.shownAt),
+        stats: sumStats(stats),
+        timeline: [...timeline.values()].sort((a, b) => a.start - b.start),
+        played,
+        blocked: blocks.length ? blocks.join('; ') : null,
+        format,
+        joins,
+      });
 
       expect(out.shownWhilePaused, 'lines appeared while the video was paused').toBe(0);
-      if (!blocked && format && TAPPED.test(format)) expect(out.path, `read-ahead should carry ${format}`).not.toBe('live');
-      if (blocked) console.warn(`YouTube stopped playback after ${played.toFixed(0)} s: ${blocked}`);
+      if (format && TAPPED.test(format)) expect(out.path, `read-ahead should carry ${format}`).not.toBe('live');
+      if (blocks.length) console.warn(`YouTube stopped playback in ${blocks.length} piece(s): ${blocks.join('; ')}`);
     });
   }
 });

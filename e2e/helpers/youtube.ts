@@ -16,9 +16,9 @@ export async function waitOutAds(page: Page): Promise<void> {
   throw new Error('Ad did not finish within 90 s');
 }
 
-/** Records the MIME type of every SourceBuffer the page creates (window.__astMimes). Call before navigating. */
-export async function recordSourceBufferTypes(page: Page): Promise<void> {
-  await page.addInitScript(() => {
+/** Records the MIME type of every SourceBuffer a page creates (window.__astMimes). Call before navigating. */
+export async function recordSourceBufferTypes(target: Pick<Page, 'addInitScript'>): Promise<void> {
+  await target.addInitScript(() => {
     const w = window as any;
     w.__astMimes = [];
     const original = MediaSource.prototype.addSourceBuffer;
