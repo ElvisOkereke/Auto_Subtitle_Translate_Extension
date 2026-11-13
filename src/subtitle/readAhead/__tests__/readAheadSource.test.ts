@@ -45,6 +45,15 @@ describe('MseReadAhead (untrusted main-world messages)', () => {
 
   afterEach(() => source.stop());
 
+  it('counts accepted frames and not rejected ones', () => {
+    frame(12);
+    frame(13);
+    frame(14);
+    frame(55); // beyond the buffered range
+    frame(3); // far behind the playhead
+    expect(source.framesAccepted).toBe(3);
+  });
+
   it('accepts frames inside the buffered range ahead of the playhead', () => {
     frame(12);
     frame(30.5);

@@ -221,6 +221,9 @@ installTestBridge({
     translateCalls: mode?.translateCalls ?? 0,
     raOcrCalls: mode?.raOcrCalls ?? 0,
     readAheadLead: mode?.readAheadLead ?? 0,
+    readAheadFrames: mode?.readAheadFrames ?? 0,
+    linesFromReadAhead: mode?.linesFromReadAhead ?? 0,
+    linesFromLive: mode?.linesFromLive ?? 0,
     timelineSize: mode?.timeline.size ?? 0,
     videoId: currentVideoId(),
     };

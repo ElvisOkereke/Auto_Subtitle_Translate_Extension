@@ -64,6 +64,10 @@ export class SubtitleMode {
   ocrCalls = 0;
   raOcrCalls = 0;
   translateCalls = 0;
+  /** Lines first shown from a read-ahead entry vs a live read (which path is carrying the experience). */
+  linesFromReadAhead = 0;
+  linesFromLive = 0;
+  private readonly shownLines = new WeakSet<TimelineLine>();
   /** Video time at which each line's translation arrived, keyed by line start. */
   readonly translatedAt = new Map<number, number>();
   /** Video time at which each line's Claude ('better') translation arrived. */
@@ -82,6 +86,11 @@ export class SubtitleMode {
   /** Seconds of video read ahead of the playhead. */
   get readAheadLead(): number {
     return this.deps.readAhead?.lead ?? 0;
+  }
+
+  /** Frames the read-ahead source has accepted (0 means the live path carries everything). */
+  get readAheadFrames(): number {
+    return this.deps.readAhead?.framesAccepted ?? 0;
   }
 
   private readonly tracker = new LineTracker({ changeThreshold: 0.04, stableFrames: 2 });
@@ -229,12 +238,22 @@ export class SubtitleMode {
   }
 
   /** Shows a line the timeline already knows (seek back, rewatch, read-ahead). */
+  /** Puts a translated line on screen and counts which path first showed it. */
+  private showLine(line: TimelineLine): void {
+    if (!line.translation) return;
+    this.overlay.show(line.translation, { lineStart: line.start, quality: line.quality === 'better' ? 'better' : 'fast' });
+    if (this.shownLines.has(line)) return;
+    this.shownLines.add(line);
+    if (line.origin === 'read-ahead') this.linesFromReadAhead++;
+    else this.linesFromLive++;
+  }
+
   private showKnown(t: number): boolean {
     const known = this.timeline.at(t);
     if (!known || known.end === null || !known.translation) return false;
     if (this.current !== known) {
       this.current = known;
-      this.overlay.show(known.translation, { lineStart: known.start, quality: known.quality === 'better' ? 'better' : 'fast' });
+      this.showLine(known);
     }
     return true;
   }
@@ -256,7 +275,7 @@ export class SubtitleMode {
       if (line?.translation) {
         if (this.current !== line) {
           this.current = line;
-          this.overlay.show(line.translation, { lineStart: line.start, quality: line.quality === 'better' ? 'better' : 'fast' });
+          this.showLine(line);
         }
       } else if (!line && this.current) {
         this.current = null;
@@ -393,7 +412,7 @@ export class SubtitleMode {
       this.raCurrent = existing; // the live path already has this line
       return;
     }
-    const line = this.timeline.upsert({ start: t, end: null, source: text });
+    const line = this.timeline.upsert({ start: t, end: null, source: text, origin: 'read-ahead' });
     this.raCurrent = line;
     void this.translate(line, 'readahead');
   }
@@ -412,12 +431,12 @@ export class SubtitleMode {
     if (known && isSameLine(text, known.source)) {
       // Read ahead (or seen before): reuse it instead of creating a duplicate line.
       this.current = known;
-      if (known.translation) this.overlay.show(known.translation, { lineStart: known.start, quality: known.quality === 'better' ? 'better' : 'fast' });
+      if (known.translation) this.showLine(known);
       return;
     }
 
     if (this.current && this.current.end === null) this.timeline.close(this.current.start, t);
-    const line = this.timeline.upsert({ start: t, end: null, source: text });
+    const line = this.timeline.upsert({ start: t, end: null, source: text, origin: 'live' });
     this.current = line;
     void this.translate(line, 'live');
   }
@@ -466,7 +485,7 @@ export class SubtitleMode {
     if (!this.translatedAt.has(line.start)) this.translatedAt.set(line.start, this.video.currentTime);
     if (line.quality === 'better' && !this.betterAt.has(line.start)) this.betterAt.set(line.start, this.video.currentTime);
     if (this.current === line && this.state === 'running') {
-      this.overlay.show(line.translation!, { lineStart: line.start, quality: line.quality === 'better' ? 'better' : 'fast' });
+      this.showLine(line);
     }
   }
 }

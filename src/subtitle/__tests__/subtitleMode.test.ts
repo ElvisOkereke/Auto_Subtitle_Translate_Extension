@@ -74,6 +74,7 @@ async function harness(
     setBox: () => undefined,
     stop: () => undefined,
     lead: 0,
+    framesAccepted: 0,
   };
   h.mode = await SubtitleMode.start({
     video,
@@ -151,6 +152,21 @@ describe('SubtitleMode', () => {
     const before = h.fastCalls;
     await liveLine(h, SIG(90), 108.8, text(35));
     expect(h.fastCalls).toBeGreaterThan(before);
+  });
+
+  it('stats say which path showed each line', async () => {
+    const h = (current = await harness());
+    // Read ahead: a subtitle at 30..31, then an empty box.
+    for (let t = 30; t < 31; t += 0.125) h.raFrame(crop(3), SIG(200), t);
+    for (let t = 31; t < 32; t += 0.125) h.raFrame(crop(-1), SIG(0), t);
+    await flush();
+    (h.video as any).currentTime = 30.2;
+    h.onFrame(SIG(200), 30.2, async () => crop(-1));
+    expect(h.overlayText()).toBe(`EN ${text(3)}`);
+    // Live: a line read ahead of nothing (before the read-ahead range).
+    await liveLine(h, SIG(120), 10, text(1));
+    expect(h.overlayText()).toBe(`EN ${text(1)}`);
+    expect({ readAhead: h.mode.linesFromReadAhead, live: h.mode.linesFromLive }).toEqual({ readAhead: 1, live: 1 });
   });
 
   it('seeking closes the line that was on screen (it must not stretch over the rest of the video)', async () => {

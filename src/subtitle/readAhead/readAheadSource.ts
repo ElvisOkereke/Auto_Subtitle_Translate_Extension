@@ -13,6 +13,8 @@ export interface ReadAheadSource {
   stop(): void;
   /** Seconds of video decoded ahead of currentTime. */
   readonly lead: number;
+  /** Frames accepted from the main world (the read-ahead path is active when this grows). */
+  readonly framesAccepted: number;
 }
 
 export const READ_AHEAD_FPS = 8;
@@ -32,6 +34,7 @@ export class MseReadAhead implements ReadAheadSource {
   private onReset: (() => void) | null = null;
   private latest = -Infinity;
   private canvas: OffscreenCanvas | null = null;
+  framesAccepted = 0;
   private readonly onMessage = (event: MessageEvent) => {
     if (event.source !== window) return;
     const msg = event.data;
@@ -48,6 +51,7 @@ export class MseReadAhead implements ReadAheadSource {
         return;
       }
       this.latest = Math.max(this.latest, msg.t);
+      this.framesAccepted++;
       this.deliver(msg.bitmap, msg.t);
     }
   };

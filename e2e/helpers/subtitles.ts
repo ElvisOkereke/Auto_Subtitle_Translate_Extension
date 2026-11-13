@@ -21,11 +21,8 @@ export const timelineFixture: { stretches: { id: string; start: number; end: num
   fs.readFileSync(path.join(FIXTURES, 'subtitles/_zIrbXw-SVs.timeline.json'), 'utf8')
 );
 
-export interface Shown {
-  shownAt: number;
-  lineStart: number;
-  text: string;
-}
+/** @deprecated use ShownRecord */
+export type Shown = ShownRecord;
 
 export interface ModeStats {
   state: string;
@@ -34,21 +31,59 @@ export interface ModeStats {
   translateCalls: number;
   timelineSize: number;
   readAheadLead: number;
+  /** Frames accepted from the read-ahead tap (0: the live path carries everything). */
+  readAheadFrames: number;
+  linesFromReadAhead: number;
+  linesFromLive: number;
   videoId: string | null;
 }
 
-/** Records every overlay update in the page's main world (the DOM is shared with content scripts). */
+/** One overlay appearance. Times are video seconds; `wall*` are performance.now() in the page. */
+export interface ShownRecord {
+  shownAt: number;
+  hiddenAt: number | null;
+  lineStart: number;
+  text: string;
+  pausedAtShow: boolean;
+  wallShownAt: number;
+  wallHiddenAt: number | null;
+}
+
+/**
+ * Records every overlay appearance in the page's main world (the DOM is shared
+ * with content scripts): when it was shown and hidden (or replaced), in video
+ * time, and whether the video was paused when it appeared.
+ */
 export async function recordOverlay(page: Page): Promise<void> {
   await page.evaluate(() => {
     const w = window as any;
     w.__shown = [];
+    const close = (last: any) => {
+      if (last && last.hiddenAt === null) {
+        last.hiddenAt = (document.querySelector('video') as HTMLVideoElement | null)?.currentTime ?? null;
+        last.wallHiddenAt = performance.now();
+      }
+    };
     new MutationObserver(() => {
       const el = document.querySelector<HTMLElement>('.ast-subtitle-overlay');
-      if (!el || el.style.display === 'none') return;
-      const text = el.textContent ?? '';
       const last = w.__shown[w.__shown.length - 1];
-      if (!last || last.text !== text || last.lineStart !== Number(el.dataset.lineStart)) {
-        w.__shown.push({ shownAt: Number(el.dataset.shownAt), lineStart: Number(el.dataset.lineStart), text });
+      if (!el || el.style.display === 'none') {
+        close(last);
+        return;
+      }
+      const text = el.textContent ?? '';
+      if (!last || last.text !== text || last.lineStart !== Number(el.dataset.lineStart) || last.hiddenAt !== null) {
+        close(last);
+        const video = document.querySelector('video') as HTMLVideoElement | null;
+        w.__shown.push({
+          shownAt: Number(el.dataset.shownAt),
+          hiddenAt: null,
+          lineStart: Number(el.dataset.lineStart),
+          text,
+          pausedAtShow: !!video?.paused,
+          wallShownAt: performance.now(),
+          wallHiddenAt: null,
+        });
       }
     }).observe(document.documentElement, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['style', 'data-shown-at'] });
   });
