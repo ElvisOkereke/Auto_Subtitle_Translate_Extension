@@ -39,7 +39,7 @@ import {
 
 const LABEL = process.env.BENCH_LABEL || execFileSync('git', ['rev-parse', '--short', 'HEAD']).toString().trim();
 /** Video SourceBuffer formats the read-ahead tap reads (mseTap.main.ts). */
-const TAPPED = /^video\/mp4/i;
+const TAPPED = /^video\/(mp4|webm)/i;
 const OUT = path.join(ROOT, 'e2e/.perf/youtube-bench', LABEL);
 const PAUSE_AFTER_S = 60;
 const PAUSE_WALL_MS = 5000;
