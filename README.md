@@ -11,6 +11,10 @@ A Chrome (MV3) extension that translates what you watch, live:
 - **Screen Translate** — drag a box over text on any page for a one-shot
   translation.
 
+> **Project overview, status and roadmap:** [docs/project-overview.md](docs/project-overview.md)
+> covers the vision, what's built, measured results, architecture and what's
+> next. Measured wins are in [docs/milestones.md](docs/milestones.md).
+
 Speech recognition and OCR run **locally in your browser** (no key, no server).
 Translation is **fast then best**: DeepL (or Google) puts a translation up
 immediately, then Claude replaces it with a context-aware one that knows what
