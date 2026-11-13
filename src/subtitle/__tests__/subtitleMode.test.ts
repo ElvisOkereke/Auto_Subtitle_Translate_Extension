@@ -154,6 +154,19 @@ describe('SubtitleMode', () => {
     expect(h.fastCalls).toBeGreaterThan(before);
   });
 
+  it('read-ahead re-reads an open line, so a change the image signature misses is still caught', async () => {
+    const h = (current = await harness());
+    // Small text in a big box: the next subtitle barely changes the box image (same signature).
+    // Frames arrive over time; OCR answers in between (as in a real stream).
+    for (let t = 100; t < 103; t += 0.125) {
+      h.raFrame(crop(t < 101.5 ? 1 : 2), SIG(200), t);
+      await flush(2);
+    }
+    await flush(10);
+    expect(h.mode.timeline.at(100.5)?.source).toBe(text(1));
+    expect(h.mode.timeline.at(102.6)?.source).toBe(text(2));
+  });
+
   it('stats say which path showed each line', async () => {
     const h = (current = await harness());
     // Read ahead: a subtitle at 30..31, then an empty box.

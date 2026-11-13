@@ -53,6 +53,8 @@ export type SubtitleModeState = 'loading' | 'running' | 'paused-ad' | 'stopped';
 
 const MIN_CONFIDENCE = 0.5;
 const RECHECK_MS = 750; // re-read a displayed line if nothing triggered a read for this long
+/** Read-ahead re-reads an open line this often (video seconds): small text in a big box can change without moving the image signature. */
+const RA_RECHECK_S = 0.75;
 const SAVE_EVERY_MS = 10_000;
 const MAX_READ_AHEAD_QUEUE = 32;
 const MAX_OPEN_LINE_S = 8; // a saved line with no end is closed after this long
@@ -80,6 +82,8 @@ export class SubtitleMode {
   // Read-ahead: frames decoded ahead of playback run through their own tracker.
   private readonly raTracker = new LineTracker({ changeThreshold: 0.04, stableFrames: 2 });
   private raQueue: { t: number; crop: ImageBitmap }[] = [];
+  /** Video time of the last frame queued for read-ahead OCR. */
+  private raLastQueuedAt = -Infinity;
   private raReadingAt: number | null = null;
   private raCurrent: TimelineLine | null = null;
   private raFrom = Infinity;
@@ -405,6 +409,12 @@ export class SubtitleMode {
         return;
       }
       this.raQueue.push({ t: event.since, crop });
+      this.raLastQueuedAt = t;
+      void this.pumpReadAhead();
+    } else if (this.raCurrent?.end === null && t - this.raLastQueuedAt >= RA_RECHECK_S && this.raGap === null && this.raQueue.length < MAX_READ_AHEAD_QUEUE / 2) {
+      // No change seen, but a line is open: re-read now and then (like the live path's recheck).
+      this.raQueue.push({ t, crop });
+      this.raLastQueuedAt = t;
       void this.pumpReadAhead();
     } else {
       crop.close();
