@@ -4,6 +4,19 @@ Wins worth sharing, newest first. Each has the headline, the proof (a number
 or what was shown working), and where the evidence lives. Numbers come from
 automated runs in a real browser (details: [performance.md](performance.md)).
 
+## 2026-11-12 — A redesigned popup, in light and dark
+
+- The popup now opens on what you actually do: a subtitle-style **caption bar**
+  tells you what's happening in this tab ("Translating Korean subtitles into
+  English"), with the two modes, the target language and Screen Translate right
+  underneath. Keys, subscription, engine and glossary moved behind one gear.
+- **Light and dark mode** (or match the system), including the Screen Translate
+  panel drawn on web pages; one bundled, highly legible typeface (Atkinson
+  Hyperlegible).
+- Every label now says what the button does ("Start live captions", "Use saved
+  box", "Translate with: your subscription / your own keys").
+- Checked in a real browser by automated tests that screenshot both themes.
+
 ## 2026-11-12 — Subscriptions: translation that works out of the box
 
 - Sign in with your email (one-time code) and subscribe — no API keys needed.

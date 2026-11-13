@@ -27,26 +27,36 @@ npm run build          # dev build into dist/   (npm run build:prod for minified
 ```
 
 Chrome → `chrome://extensions` → enable Developer mode → **Load unpacked** →
-select `dist/`. Open the popup and paste a DeepL (free keys end in `:fx`) or
-Google Translate API key, and for context-aware translation an Anthropic API key
-(or choose **Anthropic-compatible gateway** and enter its URL and token). Keys
-are stored only in this browser's local extension storage.
+select `dist/`. Open the popup, click the gear (**Settings**) and paste a DeepL
+(free keys end in `:fx`) or Google Translate API key, and for context-aware
+translation an Anthropic API key (or choose **Anthropic-compatible gateway** and
+enter its URL and token). Keys are stored only in this browser's local extension
+storage.
 
 ## Use
 
+The popup opens on what you do every time: the **caption bar** at the top says
+what's happening in this tab ("Translating Korean subtitles into English"),
+then the two modes, the **Translate into** language and **Screen Translate**.
+Setup (keys or subscription, engine, glossary, caption style, theme) lives
+behind the gear; the **Engine** and **Account** rows on the main view show the
+current choice and open the right settings. **Appearance** switches between
+light, dark and *Match system*; the Screen Translate panel on web pages follows
+it too.
+
 **Subtitles mode** — on the video page open the popup → **Subtitles** →
 pick the subtitle language → **Draw subtitle box** → drag a box around where
-the subtitles appear. The box is remembered per video (**Start (saved box)**
+the subtitles appear. The box is remembered per video (**Use saved box**
 next time). The English sits on a see-through tint over the original line and
 updates as the subtitles change; nothing is shown when there's no subtitle.
 
-**Audio mode** — popup → **Audio** → **Start Subtitles**. The first run
+**Audio mode** — popup → **Audio** → **Start live captions**. The first run
 downloads the speech model (~209 MB on GPUs with WebGPU, 80 MB otherwise).
 
-Only one mode runs at a time. Position/size settings in the popup apply to
-audio captions.
+Only one mode runs at a time. Caption position and size (Settings → Live
+captions) apply to audio captions.
 
-**Translation engine** (popup): *Fast then best* (default with Claude access),
+**Translation engine** (Settings): *Fast then best* (default with Claude access),
 *Fast only*, or *Best only*; Claude model Opus 5.5 (default), Sonnet 5.5 or
 Haiku 5.5. **Glossary for this video** lists the names and terms Claude fixed
 (e.g. 뽀삐 → Poppy); correct or delete an entry and the lines using it are
