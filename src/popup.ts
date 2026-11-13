@@ -3,6 +3,8 @@
 import { ExtensionSettings } from './types';
 import { DEFAULT_SETTINGS, getSecrets } from './settings';
 import { validateGatewayUrl } from './translation/claudeAccess';
+import { applyTheme, ThemeChoice } from './theme';
+import { captionText, engineSummaryText, PopupState } from './popupText';
 
 interface PopupElements {
   toggleButton: HTMLButtonElement;
@@ -56,6 +58,20 @@ interface PopupElements {
   accountManage: HTMLButtonElement;
   accountSignOut: HTMLButtonElement;
   accountStatus: HTMLDivElement;
+  openSettings: HTMLElement;
+  closeSettings: HTMLElement;
+  mainView: HTMLElement;
+  settingsView: HTMLElement;
+  captionBar: HTMLParagraphElement;
+  translateWithGroup: HTMLElement;
+  translateWithSubscription: HTMLElement;
+  translateWithKeys: HTMLElement;
+  ownKeysGroup: HTMLElement;
+  themeChoice: HTMLSelectElement;
+  engineSummary: HTMLElement;
+  accountSummary: HTMLElement;
+  engineSummaryValue: HTMLElement;
+  accountSummaryValue: HTMLElement;
 }
 
 const ELEMENT_IDS: (keyof PopupElements)[] = [
@@ -66,7 +82,8 @@ const ELEMENT_IDS: (keyof PopupElements)[] = [
   'startSubtitleMode', 'drawSubtitleBox', 'stopSubtitleMode', 'subtitleModeStatus',
   'engineMode', 'claudeModel', 'claudeAccess', 'anthropicApiKey', 'claudeGatewayUrl', 'claudeGatewayToken',
   'claudeGatewayAuth', 'anthropicKeyGroup', 'claudeGatewayGroup', 'claudeStatus', 'glossaryTopic', 'glossaryList',
-  'accountEmail', 'accountSendCode', 'accountCodeRow', 'accountCode', 'accountSignIn', 'signedOutView', 'signedInView', 'accountEmailShown', 'accountPlan', 'accountUsage', 'accountUsageBar', 'accountSubscribeStandard', 'accountSubscribePro', 'accountManage', 'accountSignOut', 'accountStatus'
+  'accountEmail', 'accountSendCode', 'accountCodeRow', 'accountCode', 'accountSignIn', 'signedOutView', 'signedInView', 'accountEmailShown', 'accountPlan', 'accountUsage', 'accountUsageBar', 'accountSubscribeStandard', 'accountSubscribePro', 'accountManage', 'accountSignOut', 'accountStatus',
+  'openSettings', 'closeSettings', 'mainView', 'settingsView', 'captionBar', 'translateWithGroup', 'translateWithSubscription', 'translateWithKeys', 'ownKeysGroup', 'themeChoice', 'engineSummary', 'accountSummary', 'engineSummaryValue', 'accountSummaryValue'
 ];
 
 const MODE_LABELS: Record<string, string> = {
@@ -134,7 +151,20 @@ const NON_SETTING_ELEMENT_KEYS = [
   'accountSubscribePro',
   'accountManage',
   'accountSignOut',
-  'accountStatus'
+  'accountStatus',
+  'openSettings',
+  'closeSettings',
+  'mainView',
+  'settingsView',
+  'captionBar',
+  'translateWithGroup',
+  'translateWithSubscription',
+  'translateWithKeys',
+  'ownKeysGroup',
+  'engineSummary',
+  'accountSummary',
+  'engineSummaryValue',
+  'accountSummaryValue'
 ];
 
 interface AccountView {
@@ -156,6 +186,91 @@ class PopupController {
   /** Bumped by every user action so a slow initial state query can't overwrite it. */
   private screenTranslateActionCount = 0;
   private signedIn = false;
+  private hostedAvailable = false;
+  private subtitleState: PopupState['subtitleState'] = 'off';
+  private hasBox = false;
+  private screenState: PopupState['screenTranslate'] = 'inactive';
+  private currentMode: 'audio' | 'subtitles' = 'audio';
+  private stopTheme: () => void = () => undefined;
+
+  private optionText(select: HTMLSelectElement): string {
+    return select.selectedOptions[0]?.textContent?.trim() ?? select.value;
+  }
+
+  /** The caption bar: the current state as one subtitle-like line. */
+  private renderCaption() {
+    const e = this.elements;
+    e.captionBar.textContent = captionText({
+      mode: this.currentMode,
+      audioRunning: this.isActive,
+      subtitleState: this.subtitleState,
+      hasBox: this.hasBox,
+      subtitleLanguage: this.optionText(e.subtitleLanguage),
+      speechLanguage: this.optionText(e.sourceLanguage),
+      targetLanguage: this.optionText(e.targetLanguage),
+      screenTranslate: this.screenState,
+    });
+  }
+
+  /** The Engine row on the main view. */
+  private renderEngineSummary() {
+    const e = this.elements;
+    const gateway = e.claudeAccess.value === 'gateway';
+    const subscription = e.claudeAccess.value === 'subscription' || e.translationProvider.value === 'subscription';
+    const provider = e.translationProvider.value as 'deepl' | 'google' | 'subscription';
+    const hasFastKey = provider === 'deepl' ? !!e.deeplApiKey.value : provider === 'google' ? !!e.googleTranslateApiKey.value : this.signedIn;
+    const hasClaude = subscription ? this.signedIn : gateway ? !!e.claudeGatewayUrl.value && !!e.claudeGatewayToken.value : !!e.anthropicApiKey.value;
+    e.engineSummaryValue.textContent = engineSummaryText({
+      translateWith: subscription ? 'subscription' : 'keys',
+      provider,
+      hasFastKey,
+      hasClaude,
+      engineMode: e.engineMode.value as 'fast-then-best' | 'fast' | 'best',
+      modelLabel: this.optionText(e.claudeModel).replace(/\s*\(.*\)$/, ''),
+    });
+  }
+
+  // ---- views ----
+
+  private showView(view: 'main' | 'settings', sectionId?: string) {
+    const e = this.elements;
+    const settings = view === 'settings';
+    e.mainView.classList.toggle('hidden', settings);
+    e.settingsView.classList.toggle('hidden', !settings);
+    const shown = settings ? e.settingsView : e.mainView;
+    shown.classList.remove('entering', 'entering-back');
+    void shown.offsetWidth; // restart the slide animation
+    shown.classList.add(settings ? 'entering' : 'entering-back');
+    if (settings && sectionId) document.getElementById(sectionId)?.scrollIntoView({ block: 'start' });
+    (settings ? e.closeSettings : e.openSettings).focus();
+  }
+
+  // ---- translate with: subscription or own keys ----
+
+  private renderTranslateWith() {
+    const e = this.elements;
+    const subscription = e.translationProvider.value === 'subscription' || e.claudeAccess.value === 'subscription';
+    e.translateWithGroup.classList.toggle('hidden', !this.hostedAvailable);
+    e.translateWithSubscription.setAttribute('aria-checked', String(subscription));
+    e.translateWithKeys.setAttribute('aria-checked', String(!subscription));
+    e.ownKeysGroup.classList.toggle('hidden', subscription && this.hostedAvailable);
+  }
+
+  private setTranslateWith(choice: 'subscription' | 'keys') {
+    const e = this.elements;
+    if (choice === 'subscription') {
+      e.translationProvider.value = 'subscription';
+      e.claudeAccess.value = 'subscription';
+    } else {
+      if (e.translationProvider.value === 'subscription') e.translationProvider.value = 'deepl';
+      if (e.claudeAccess.value === 'subscription') e.claudeAccess.value = 'key';
+    }
+    this.updateApiKeyVisibility();
+    this.updateClaudeFields();
+    this.renderTranslateWith();
+    this.renderEngineSummary();
+    void this.saveSettings();
+  }
 
   constructor() {
     this.isActive = false;
@@ -187,7 +302,10 @@ class PopupController {
 
   /** Hides the account section and Subscription options while no hosted service is configured. */
   private setHostedAvailable(available: boolean) {
+    this.hostedAvailable = available;
     document.getElementById('accountSection')?.classList.toggle('hidden', !available);
+    this.elements.accountSummary.classList.toggle('hidden', !available);
+    this.renderTranslateWith();
     for (const select of [this.elements.claudeAccess, this.elements.translationProvider]) {
       for (const option of select.options) if (option.value === 'subscription') option.hidden = !available;
     }
@@ -208,12 +326,17 @@ class PopupController {
       // One subscription per account: upgrades/changes go through Manage subscription.
       e.accountSubscribePro.classList.toggle('hidden', account.active);
       e.accountManage.classList.toggle('hidden', !account.active);
+      e.accountSummaryValue.textContent = account.active
+        ? `${PLAN_LABELS[account.plan] ?? account.plan}, $${account.usageUsd.toFixed(2)} of $${account.budgetUsd.toFixed(2)} used`
+        : `${account.email}, not subscribed`;
       if (!account.active) this.setAccountStatus('Subscribe to translate with the hosted service (no API keys needed).');
       else if (account.exhausted) this.setAccountStatus("This month's allowance is used up - upgrade, or use your own keys until next month.");
       else if (account.warn) this.setAccountStatus("You've used over 80% of this month's allowance.");
       else this.setAccountStatus('');
     }
+    if (!account) e.accountSummaryValue.textContent = 'Sign in to use your subscription';
     this.updateClaudeFields();
+    this.renderEngineSummary();
   }
 
   private async sendCode() {
@@ -307,6 +430,10 @@ class PopupController {
     this.elements.modeSubtitles.classList.toggle('active', subtitles);
     this.elements.audioPanel.classList.toggle('hidden', subtitles);
     this.elements.subtitlePanel.classList.toggle('hidden', !subtitles);
+    this.elements.modeAudio.setAttribute('aria-selected', String(!subtitles));
+    this.elements.modeSubtitles.setAttribute('aria-selected', String(subtitles));
+    this.currentMode = mode;
+    this.renderCaption();
     chrome.storage.local?.set({ popupMode: mode }).catch(() => undefined);
   }
 
@@ -329,17 +456,11 @@ class PopupController {
     this.elements.stopSubtitleMode.classList.toggle('hidden', !running);
     this.elements.startSubtitleMode.classList.toggle('hidden', running || !hasBox);
     this.elements.drawSubtitleBox.textContent = hasBox || running ? 'Redraw box' : 'Draw subtitle box';
-    const status = this.elements.subtitleModeStatus;
-    const text = running
-      ? state === 'paused-ad'
-        ? 'Paused during the ad.'
-        : state === 'loading'
-          ? 'Loading OCR model...'
-          : 'Translating subtitles in the box.'
-      : '';
-    status.textContent = text;
-    status.className = 'status success';
-    status.classList.toggle('hidden', !text);
+    // The caption bar carries the state now.
+    this.hasBox = hasBox;
+    this.subtitleState = running ? (state === 'paused-ad' ? 'paused-ad' : state === 'loading' ? 'loading' : 'running') : 'off';
+    this.elements.subtitleModeStatus.textContent = '';
+    this.renderCaption();
   }
 
   private async sendToTab(message: Record<string, unknown>) {
@@ -424,6 +545,24 @@ class PopupController {
       this.updateApiKeyVisibility();
     });
     this.elements.claudeAccess.addEventListener('change', () => this.updateClaudeFields());
+    this.elements.openSettings.addEventListener('click', () => this.showView('settings'));
+    this.elements.closeSettings.addEventListener('click', () => this.showView('main'));
+    for (const summary of [this.elements.engineSummary, this.elements.accountSummary]) {
+      summary.addEventListener('click', () => this.showView('settings', summary.dataset.section));
+    }
+    this.elements.translateWithSubscription.addEventListener('click', () => this.setTranslateWith('subscription'));
+    this.elements.translateWithKeys.addEventListener('click', () => this.setTranslateWith('keys'));
+    this.elements.themeChoice.addEventListener('change', () => {
+      this.stopTheme();
+      this.stopTheme = applyTheme(document.documentElement, this.elements.themeChoice.value as ThemeChoice);
+    });
+    for (const select of [this.elements.subtitleLanguage, this.elements.sourceLanguage, this.elements.targetLanguage]) {
+      select.addEventListener('change', () => this.renderCaption());
+    }
+    for (const field of [this.elements.translationProvider, this.elements.engineMode, this.elements.claudeModel, this.elements.deeplApiKey,
+      this.elements.googleTranslateApiKey, this.elements.anthropicApiKey, this.elements.claudeGatewayUrl, this.elements.claudeGatewayToken]) {
+      field.addEventListener('change', () => this.renderEngineSummary());
+    }
     this.elements.accountSendCode.addEventListener('click', () => void this.sendCode());
     this.elements.accountSignIn.addEventListener('click', () => void this.signIn());
     this.elements.accountCode.addEventListener('keydown', e => e.key === 'Enter' && void this.signIn());
@@ -501,13 +640,19 @@ class PopupController {
       this.elements.claudeGatewayAuth.value = settings.claudeGatewayAuth;
       this.elements.anthropicApiKey.value = secrets.anthropicApiKey;
       this.elements.claudeGatewayToken.value = secrets.claudeGatewayToken;
+      this.elements.themeChoice.value = settings.theme ?? 'system';
+      this.stopTheme();
+      this.stopTheme = applyTheme(document.documentElement, (settings.theme ?? 'system') as ThemeChoice);
       this.updateApiKeyVisibility();
       this.updateClaudeFields();
+      this.renderTranslateWith();
+      this.renderEngineSummary();
+      this.renderCaption();
       await this.showClaudeError();
 
       this.updateToggleButton();
 
-      this.showStatus('Ready to start subtitles', 'success');
+
     } catch (error) {
       console.error('Failed to load settings:', error);
       this.showStatus('Failed to load settings', 'error');
@@ -544,6 +689,7 @@ class PopupController {
         claudeModel: this.elements.claudeModel.value,
         claudeAccess: this.elements.claudeAccess.value,
         claudeGatewayAuth: this.elements.claudeGatewayAuth.value,
+        theme: this.elements.themeChoice.value,
         anthropicApiKey: this.elements.anthropicApiKey.value,
         claudeGatewayToken: this.elements.claudeGatewayToken.value
       };
@@ -663,6 +809,8 @@ class PopupController {
 
   renderScreenTranslateState(state: 'inactive' | 'armed' | 'ready-to-redraw') {
     this.isScreenTranslating = state !== 'inactive';
+    this.screenState = state;
+    this.renderCaption();
     this.updateScreenTranslateButton();
 
     if (state === 'inactive') {
@@ -673,8 +821,8 @@ class PopupController {
 
     this.elements.screenTranslateStatus.textContent = state === 'armed'
       ? 'Drag a box around text to translate.'
-      : "Click 'Draw New Box' to translate another area.";
-    this.elements.screenTranslateStatus.className = 'status success';
+      : 'Translated. Draw another box to translate more.';
+    this.elements.screenTranslateStatus.className = 'message';
     this.elements.drawNewBoxButton.classList.toggle('hidden', state !== 'ready-to-redraw');
   }
 
@@ -702,25 +850,24 @@ class PopupController {
     const button = this.elements.toggleButton;
 
     if (this.isActive) {
-      button.textContent = 'Stop Subtitles';
+      button.textContent = 'Stop live captions';
       button.classList.add('active');
     } else {
-      button.textContent = 'Start Subtitles';
+      button.textContent = 'Start live captions';
       button.classList.remove('active');
     }
+    this.renderCaption?.();
   }
 
   updateScreenTranslateButton() {
     const button = this.elements.screenTranslateButton;
 
     if (this.isScreenTranslating) {
-      button.textContent = 'Stop Translation';
+      button.textContent = 'Stop translating';
       button.classList.add('active');
-      button.style.background = '#e53e3e';
     } else {
       button.textContent = 'Screen Translate';
       button.classList.remove('active');
-      button.style.background = '#38a169';
     }
   }
 
@@ -728,7 +875,7 @@ class PopupController {
     const statusElement = this.elements.status;
 
     statusElement.textContent = message;
-    statusElement.className = `status ${type}`;
+    statusElement.className = `message ${type}`;
     statusElement.classList.remove('hidden');
 
     setTimeout(() => {

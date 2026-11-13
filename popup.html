@@ -3,221 +3,43 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Auto Subtitle Translator</title>
-    <style>
-        body {
-            width: 320px;
-            min-height: 400px;
-            margin: 0;
-            padding: 16px;
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: #f8f9fa;
-        }
-        
-        .header {
-            text-align: center;
-            margin-bottom: 20px;
-        }
-        
-        .logo {
-            width: 48px;
-            height: 48px;
-            margin: 0 auto 8px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            border-radius: 12px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: white;
-            font-size: 20px;
-        }
-        
-        h1 {
-            margin: 0;
-            font-size: 18px;
-            color: #333;
-        }
-        
-        .toggle-section {
-            margin-bottom: 24px;
-            text-align: center;
-        }
-        
-        .toggle-button {
-            background: #667eea;
-            color: white;
-            border: none;
-            padding: 12px 24px;
-            border-radius: 8px;
-            font-size: 16px;
-            cursor: pointer;
-            transition: all 0.2s;
-            min-width: 120px;
-        }
-        
-        .toggle-button:hover {
-            background: #5a67d8;
-            transform: translateY(-1px);
-        }
-        
-        .toggle-button.active {
-            background: #48bb78;
-        }
-        
-        .toggle-button.active:hover {
-            background: #38a169;
-        }
-        
-        .settings-section {
-            margin-bottom: 20px;
-        }
-        
-        .setting-group {
-            margin-bottom: 16px;
-        }
-        
-        label {
-            display: block;
-            margin-bottom: 4px;
-            font-weight: 500;
-            color: #4a5568;
-            font-size: 14px;
-        }
-        
-        select, input {
-            width: 100%;
-            padding: 8px 12px;
-            border: 1px solid #e2e8f0;
-            border-radius: 6px;
-            font-size: 14px;
-            background: white;
-            box-sizing: border-box;
-        }
-        
-        select:focus, input:focus {
-            outline: none;
-            border-color: #667eea;
-            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
-        }
-        
-        .status {
-            padding: 8px 12px;
-            border-radius: 6px;
-            font-size: 12px;
-            text-align: center;
-            margin-bottom: 16px;
-        }
-        
-        .status.success {
-            background: #f0fff4;
-            color: #38a169;
-            border: 1px solid #9ae6b4;
-        }
-        
-        .status.error {
-            background: #fed7d7;
-            color: #e53e3e;
-            border: 1px solid #feb2b2;
-        }
-        
-        .status.warning {
-            background: #fefcbf;
-            color: #d69e2e;
-            border: 1px solid #faf089;
-        }
-        
-        .footer {
-            text-align: center;
-            font-size: 12px;
-            color: #718096;
-            border-top: 1px solid #e2e8f0;
-            padding-top: 12px;
-            margin-top: 20px;
-        }
-        
-        
-        .mode-switch {
-            display: flex;
-            background: #e2e8f0;
-            border-radius: 8px;
-            padding: 3px;
-            margin-bottom: 16px;
-        }
-
-        .mode-button {
-            flex: 1;
-            border: none;
-            background: transparent;
-            padding: 8px;
-            border-radius: 6px;
-            font-size: 14px;
-            cursor: pointer;
-            color: #4a5568;
-        }
-
-        .mode-button.active {
-            background: white;
-            color: #2d3748;
-            font-weight: 600;
-            box-shadow: 0 1px 2px rgba(0,0,0,0.12);
-        }
-
-        .panel-row {
-            display: flex;
-            gap: 8px;
-            justify-content: center;
-            flex-wrap: wrap;
-        }
-
-        .page-text-section {
-            margin-bottom: 24px;
-            padding-top: 12px;
-            border-top: 1px solid #e2e8f0;
-            text-align: center;
-        }
-
-        .hidden {
-            display: none;
-        }
-
-        .setting-status { font-size: 12px; color: #b91c1c; min-height: 0; margin: 2px 0 6px; }
-        .setting-status:empty { display: none; }
-        .small-button { margin: 4px 4px 0 0; padding: 4px 10px; font-size: 12px; }
-        .account-line { font-size: 13px; margin: 2px 0; }
-        #accountUsageBar { width: 100%; height: 8px; }
-        .account-buttons { margin-top: 6px; }
-        #accountStatus.ok { color: #15803d; }
-        #glossarySection summary { cursor: pointer; font-weight: 600; margin-bottom: 6px; }
-        #glossaryTopic { color: #475569; }
-        .glossary-row { display: grid; grid-template-columns: 1fr 1.4fr auto; gap: 6px; align-items: center; margin: 4px 0; }
-        .glossary-row .glossary-source { font-size: 13px; overflow-wrap: anywhere; }
-        .glossary-row input { min-width: 0; }
-        .glossary-row button { padding: 2px 8px; }
-        .glossary-empty { font-size: 12px; color: #64748b; }
-    </style>
+    <meta name="color-scheme" content="light dark">
+    <title>Subtitle Translator</title>
+    <link rel="stylesheet" href="popup.css">
 </head>
 <body>
-    <div class="header">
-        <div class="logo">🎬</div>
-        <h1>Auto Subtitle Translator</h1>
-    </div>
-    
-    <div id="status" class="status hidden"></div>
-    
-    <div class="mode-switch" role="tablist">
-        <button id="modeAudio" class="mode-button active" role="tab">Audio</button>
-        <button id="modeSubtitles" class="mode-button" role="tab">Subtitles</button>
-    </div>
+<!-- Main view: the everyday actions -->
+<main id="mainView" class="view">
+    <header class="app-header">
+        <svg class="mark" viewBox="0 0 28 20" aria-hidden="true">
+            <rect x="0.5" y="0.5" width="27" height="19" rx="4" class="mark-frame"/>
+            <rect x="5" y="11" width="18" height="4" rx="1.5" class="mark-line"/>
+        </svg>
+        <h1>Subtitle Translator</h1>
+        <button id="openSettings" class="icon-button" type="button" aria-label="Settings" title="Settings">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Zm7.4-2.5.05-1-.05-1 2.1-1.65-2-3.46-2.5 1a7.6 7.6 0 0 0-1.73-1L15 3h-4l-.37 2.39a7.6 7.6 0 0 0-1.73 1l-2.5-1-2 3.46L6.55 11 6.5 12l.05 1-2.1 1.65 2 3.46 2.5-1c.53.41 1.11.75 1.73 1L11 21h4l.37-2.39a7.6 7.6 0 0 0 1.73-1l2.5 1 2-3.46L19.4 13Z"/></svg>
+        </button>
+    </header>
 
-    <!-- Audio mode: live captions from the tab's speech -->
-    <div id="audioPanel" class="toggle-section">
-        <button id="toggleButton" class="toggle-button">Start Subtitles</button>
+    <!-- The current state, drawn like the subtitles this extension puts on videos -->
+    <p id="captionBar" class="caption-bar" role="status" aria-live="polite">Pick a mode to start</p>
+    <div id="status" class="message hidden" role="alert"></div>
+
+    <div class="mode-switch" role="tablist" aria-label="What to translate">
+        <button id="modeSubtitles" class="mode-button" role="tab" type="button">
+            <span class="mode-name">Subtitles</span>
+            <span class="mode-hint">Text in the video</span>
+        </button>
+        <button id="modeAudio" class="mode-button active" role="tab" type="button">
+            <span class="mode-name">Audio</span>
+            <span class="mode-hint">Speech in the tab</span>
+        </button>
     </div>
 
     <!-- Subtitles mode: translate subtitles burned into the video -->
-    <div id="subtitlePanel" class="toggle-section hidden">
-        <div class="setting-group" style="text-align: left;">
-            <label for="subtitleLanguage">Subtitle language:</label>
+    <section id="subtitlePanel" class="panel hidden" aria-label="Subtitles">
+        <label class="row">
+            <span>Subtitles in</span>
             <select id="subtitleLanguage">
                 <option value="ko">Korean</option>
                 <option value="ja">Japanese</option>
@@ -229,55 +51,23 @@
                 <option value="pt">Portuguese</option>
                 <option value="ru">Russian</option>
             </select>
-        </div>
-        <div class="panel-row">
-            <button id="startSubtitleMode" class="toggle-button hidden" style="background: #38a169;">Start (saved box)</button>
-            <button id="drawSubtitleBox" class="toggle-button">Draw subtitle box</button>
-            <button id="stopSubtitleMode" class="toggle-button hidden" style="background: #e53e3e;">Stop</button>
-        </div>
-        <div id="subtitleModeStatus" class="status hidden" style="margin-top: 12px;"></div>
-    </div>
-
-    <!-- Page text: one-shot translation of text under a box (available in both modes) -->
-    <div class="page-text-section">
-        <button id="screenTranslateButton" class="toggle-button" style="background: #38a169;">Screen Translate</button>
-        <div id="screenTranslateStatus" class="status hidden" style="margin-top: 12px;"></div>
-        <button id="drawNewBoxButton" class="toggle-button hidden" style="margin-top: 8px; background: #2196F3;">Draw New Box</button>
-    </div>
-    
-    <div class="settings-section" id="accountSection">
-        <div class="setting-group">
-            <label>Account (hosted translation)</label>
-            <div id="signedOutView">
-                <input type="email" id="accountEmail" placeholder="you@example.com" autocomplete="email">
-                <button id="accountSendCode" type="button" class="small-button">Send sign-in code</button>
-                <div id="accountCodeRow" class="hidden">
-                    <input type="text" id="accountCode" inputmode="numeric" maxlength="6" placeholder="6-digit code" autocomplete="one-time-code">
-                    <button id="accountSignIn" type="button" class="small-button">Sign in</button>
-                </div>
+        </label>
+        <div class="actions">
+            <button id="drawSubtitleBox" class="button primary" type="button">Draw subtitle box</button>
+            <div class="actions-secondary">
+                <button id="startSubtitleMode" class="button hidden" type="button">Use saved box</button>
+                <button id="stopSubtitleMode" class="button danger hidden" type="button">Stop</button>
             </div>
-            <div id="signedInView" class="hidden">
-                <div id="accountEmailShown" class="account-line"></div>
-                <div id="accountPlan" class="account-line"></div>
-                <div id="accountUsage" class="account-line"></div>
-                <progress id="accountUsageBar" max="1" value="0"></progress>
-                <div class="account-buttons">
-                    <button id="accountSubscribeStandard" type="button" class="small-button hidden">Subscribe - Standard $9.99/mo</button>
-                    <button id="accountSubscribePro" type="button" class="small-button hidden">Subscribe - Pro $24.99/mo</button>
-                    <button id="accountManage" type="button" class="small-button hidden">Manage subscription</button>
-                    <button id="accountSignOut" type="button" class="small-button">Sign out</button>
-                </div>
-            </div>
-            <div class="setting-status" id="accountStatus" role="status"></div>
         </div>
-    </div>
+        <div id="subtitleModeStatus" class="message hidden"></div>
+    </section>
 
-    <div class="settings-section">
-        
-        <div class="setting-group">
-            <label for="sourceLanguage">Source Language:</label>
+    <!-- Audio mode: live captions from the tab's speech -->
+    <section id="audioPanel" class="panel" aria-label="Audio">
+        <label class="row">
+            <span>Speech in</span>
             <select id="sourceLanguage">
-                <option value="auto">Auto-detect</option>
+                <option value="auto">Detect automatically</option>
                 <option value="en">English</option>
                 <option value="es">Spanish</option>
                 <option value="fr">French</option>
@@ -291,120 +81,213 @@
                 <option value="hi">Hindi</option>
                 <option value="ru">Russian</option>
             </select>
+        </label>
+        <div class="actions">
+            <button id="toggleButton" class="button primary" type="button">Start live captions</button>
         </div>
-        
-        <div class="setting-group">
-            <label for="targetLanguage">Target Language:</label>
-            <select id="targetLanguage">
-                <option value="en">English</option>
-                <option value="es">Spanish</option>
-                <option value="fr">French</option>
-                <option value="de">German</option>
-                <option value="it">Italian</option>
-                <option value="pt">Portuguese</option>
-                <option value="ja">Japanese</option>
-                <option value="ko">Korean</option>
-                <option value="zh">Chinese</option>
-                <option value="ar">Arabic</option>
-                <option value="hi">Hindi</option>
-                <option value="ru">Russian</option>
-            </select>
+    </section>
+
+    <label class="row target-row">
+        <span>Translate into</span>
+        <select id="targetLanguage">
+            <option value="en">English</option>
+            <option value="es">Spanish</option>
+            <option value="fr">French</option>
+            <option value="de">German</option>
+            <option value="it">Italian</option>
+            <option value="pt">Portuguese</option>
+            <option value="ja">Japanese</option>
+            <option value="ko">Korean</option>
+            <option value="zh">Chinese</option>
+            <option value="ar">Arabic</option>
+            <option value="hi">Hindi</option>
+            <option value="ru">Russian</option>
+        </select>
+    </label>
+
+    <!-- Page text: one-shot translation of text under a box (both modes) -->
+    <section class="page-text" aria-label="Text on this page">
+        <div class="row">
+            <span>Text on this page</span>
+            <button id="screenTranslateButton" class="button" type="button">Screen Translate</button>
         </div>
-        
-        <div class="setting-group">
-            <label for="subtitleStyle">Subtitle Position:</label>
-            <select id="subtitleStyle">
-                <option value="bottom">Bottom</option>
-                <option value="top">Top</option>
-                <option value="center">Center</option>
-            </select>
-        </div>
-        
-        <div class="setting-group">
-            <label for="fontSize">Font Size:</label>
-            <select id="fontSize">
-                <option value="small">Small</option>
-                <option value="medium">Medium</option>
-                <option value="large">Large</option>
-                <option value="x-large">Extra Large</option>
-            </select>
-        </div>
-        
-        <div class="setting-group">
-            <label for="translationProvider">Translation Provider:</label>
-            <select id="translationProvider">
-                <option value="google">Google Translate</option>
-                <option value="deepl">DeepL</option>
-                <option value="subscription">Subscription (signed in)</option>
-            </select>
+        <div id="screenTranslateStatus" class="message hidden"></div>
+        <button id="drawNewBoxButton" class="button hidden" type="button">Draw another box</button>
+    </section>
+
+    <nav class="summaries" aria-label="Setup">
+        <button id="engineSummary" class="summary" type="button" data-section="translationSection">
+            <span class="summary-label">Engine</span>
+            <span class="summary-value" id="engineSummaryValue"></span>
+            <span class="chevron" aria-hidden="true">›</span>
+        </button>
+        <button id="accountSummary" class="summary hidden" type="button" data-section="accountSection">
+            <span class="summary-label">Account</span>
+            <span class="summary-value" id="accountSummaryValue"></span>
+            <span class="chevron" aria-hidden="true">›</span>
+        </button>
+    </nav>
+</main>
+
+<!-- Settings view: setup done once -->
+<section id="settingsView" class="view hidden" aria-label="Settings">
+    <header class="app-header">
+        <button id="closeSettings" class="icon-button back" type="button" aria-label="Back">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15.5 4.5 8 12l7.5 7.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <h1>Settings</h1>
+    </header>
+
+    <section id="translationSection" class="settings-group" aria-labelledby="translationHeading">
+        <h2 id="translationHeading">Translation</h2>
+        <div id="translateWithGroup" class="segmented hidden" role="radiogroup" aria-label="Translate with">
+            <button id="translateWithSubscription" type="button" role="radio" aria-checked="false">My subscription</button>
+            <button id="translateWithKeys" type="button" role="radio" aria-checked="true">My own keys</button>
         </div>
 
-        <div class="setting-group" id="googleApiKeyGroup">
-            <label for="googleTranslateApiKey">Google Translate API Key:</label>
-            <input type="password" id="googleTranslateApiKey" placeholder="Paste your API key">
-        </div>
-
-        <div class="setting-group hidden" id="deeplApiKeyGroup">
-            <label for="deeplApiKey">DeepL API Key:</label>
-            <input type="password" id="deeplApiKey" placeholder="Paste your API key">
-        </div>
-
-        <div class="setting-group">
-            <label for="engineMode">Translation engine:</label>
+        <label class="field">
+            <span>Translation engine</span>
             <select id="engineMode">
                 <option value="fast-then-best">Fast then best (DeepL, then Claude)</option>
                 <option value="fast">Fast only</option>
                 <option value="best">Best only (Claude)</option>
             </select>
+        </label>
+        <div id="ownKeysGroup" class="field-stack">
+            <label class="field">
+                <span>Fast engine</span>
+                <select id="translationProvider">
+                    <option value="google">Google Translate</option>
+                    <option value="deepl">DeepL</option>
+                    <option value="subscription">Subscription (signed in)</option>
+                </select>
+            </label>
+            <label class="field" id="googleApiKeyGroup">
+                <span>Google Translate API key</span>
+                <input type="password" id="googleTranslateApiKey" placeholder="Paste your key" autocomplete="off">
+            </label>
+            <label class="field hidden" id="deeplApiKeyGroup">
+                <span>DeepL API key</span>
+                <input type="password" id="deeplApiKey" placeholder="Paste your key (free keys end in :fx)" autocomplete="off">
+            </label>
+            <label class="field">
+                <span>Claude access</span>
+                <select id="claudeAccess">
+                    <option value="key">Anthropic API key</option>
+                    <option value="gateway">Anthropic-compatible gateway</option>
+                    <option value="subscription">Subscription (signed in)</option>
+                </select>
+            </label>
+            <label class="field" id="anthropicKeyGroup">
+                <span>Anthropic API key</span>
+                <input type="password" id="anthropicApiKey" placeholder="sk-ant-…" autocomplete="off">
+            </label>
+            <div id="claudeGatewayGroup" class="field-stack hidden">
+                <label class="field">
+                    <span>Gateway URL</span>
+                    <input type="url" id="claudeGatewayUrl" placeholder="https://gateway.example.com/anthropic" autocomplete="off">
+                </label>
+                <label class="field">
+                    <span>Gateway token</span>
+                    <input type="password" id="claudeGatewayToken" placeholder="Paste your token" autocomplete="off">
+                </label>
+                <label class="field">
+                    <span>Send token as</span>
+                    <select id="claudeGatewayAuth">
+                        <option value="bearer">Authorization: Bearer</option>
+                        <option value="x-api-key">x-api-key</option>
+                    </select>
+                </label>
+            </div>
         </div>
 
-        <div class="setting-group">
-            <label for="claudeModel">Claude model:</label>
+        <label class="field">
+            <span>Claude model</span>
             <select id="claudeModel">
                 <option value="claude-opus-5-5">Claude Opus 5.5 (best)</option>
                 <option value="claude-sonnet-5-5">Claude Sonnet 5.5 (faster)</option>
                 <option value="claude-haiku-5-5">Claude Haiku 5.5 (cheapest)</option>
             </select>
-        </div>
+        </label>
+        <div id="claudeStatus" class="message bad" role="status"></div>
+    </section>
 
-        <div class="setting-group">
-            <label for="claudeAccess">Claude access:</label>
-            <select id="claudeAccess">
-                <option value="key">Anthropic API key</option>
-                <option value="gateway">Anthropic-compatible gateway</option>
-                <option value="subscription">Subscription (signed in)</option>
+    <section id="accountSection" class="settings-group" aria-labelledby="accountHeading">
+        <h2 id="accountHeading">Account</h2>
+        <div id="signedOutView" class="field-stack">
+            <p class="note">Sign in to translate with the hosted service. No API keys needed.</p>
+            <div class="inline-form">
+                <input type="email" id="accountEmail" placeholder="you@example.com" autocomplete="email" aria-label="Email">
+                <button id="accountSendCode" type="button" class="button">Send code</button>
+            </div>
+            <div id="accountCodeRow" class="inline-form hidden">
+                <input type="text" id="accountCode" inputmode="numeric" maxlength="6" placeholder="6-digit code" autocomplete="one-time-code" aria-label="Sign-in code">
+                <button id="accountSignIn" type="button" class="button primary">Sign in</button>
+            </div>
+        </div>
+        <div id="signedInView" class="field-stack hidden">
+            <div class="account-head">
+                <div>
+                    <div id="accountEmailShown" class="account-email"></div>
+                    <div id="accountPlan" class="note"></div>
+                </div>
+                <button id="accountSignOut" type="button" class="button quiet">Sign out</button>
+            </div>
+            <div id="accountUsage" class="note"></div>
+            <progress id="accountUsageBar" max="1" value="0" aria-label="Allowance used this month"></progress>
+            <div class="actions-secondary">
+                <button id="accountSubscribeStandard" type="button" class="button primary hidden">Subscribe to Standard, $9.99/month</button>
+                <button id="accountSubscribePro" type="button" class="button hidden">Subscribe to Pro, $24.99/month</button>
+                <button id="accountManage" type="button" class="button hidden">Manage subscription</button>
+            </div>
+        </div>
+        <div id="accountStatus" class="message" role="status"></div>
+    </section>
+
+    <section class="settings-group" aria-labelledby="captionsHeading">
+        <h2 id="captionsHeading">Live captions</h2>
+        <label class="row">
+            <span>Position</span>
+            <select id="subtitleStyle">
+                <option value="bottom">Bottom</option>
+                <option value="top">Top</option>
+                <option value="center">Center</option>
             </select>
-        </div>
-
-        <div class="setting-group" id="anthropicKeyGroup">
-            <label for="anthropicApiKey">Anthropic API Key:</label>
-            <input type="password" id="anthropicApiKey" placeholder="sk-ant-...">
-        </div>
-
-        <div class="setting-group hidden" id="claudeGatewayGroup">
-            <label for="claudeGatewayUrl">Gateway URL:</label>
-            <input type="url" id="claudeGatewayUrl" placeholder="https://gateway.example.com/anthropic">
-            <label for="claudeGatewayToken">Gateway token:</label>
-            <input type="password" id="claudeGatewayToken" placeholder="Paste your token">
-            <label for="claudeGatewayAuth">Send token as:</label>
-            <select id="claudeGatewayAuth">
-                <option value="bearer">Authorization: Bearer</option>
-                <option value="x-api-key">x-api-key</option>
+        </label>
+        <label class="row">
+            <span>Text size</span>
+            <select id="fontSize">
+                <option value="small">Small</option>
+                <option value="medium">Medium</option>
+                <option value="large">Large</option>
+                <option value="x-large">Extra large</option>
             </select>
-        </div>
-        <div class="setting-status" id="claudeStatus" role="status"></div>
+        </label>
+    </section>
 
-        <details class="setting-group" id="glossarySection">
-            <summary>Glossary for this video</summary>
-            <div id="glossaryTopic" class="setting-status"></div>
+    <section class="settings-group" aria-labelledby="glossaryHeading">
+        <details id="glossarySection">
+            <summary><h2 id="glossaryHeading">Glossary for this video</h2></summary>
+            <p class="note">Names and terms Claude fixed for this video. Correct one and the lines using it are translated again.</p>
+            <div id="glossaryTopic" class="note"></div>
             <div id="glossaryList"></div>
         </details>
-    </div>
-    
-    <div class="footer">
-        Auto Subtitle Translator v1.0.0
-    </div>
-    
-    <script src="popup.js"></script>
+    </section>
+
+    <section class="settings-group" aria-labelledby="appearanceHeading">
+        <h2 id="appearanceHeading">Appearance</h2>
+        <label class="row">
+            <span>Theme</span>
+            <select id="themeChoice">
+                <option value="system">Match system</option>
+                <option value="light">Light</option>
+                <option value="dark">Dark</option>
+            </select>
+        </label>
+    </section>
+    <p class="version">Subtitle Translator 1.0</p>
+</section>
+
+<script src="popup.js"></script>
 </body>
 </html>

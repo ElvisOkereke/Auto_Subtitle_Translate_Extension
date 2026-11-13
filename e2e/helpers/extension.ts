@@ -22,7 +22,7 @@ export interface ExtensionFixtures {
   openPopup: (target: Page) => Promise<Page>;
   tabIdOf: (target: Page) => Promise<number>;
   /** The hosted proxy (server/) running locally; the extension is pointed at it. Opt-in: only started when a test uses it. */
-  proxy: LocalProxy;
+  localProxy: LocalProxy;
 }
 
 export interface ExtensionOptions {
@@ -134,7 +134,9 @@ export const test = base.extend<ExtensionFixtures & ExtensionOptions, { server: 
     });
   },
 
-  proxy: async ({ server, sw, translationCalls }, use) => {
+  // Not named `proxy`: that is a built-in Playwright option its own fixtures read,
+  // which would start this server (and point the extension at it) in every test.
+  localProxy: async ({ server, sw, translationCalls }, use) => {
     void translationCalls; // mock endpoints configured first
     const proxy = await startLocalProxy(server.url);
     await sw.evaluate(async url => {

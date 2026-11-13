@@ -185,4 +185,61 @@ describe('popup translation engine settings', () => {
     expect(el('accountSubscribeStandard').classList.contains('hidden')).toBe(true);
     expect(el('accountSubscribePro').classList.contains('hidden')).toBe(true);
   });
+
+  it('the settings view opens and closes; the main view is the default', async () => {
+    await loadPopup();
+    expect(el('mainView').classList.contains('hidden')).toBe(false);
+    expect(el('settingsView').classList.contains('hidden')).toBe(true);
+    el('openSettings').click();
+    expect(el('mainView').classList.contains('hidden')).toBe(true);
+    expect(el('settingsView').classList.contains('hidden')).toBe(false);
+    el('closeSettings').click();
+    expect(el('mainView').classList.contains('hidden')).toBe(false);
+  });
+
+  it('Translate with: subscription sets both engines to the subscription and hides key fields; own keys brings them back', async () => {
+    const chromeMock = await loadPopup();
+    chromeMock.runtime.sendMessage.mockImplementation(async (msg: any) =>
+      msg.type === 'ACCOUNT_STATUS' ? { success: true, available: true, signedIn: false } : { success: true }
+    );
+    jest.isolateModules(() => require('../popup'));
+    document.dispatchEvent(new Event('DOMContentLoaded'));
+    await new Promise(r => setTimeout(r, 20));
+    expect(el('translateWithGroup').classList.contains('hidden')).toBe(false);
+    el('translateWithSubscription').click();
+    await new Promise(r => setTimeout(r, 10));
+    expect(el<HTMLSelectElement>('translationProvider').value).toBe('subscription');
+    expect(el<HTMLSelectElement>('claudeAccess').value).toBe('subscription');
+    expect(el('ownKeysGroup').classList.contains('hidden')).toBe(true);
+    expect(savedSettings(chromeMock).at(-1)).toMatchObject({ translationProvider: 'subscription', claudeAccess: 'subscription' });
+    el('translateWithKeys').click();
+    await new Promise(r => setTimeout(r, 10));
+    expect(el('ownKeysGroup').classList.contains('hidden')).toBe(false);
+    expect(el<HTMLSelectElement>('translationProvider').value).toBe('deepl');
+    expect(el<HTMLSelectElement>('claudeAccess').value).toBe('key');
+  });
+
+  it('the theme choice persists and is applied to the page', async () => {
+    const chromeMock = await loadPopup({ theme: 'dark' });
+    expect(document.documentElement.dataset.theme).toBe('dark');
+    el<HTMLSelectElement>('themeChoice').value = 'light';
+    el('themeChoice').dispatchEvent(new Event('change'));
+    await new Promise(r => setTimeout(r, 10));
+    expect(document.documentElement.dataset.theme).toBe('light');
+    expect(savedSettings(chromeMock).at(-1).theme).toBe('light');
+  });
+
+  it('the audio button reads Start live captions / Stop live captions', async () => {
+    await loadPopup();
+    expect(el('toggleButton').textContent).toBe('Start live captions');
+  });
+
+  it('the caption bar shows the current state', async () => {
+    await loadPopup();
+    el('modeSubtitles').click();
+    expect(el('captionBar').textContent).toBe('Draw a box around the subtitles on the video');
+    el('modeAudio').click();
+    expect(el('captionBar').textContent).toBe('Start live captions to translate speech in this tab');
+  });
 });
+

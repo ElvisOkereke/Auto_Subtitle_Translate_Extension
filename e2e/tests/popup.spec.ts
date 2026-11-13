@@ -16,10 +16,41 @@ test.describe('Popup', () => {
     expect(settings).toMatchObject({ targetLanguage: 'en', translationProvider: 'google' });
   });
 
+  for (const theme of ['light', 'dark'] as const) {
+    test(`everyday actions work from the main view (${theme} theme)`, async ({ context, fixtureURL, openPopup, configure }) => {
+      await configure({ translationProvider: 'deepl', deeplApiKey: 'k:fx', anthropicApiKey: 'sk-test', targetLanguage: 'en', translationEngineMode: 'fast-then-best', theme });
+      const page = await context.newPage();
+      await page.goto(`${fixtureURL}/screen-translate.html`);
+      const popup = await openPopup(page);
+      await expect(popup.locator('html')).toHaveAttribute('data-theme', theme);
+      const bg = await popup.evaluate(() => getComputedStyle(document.body).backgroundColor);
+      expect(bg).toBe(theme === 'light' ? 'rgb(243, 244, 247)' : 'rgb(24, 27, 34)');
+      await expect(popup.locator('#mainView')).toBeVisible();
+      await expect(popup.locator('#settingsView')).toBeHidden();
+      await expect(popup.locator('#engineSummaryValue')).toHaveText('DeepL, then Claude Opus 5.5');
+      // Everything everyday is on the main view: modes, languages, start actions, Screen Translate.
+      await popup.click('#modeSubtitles');
+      await expect(popup.locator('#captionBar')).toHaveText('Draw a box around the subtitles on the video');
+      for (const id of ['#subtitleLanguage', '#targetLanguage', '#drawSubtitleBox', '#screenTranslateButton']) await expect(popup.locator(id)).toBeVisible();
+      await popup.screenshot({ path: test.info().outputPath(`popup-main-${theme}.png`), fullPage: true });
+      await popup.click('#modeAudio');
+      await expect(popup.locator('#toggleButton')).toHaveText('Start live captions');
+      await expect(popup.locator('#sourceLanguage')).toBeVisible();
+      await popup.click('#engineSummary'); // opens settings at the translation section
+      await expect(popup.locator('#settingsView')).toBeVisible();
+      await expect(popup.locator('#themeChoice')).toHaveValue(theme);
+      await popup.waitForTimeout(250); // let the slide-in finish
+      await popup.screenshot({ path: test.info().outputPath(`popup-settings-${theme}.png`), fullPage: true });
+      await popup.click('#closeSettings');
+      await expect(popup.locator('#mainView')).toBeVisible();
+    });
+  }
+
   test('engine and Claude settings persist (secrets to local, the rest to sync)', async ({ context, fixtureURL, openPopup, sw }) => {
     const page = await context.newPage();
     await page.goto(`${fixtureURL}/screen-translate.html`);
     const popup = await openPopup(page);
+    await popup.click('#openSettings'); // setup lives in the settings view
     await popup.selectOption('#engineMode', 'best');
     await popup.selectOption('#claudeModel', 'claude-sonnet-5-5');
     await popup.selectOption('#claudeAccess', 'gateway');
@@ -39,6 +70,7 @@ test.describe('Popup', () => {
     await popup.screenshot({ path: test.info().outputPath('popup-engine.png'), fullPage: true });
     await popup.close();
     const again = await openPopup(page);
+    await again.click('#openSettings');
     await expect(again.locator('#claudeModel')).toHaveValue('claude-sonnet-5-5');
     await expect(again.locator('#claudeGatewayToken')).toHaveValue('tok-123');
     await expect(again.locator('#claudeGatewayGroup')).toBeVisible();
@@ -48,6 +80,8 @@ test.describe('Popup', () => {
     const page = await context.newPage();
     await page.goto(`${fixtureURL}/screen-translate.html`);
     const popup = await openPopup(page);
+    await popup.selectOption('#targetLanguage', 'fr'); // on the main view
+    await popup.click('#openSettings');
 
     await expect(popup.locator('#googleApiKeyGroup')).toBeVisible();
     await expect(popup.locator('#deeplApiKeyGroup')).toBeHidden();
@@ -57,7 +91,6 @@ test.describe('Popup', () => {
     await expect(popup.locator('#deeplApiKeyGroup')).toBeVisible();
     await popup.fill('#deeplApiKey', 'abc:fx');
     await popup.locator('#deeplApiKey').blur();
-    await popup.selectOption('#targetLanguage', 'fr');
 
     // API keys are saved to local storage, never sync (sync uploads them to Google).
     await expect

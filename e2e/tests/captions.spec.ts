@@ -22,7 +22,7 @@ const captionLines = (page: Page) => page.locator('#subtitle-overlay-extension .
 async function startCaptions(page: Page, openPopup: (p: Page) => Promise<Page>) {
   const popup = await openPopup(page);
   await popup.click('#toggleButton');
-  await expect(popup.locator('#toggleButton')).toHaveText('Stop Subtitles');
+  await expect(popup.locator('#toggleButton')).toHaveText('Stop live captions');
   return popup;
 }
 
@@ -95,7 +95,7 @@ test('speech in a tab becomes translated subtitles', async ({ context, fixtureUR
   await page.screenshot({ path: test.info().outputPath('subtitle.png') });
 
   await popup.click('#toggleButton');
-  await expect(popup.locator('#toggleButton')).toHaveText('Start Subtitles');
+  await expect(popup.locator('#toggleButton')).toHaveText('Start live captions');
   await expect(overlay(page)).toHaveCount(0);
   await expect.poll(() => offscreenOpen(sw)).toBe(false);
 });
@@ -153,7 +153,7 @@ test('starting captions on another tab stops the first one', async ({ context, f
 
   await expect(overlay(first)).toContainText('Captions stopped');
   const popupForFirst = await openPopup(first);
-  await expect(popupForFirst.locator('#toggleButton')).toHaveText('Start Subtitles');
+  await expect(popupForFirst.locator('#toggleButton')).toHaveText('Start live captions');
   expect(await offscreenOpen(sw)).toBe(true);
 });
 

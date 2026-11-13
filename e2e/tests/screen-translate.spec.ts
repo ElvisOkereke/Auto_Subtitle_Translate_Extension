@@ -23,7 +23,7 @@ test.describe('Screen Translate', () => {
 
     const popup = await openPopup(page);
     await popup.click('#screenTranslateButton');
-    await expect(popup.locator('#screenTranslateButton')).toHaveText('Stop Translation');
+    await expect(popup.locator('#screenTranslateButton')).toHaveText('Stop translating');
     await expect(popup.locator('#screenTranslateStatus')).toHaveText('Drag a box around text to translate.');
 
     await page.bringToFront();
@@ -41,7 +41,7 @@ test.describe('Screen Translate', () => {
     // A freshly opened popup reflects the content script's real state.
     await popup.close();
     const popup2 = await openPopup(page);
-    await expect(popup2.locator('#screenTranslateButton')).toHaveText('Stop Translation');
+    await expect(popup2.locator('#screenTranslateButton')).toHaveText('Stop translating');
     await expect(popup2.locator('#drawNewBoxButton')).toBeVisible();
 
     // Draw New Box re-arms selection; a second drag translates again.
