@@ -8,6 +8,7 @@ import {
   DrawSubtitleBoxMessage,
   ROIData
 } from './types';
+import { ensurePageStyles, themePageElement } from './ui/pageTheme';
 
 function extractTextAtRect(rect: DOMRect): string | null {
   const centerX = rect.x + rect.width / 2;
@@ -261,38 +262,21 @@ class RealTimeTranslator {
     return translation ?? { success: false, error: 'No response from extension background' };
   }
 
+  /** Places an on-page element next to the selected area, kept inside the viewport. */
+  private placeNear(el: HTMLElement, rect: DOMRect, width = 320): void {
+    el.style.top = `${Math.min(rect.bottom + 6, window.innerHeight - 60)}px`;
+    el.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - width - 8))}px`;
+  }
+
   private showLoadingIndicator(rect: DOMRect): void {
+    ensurePageStyles();
     const loader = document.createElement('div');
     loader.id = 'translation-loading';
-    loader.style.cssText = `
-      position: fixed;
-      top: ${rect.bottom + 5}px;
-      left: ${rect.left}px;
-      background: #2196F3;
-      color: white;
-      padding: 5px 10px;
-      border-radius: 3px;
-      z-index: 999998;
-      font-family: system-ui, -apple-system, sans-serif;
-      font-size: 12px;
-      animation: pulse 1s infinite;
-    `;
-    loader.textContent = 'Translating...';
-
-    // Add pulse animation
-    if (!document.querySelector('#translation-animations')) {
-      const style = document.createElement('style');
-      style.id = 'translation-animations';
-      style.textContent = `
-        @keyframes pulse {
-          0% { opacity: 0.6; }
-          50% { opacity: 1; }
-          100% { opacity: 0.6; }
-        }
-      `;
-      document.head.appendChild(style);
-    }
-
+    loader.className = 'ast-ui ast-chip ast-chip--busy';
+    loader.setAttribute('role', 'status');
+    loader.textContent = 'Translating…';
+    this.placeNear(loader, rect, 120);
+    void themePageElement(loader);
     document.body.appendChild(loader);
   }
 
@@ -304,53 +288,47 @@ class RealTimeTranslator {
   }
 
   private showTranslationOverlay(originalText: string, translatedText: string, rect: DOMRect): void {
+    ensurePageStyles();
     const overlayId = `translation-${Date.now()}`;
     const overlay = document.createElement('div');
     overlay.id = overlayId;
+    overlay.className = 'ast-ui ast-panel';
     overlay.setAttribute('data-rtt-owned', '');
-    overlay.style.cssText = `
-      position: fixed;
-      top: ${rect.bottom + 5}px;
-      left: ${rect.left}px;
-      max-width: 300px;
-      background: rgba(0, 0, 0, 0.9);
-      color: white;
-      padding: 10px;
-      border-radius: 5px;
-      z-index: 999997;
-      font-family: system-ui, -apple-system, sans-serif;
-      font-size: 14px;
-      box-shadow: 0 4px 20px rgba(0,0,0,0.3);
-      border: 1px solid #333;
-    `;
+    overlay.setAttribute('role', 'dialog');
+    overlay.setAttribute('aria-label', 'Translation');
+    this.placeNear(overlay, rect);
+    void themePageElement(overlay);
 
-    overlay.innerHTML = `
-      <div style="font-size: 12px; opacity: 0.7; margin-bottom: 5px;">Original:</div>
-      <div data-role="original-text" style="margin-bottom: 8px; font-style: italic;">${this.escapeHtml(originalText)}</div>
-      <div style="font-size: 12px; opacity: 0.7; margin-bottom: 5px;">Translation:</div>
-      <div data-role="translated-text" style="font-weight: bold;">${this.escapeHtml(translatedText)}</div>
-      <div style="text-align: right; margin-top: 8px;">
-        <button id="refresh-${overlayId}" data-rtt-owned title="Refresh" style="
-          background: #2196F3;
-          color: white;
-          border: none;
-          padding: 2px 8px;
-          border-radius: 3px;
-          cursor: pointer;
-          font-size: 11px;
-          margin-right: 4px;
-        ">⟳</button>
-        <button id="close-${overlayId}" data-rtt-owned style="
-          background: #f44336;
-          color: white;
-          border: none;
-          padding: 2px 8px;
-          border-radius: 3px;
-          cursor: pointer;
-          font-size: 11px;
-        ">×</button>
-      </div>
-    `;
+    // Translation first (what the reader came for), the original underneath.
+    const head = document.createElement('div');
+    head.className = 'ast-panel__head';
+    const title = document.createElement('span');
+    title.className = 'ast-panel__title';
+    title.textContent = 'Translation';
+    const refresh = document.createElement('button');
+    refresh.id = `refresh-${overlayId}`;
+    refresh.className = 'ast-icon-button';
+    refresh.setAttribute('data-rtt-owned', '');
+    refresh.title = 'Translate again';
+    refresh.setAttribute('aria-label', 'Translate again');
+    refresh.textContent = '⟳';
+    const close = document.createElement('button');
+    close.id = `close-${overlayId}`;
+    close.className = 'ast-icon-button';
+    close.setAttribute('data-rtt-owned', '');
+    close.title = 'Close';
+    close.setAttribute('aria-label', 'Close');
+    close.textContent = '×';
+    head.append(title, refresh, close);
+    const translated = document.createElement('p');
+    translated.className = 'ast-panel__translated';
+    translated.dataset.role = 'translated-text';
+    translated.textContent = translatedText;
+    const original = document.createElement('p');
+    original.className = 'ast-panel__original';
+    original.dataset.role = 'original-text';
+    original.textContent = originalText;
+    overlay.append(head, translated, original);
 
     document.body.appendChild(overlay);
     this.translationOverlays.set(overlayId, overlay);
@@ -380,8 +358,8 @@ class RealTimeTranslator {
     const overlay = this.translationOverlays.get(overlayId);
     if (!overlay) return;
 
-    const originalDiv = overlay.querySelector<HTMLDivElement>('[data-role="original-text"]');
-    const translatedDiv = overlay.querySelector<HTMLDivElement>('[data-role="translated-text"]');
+    const originalDiv = overlay.querySelector<HTMLElement>('[data-role="original-text"]');
+    const translatedDiv = overlay.querySelector<HTMLElement>('[data-role="translated-text"]');
     if (originalDiv) originalDiv.textContent = originalText;
     if (translatedDiv) translatedDiv.textContent = translatedText;
 
@@ -403,7 +381,7 @@ class RealTimeTranslator {
     const refreshBtn = document.getElementById(`refresh-${overlayId}`) as HTMLButtonElement | null;
     const originalLabel = refreshBtn?.textContent ?? '⟳';
     if (refreshBtn) {
-      refreshBtn.textContent = '...';
+      refreshBtn.textContent = '…';
       refreshBtn.setAttribute('disabled', 'true');
     }
 
@@ -433,19 +411,13 @@ class RealTimeTranslator {
   }
 
   private showError(message: string, rect: DOMRect): void {
+    ensurePageStyles();
     const errorDiv = document.createElement('div');
-    errorDiv.style.cssText = `
-      position: fixed;
-      top: ${rect.bottom + 5}px;
-      left: ${rect.left}px;
-      background: #f44336;
-      color: white;
-      padding: 5px 10px;
-      border-radius: 3px;
-      z-index: 999998;
-      font-family: system-ui, -apple-system, sans-serif;
-      font-size: 12px;
-    `;
+    errorDiv.className = 'ast-ui ast-chip ast-chip--error';
+    errorDiv.setAttribute('data-rtt-owned', '');
+    errorDiv.setAttribute('role', 'alert');
+    this.placeNear(errorDiv, rect, 260);
+    void themePageElement(errorDiv);
     errorDiv.textContent = message;
     document.body.appendChild(errorDiv);
 
@@ -484,11 +456,6 @@ class RealTimeTranslator {
     this.overlayTimers.clear();
   }
 
-  private escapeHtml(text: string): string {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-  }
 }
 
 class ROISelector {
@@ -565,19 +532,14 @@ class ROISelector {
   };
 
   private createSelectionBox(x: number, y: number): void {
+    ensurePageStyles();
     this.selectionBox = document.createElement('div');
     this.selectionBox.setAttribute('data-rtt-owned', '');
-    this.selectionBox.style.cssText = `
-      position: fixed;
-      left: ${x}px;
-      top: ${y}px;
-      width: 0;
-      height: 0;
-      border: 2px dashed #2196F3;
-      background: rgba(33, 150, 243, 0.1);
-      z-index: 999999;
-      pointer-events: none;
-    `;
+    this.selectionBox.className = 'ast-ui ast-selection';
+    this.selectionBox.style.left = `${x}px`;
+    this.selectionBox.style.top = `${y}px`;
+    this.selectionBox.style.width = '0';
+    this.selectionBox.style.height = '0';
     document.body.appendChild(this.selectionBox);
   }
 

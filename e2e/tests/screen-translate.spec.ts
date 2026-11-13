@@ -77,7 +77,7 @@ test.describe('Screen Translate', () => {
     await expect(translated).toHaveText('[EN-US] Premier sous-titre');
 
     await page.evaluate(() => (document.getElementById('video-caption')!.textContent = 'Deuxieme sous-titre'));
-    await overlay(page).locator('button[title="Refresh"]').click();
+    await overlay(page).locator('button[title="Translate again"]').click();
     await expect(translated).toHaveText('[EN-US] Deuxieme sous-titre');
     await expect(overlay(page)).toHaveCount(1);
 
@@ -115,4 +115,28 @@ test.describe('Screen Translate', () => {
     // Auth errors must not be retried with backoff.
     expect(Date.now() - started).toBeLessThan(3000);
   });
+
+  for (const theme of ['light', 'dark'] as const) {
+    test(`the translation panel follows the ${theme} theme`, async ({ context, fixtureURL, openPopup, configure }) => {
+      await configure({ theme });
+      const page = await context.newPage();
+      await page.goto(`${fixtureURL}/screen-translate.html`);
+      const popup = await openPopup(page);
+      await popup.click('#screenTranslateButton');
+      await page.bringToFront();
+      await expect.poll(() => page.evaluate(() => document.body.style.cursor)).toBe('crosshair');
+      await dragOver(page, '#target');
+      const panel = overlay(page);
+      await expect(panel.locator('[data-role="translated-text"]')).toContainText('[EN-US]');
+      await expect(panel).toHaveAttribute('data-ast-theme', theme);
+      const bg = await panel.evaluate(el => getComputedStyle(el).backgroundColor);
+      expect(bg).toBe(theme === 'light' ? 'rgb(255, 255, 255)' : 'rgb(32, 36, 45)');
+      // Translation first, original underneath.
+      const order = await panel.evaluate(el => [...el.querySelectorAll('[data-role]')].map(n => (n as HTMLElement).dataset.role));
+      expect(order).toEqual(['translated-text', 'original-text']);
+      const box = (await panel.boundingBox())!;
+      await page.screenshot({ path: test.info().outputPath(`screen-translate-${theme}.png`), clip: { x: Math.max(0, box.x - 40), y: Math.max(0, box.y - 90), width: 420, height: box.height + 130 } });
+    });
+  }
 });
+
