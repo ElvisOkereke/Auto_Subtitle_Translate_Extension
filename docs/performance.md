@@ -241,3 +241,100 @@ What it shows:
 - Earlier runs counted any line appearing while paused; the `stale` column
   (added later) counts only lines that weren't on screen — "–" where a run
   predates it.
+
+### Step 2 (2026-11-13): reading time, VP9 read-ahead, small-text re-check
+
+The build with the fixes: minimum reading time (video time), WebM/VP9 demuxer
+for read-ahead (plus a picker fix: a 3-frame cluster was decoded in a loop),
+and read-ahead re-reading an open line every 0.75 s. Before → after; live runs
+show two samples (single real-YouTube runs vary a lot).
+
+**Live (real YouTube, sliding window, 2 workers, 15–16 min per sample):**
+
+| run | mode | video | coverage ≥0.5 s | ready | too short | stale while paused | judge |
+|---|---|---|---|---|---|---|---|
+| youtube | fast-then-best | _zIrbXw-SVs (ko) | 17/18 → 14/18 · 17/18 | 95% → 74% · 100% | 13 → 0 · 0 | 0 · 0 | 0.93 · 0.92 |
+| youtube | fast-then-best | ug5IsDJ9bhs (ko) | 10/10 → 10/10 · 9/10 | 90% → 90% · 90% | 9 → 0 · 0 | 0 · 0 | 0.90 · 0.39 |
+| youtube | fast-then-best | x8YWHt8giVY (ko) | 30/34 → 29/32 · 28/31 | 91% → 91% · 90% | 10 → 1 · 1 | 0 · 0 | 0.88 · 0.75 |
+| youtube | fast-then-best | w3RZwfzYEcs (ko) | 35/37 → 35/37 · 34/37 | 95% → 95% · 90% | 21 → 0 · 0 | 0 · 0 | 0.65 · 0.63 |
+| youtube | fast-then-best | Ac-5H_Wgk7I (zh-Hans) | 29/49 → 30/45 · 31/48 | 59% → 96% · 63% | 8 → 0 · 0 | 0 · 0 | 0.83 · 0.87 |
+| youtube | fast-then-best | dcbt04jp7B8 (pt) | 32/40 → 34/40 · 19/40 | 85% → 90% · 76% | 8 → 0 · 0 | 0 · 0 | 0.65 · 0.66 |
+| youtube | fast-then-best | IM-v1aW_AtI (ru) | 21/28 → 14/28 · 10/27 | 82% → 61% · 52% | 7 → 1 · 0 | 0 · 0 | 0.89 · 0.85 |
+| youtube | fast-then-best | N5BAtJ2qMXo (fr) | 27/27 → 14/27 · 18/27 | 89% → 52% · 67% | 7 → 0 · 0 | 0 · 0 | 1.00 · 1.00 |
+| youtube | best | _zIrbXw-SVs (ko) | 17/18 → 17/18 · 17/18 | 95% → 100% · 95% | 13 → 0 · 0 | 0 · 0 | 0.92 · 0.94 |
+| youtube | best | ug5IsDJ9bhs (ko) | 10/10 → 10/10 · 10/10 | 100% → 70% · 90% | 7 → 0 · 0 | 0 · 0 | 0.85 · 1.00 |
+| youtube | best | x8YWHt8giVY (ko) | 26/34 → 29/34 · 28/34 | 91% → 94% · 97% | 8 → 0 · 0 | 0 · 0 | 0.93 · 0.86 |
+| youtube | best | w3RZwfzYEcs (ko) | 33/37 → – · 33/37 | 90% → – · 88% | 19 → – · 0 | – · 0 | – · 0.64 |
+| youtube | best | Ac-5H_Wgk7I (zh-Hans) | 28/47 → 31/49 · 43/47 | 62% → 94% · 96% | 8 → 0 · 0 | 0 · 0 | 0.73 · 0.79 |
+| youtube | best | dcbt04jp7B8 (pt) | 31/40 → 37/40 · 37/40 | 83% → 93% · 95% | 8 → 0 · 0 | 0 · 0 | 0.68 · 0.64 |
+| youtube | best | IM-v1aW_AtI (ru) | 21/28 → 19/27 · 23/28 | 75% → 89% · 86% | 10 → 0 · 2 | 0 · 0 | 0.92 · 0.91 |
+| youtube | best | N5BAtJ2qMXo (fr) | 26/27 → 24/27 · 26/27 | 96% → 85% · 96% | 7 → 0 · 0 | 0 · 0 | 0.98 · 0.96 |
+
+**Local fMP4 (3 workers, 25 min for all 32 local runs):**
+
+| run | mode | video | coverage ≥0.5 s | ready | too short | stale while paused | judge |
+|---|---|---|---|---|---|---|---|
+| local-mp4 | fast-then-best | _zIrbXw-SVs (ko) | 18/18 → 18/18 | 100% → 100% | 12 → 0 | 0 | 0.87 |
+| local-mp4 | fast-then-best | ug5IsDJ9bhs (ko) | 9/9 → 10/10 | 100% → 100% | 7 → 0 | 0 | 0.90 |
+| local-mp4 | fast-then-best | x8YWHt8giVY (ko) | 31/34 → 33/34 | 94% → 97% | 10 → 0 | 0 | 0.89 |
+| local-mp4 | fast-then-best | w3RZwfzYEcs (ko) | 32/38 → 33/37 | 85% → 88% | 24 → 0 | 0 | 0.70 |
+| local-mp4 | fast-then-best | Ac-5H_Wgk7I (zh-Hans) | 28/49 → 39/49 | 55% → 80% | 11 → 0 | 0 | 0.74 |
+| local-mp4 | fast-then-best | dcbt04jp7B8 (pt) | 33/40 → 28/40 | 68% → 71% | 6 → 0 | 0 | 0.79 |
+| local-mp4 | fast-then-best | IM-v1aW_AtI (ru) | 25/28 → 26/28 | 68% → 71% | 9 → 0 | 0 | 0.96 |
+| local-mp4 | fast-then-best | N5BAtJ2qMXo (fr) | 26/27 → 26/27 | 70% → 70% | 9 → 0 | 0 | 0.96 |
+| local-mp4 | best | _zIrbXw-SVs (ko) | 18/18 → 18/18 | 100% → 100% | 12 → 0 | 0 | 0.89 |
+| local-mp4 | best | ug5IsDJ9bhs (ko) | 9/9 → 10/10 | 100% → 100% | 7 → 0 | 0 | 0.75 |
+| local-mp4 | best | x8YWHt8giVY (ko) | 31/34 → 32/34 | 94% → 94% | 10 → 0 | 0 | 0.78 |
+| local-mp4 | best | w3RZwfzYEcs (ko) | 30/38 → 30/37 | 85% → 85% | 21 → 0 | 0 | 0.72 |
+| local-mp4 | best | Ac-5H_Wgk7I (zh-Hans) | 27/49 → 38/49 | 55% → 78% | 10 → 0 | 0 | 0.71 |
+| local-mp4 | best | dcbt04jp7B8 (pt) | 26/40 → 29/40 | 71% → 68% | 7 → 0 | 0 | 0.79 |
+| local-mp4 | best | IM-v1aW_AtI (ru) | 25/28 → 27/28 | 64% → 71% | 9 → 0 | 0 | 0.96 |
+| local-mp4 | best | N5BAtJ2qMXo (fr) | 25/27 → 25/27 | 70% → 70% | 8 → 0 | 0 | 0.96 |
+
+**Local WebM/VP9 (what YouTube serves without AV1):**
+
+| run | mode | video | coverage ≥0.5 s | ready | too short | stale while paused | judge |
+|---|---|---|---|---|---|---|---|
+| local-webm | fast-then-best | _zIrbXw-SVs (ko) | 18/18 → 18/18 | 0% → 100% | 12 → 0 | 0 | 0.79 |
+| local-webm | fast-then-best | ug5IsDJ9bhs (ko) | 9/9 → 10/10 | 0% → 100% | 7 → 0 | 0 | 0.90 |
+| local-webm | fast-then-best | x8YWHt8giVY (ko) | 32/34 → 33/34 | 0% → 97% | 11 → 0 | 0 | 0.86 |
+| local-webm | fast-then-best | w3RZwfzYEcs (ko) | 34/38 → 32/37 | 20% → 85% | 29 → 0 | 0 | 0.78 |
+| local-webm | fast-then-best | Ac-5H_Wgk7I (zh-Hans) | 40/49 → 41/49 | 4% → 76% | 18 → 0 | 0 | 0.71 |
+| local-webm | fast-then-best | dcbt04jp7B8 (pt) | 33/40 → 33/40 | 12% → 73% | 5 → 0 | 0 | 0.71 |
+| local-webm | fast-then-best | IM-v1aW_AtI (ru) | 25/28 → 27/28 | 0% → 79% | 11 → 0 | 0 | 0.96 |
+| local-webm | fast-then-best | N5BAtJ2qMXo (fr) | 26/27 → 26/27 | 0% → 70% | 10 → 0 | 0 | 0.96 |
+| local-webm | best | _zIrbXw-SVs (ko) | 4/18 → 18/18 | 0% → 100% | 4 → 0 | 0 | 0.89 |
+| local-webm | best | ug5IsDJ9bhs (ko) | 1/9 → 10/10 | 0% → 100% | 1 → 0 | 0 | 0.95 |
+| local-webm | best | x8YWHt8giVY (ko) | 12/34 → 33/34 | 0% → 97% | 4 → 0 | 0 | 0.89 |
+| local-webm | best | w3RZwfzYEcs (ko) | 2/38 → 32/37 | 0% → 83% | 4 → 0 | 0 | 0.69 |
+| local-webm | best | Ac-5H_Wgk7I (zh-Hans) | 21/49 → 38/49 | 0% → 78% | 9 → 0 | 0 | 0.71 |
+| local-webm | best | dcbt04jp7B8 (pt) | 22/40 → 31/40 | 0% → 63% | 7 → 0 | 0 | 0.77 |
+| local-webm | best | IM-v1aW_AtI (ru) | 23/28 → 26/28 | 0% → 71% | 12 → 0 | 0 | 0.96 |
+| local-webm | best | N5BAtJ2qMXo (fr) | 14/27 → 25/27 | 0% → 70% | 8 → 0 | 0 | 1.00 |
+
+What changed:
+- **Lines stay readable**: lines leaving before their reading time went from
+  4–29 per video to 0 (0–2 on real YouTube).
+- **VP9 reads ahead**: WebM runs went from 0% of lines ready before they appear
+  to 63–100%. Best mode on WebM no longer collapses: 4→18/18, 1→10/10, 2→32/37,
+  12→33/34.
+- **Small text**: the Chinese football clip went from 27–28 to 38–41 of 49
+  locally, and from 28 to 43 of 47 in one live sample (31 in the other).
+- **Nothing stale while paused** in any run.
+
+Open:
+- **Fast then best, live, full suite**: in both full samples, some runs showed
+  lines that were read and translated but never shown (French 14 and 18 of 27,
+  Russian 14 and 10 of 28), while Best mode stayed at 24–26 and 19–23.
+  Isolated reruns were normal. During heavy runs the Claude gateway answered
+  429 "exceeded your allowed request quota" and the extension cooled Claude
+  down. That explains some variance, but not why DeepL's version wasn't shown;
+  the next step is to log each line's per-tier outcome in the live report.
+- **Not yet at the 97% coverage target** on the hardest videos:
+  - Chinese compilation (fast cuts): 78–84% locally;
+  - Portuguese clip (a match clock inside the subtitle box): 70–85%;
+  - Russian two-line subtitles at 720p: 82–96%;
+  - stylised captions: 87–89%.
+
+  Each needs a targeted change, such as filtering clock text or grouping
+  two-line subtitles.
