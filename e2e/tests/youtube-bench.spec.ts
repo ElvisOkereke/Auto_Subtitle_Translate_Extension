@@ -332,7 +332,12 @@ async function parkAt(page: Page, t: number): Promise<void> {
   await page.waitForSelector('video.html5-main-video', { timeout: 30_000 });
   await waitOutAds(page);
   await page.evaluate(at => {
-    (document.getElementById('movie_player') as any)?.setPlaybackQualityRange?.('hd1080', 'hd1080');
+    const player = document.getElementById('movie_player') as any;
+    player?.setPlaybackQualityRange?.('hd1080', 'hd1080');
+    // YouTube remembers 'muted' per profile and re-applies it over the video element;
+    // a muted tab captures silence (Audio mode), so unmute through the player.
+    player?.unMute?.();
+    player?.setVolume?.(100);
     const v = document.querySelector('video.html5-main-video') as HTMLVideoElement;
     v.pause();
     v.currentTime = at;
@@ -573,7 +578,9 @@ async function audioReport(run: string, mode: EngineMode, video: BenchVideo, cap
 }
 
 test.describe('audio real YouTube', () => {
-  test.use({ profileDir: path.join(CACHE, 'profile-youtube'), headed: true });
+  // Not the signed-in profile: there the speech model never finished loading (see docs/performance.md);
+  // the sliding window is what gets past YouTube's playback limit, not the sign-in.
+  test.use({ profileDir: path.join(CACHE, 'profile-captions-chrome'), headed: true });
   test.skip(browserKind() !== 'chrome', 'real YouTube runs use installed Chrome (E2E_BROWSER=chrome)');
 
   for (const mode of MODES) for (const video of audioVideos) {
@@ -631,6 +638,8 @@ test.describe('audio local copies', () => {
       const toLocal = (t: number) => t - offset;
       await page.evaluate(t => {
         const v = document.querySelector('video')!;
+        v.muted = false; // the fixture page mutes its video; a muted tab captures silence
+        v.volume = 1;
         v.pause();
         v.currentTime = t;
       }, toLocal(video.start));

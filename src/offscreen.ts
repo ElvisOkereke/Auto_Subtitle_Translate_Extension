@@ -35,6 +35,14 @@ function restartWorkerOnCpu(): void {
   getWorker();
 }
 
+/** Capture health, reported to the background every 2 s while capturing (tests read it). */
+const diag = { frames: 0, peakRms: 0, segments: 0, results: 0, emptyResults: 0, errors: 0, lastError: '' };
+let diagTimer: number | null = null;
+function reportDiag(): void {
+  chrome.runtime.sendMessage({ type: 'AUDIO_DIAG', diag: { ...diag, at: Date.now() } }).catch(() => undefined);
+  diag.peakRms = 0;
+}
+
 /** Speech end per segment id (epoch ms), sent with the transcription so the page can place it in video time. */
 const speechEndedAt = new Map<number, number>();
 const SPEECH_END_HANGOVER_MS = 400; // the segmenter's silence hangover (vad.ts)
@@ -42,6 +50,8 @@ const SPEECH_END_HANGOVER_MS = 400; // the segmenter's silence hangover (vad.ts)
 function handleWorkerMessage(event: MessageEvent): void {
   const { type } = event.data;
   if (type === 'result') {
+    if (event.data.text && event.data.text.trim()) diag.results++;
+    else diag.emptyResults++;
     if (event.data.text && event.data.text.trim()) {
       chrome.runtime.sendMessage({
         type: 'TRANSCRIPTION_RESULT',
@@ -62,6 +72,8 @@ function handleWorkerMessage(event: MessageEvent): void {
       percent: event.data.percent
     });
   } else if (type === 'error') {
+    diag.errors++;
+    diag.lastError = String(event.data.message ?? event.data.error ?? '').slice(0, 200);
     if (event.data.loadFailedOn === 'webgpu') {
       console.warn('WebGPU model load failed; restarting the worker on wasm:', event.data.message);
       restartWorkerOnCpu();
@@ -73,6 +85,7 @@ function handleWorkerMessage(event: MessageEvent): void {
 
 async function startCapture(streamId: string, sourceLanguage: string): Promise<void> {
   stopCapture(); // restarting must never leave a second stream running
+  diagTimer = window.setInterval(reportDiag, 2000);
   currentSourceLanguage = sourceLanguage;
   segmenter = new SpeechSegmenter(FRAME_DURATION_MS, DEFAULT_VAD_CONFIG);
 
@@ -102,8 +115,13 @@ async function startCapture(streamId: string, sourceLanguage: string): Promise<v
 
   scriptProcessor.onaudioprocess = (event: AudioProcessingEvent) => {
     const frame = new Float32Array(event.inputBuffer.getChannelData(0));
+    diag.frames++;
+    let sum = 0;
+    for (let i = 0; i < frame.length; i++) sum += frame[i] * frame[i];
+    diag.peakRms = Math.max(diag.peakRms, Math.sqrt(sum / frame.length));
     const segment = segmenter?.pushFrame(frame);
     if (segment) {
+      diag.segments++;
       // The segment closed after the silence hangover (or at the length cap): speech ended about then.
       speechEndedAt.set(segmentCounter + 1, Date.now() - SPEECH_END_HANGOVER_MS);
       if (speechEndedAt.size > 64) speechEndedAt.delete(speechEndedAt.keys().next().value!);
@@ -122,6 +140,8 @@ async function startCapture(streamId: string, sourceLanguage: string): Promise<v
 }
 
 function stopCapture(): void {
+  if (diagTimer !== null) window.clearInterval(diagTimer);
+  diagTimer = null;
   if (scriptProcessor) {
     scriptProcessor.disconnect();
     scriptProcessor.onaudioprocess = null;

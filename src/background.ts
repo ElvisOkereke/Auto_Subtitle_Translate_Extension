@@ -54,8 +54,13 @@ const HANDLED_MESSAGE_TYPES = new Set<string>([
   'EDIT_GLOSSARY_ENTRY',
   'TRANSCRIPTION_RESULT',
   'TRANSCRIPTION_ERROR',
-  'MODEL_LOADING_PROGRESS'
+  'MODEL_LOADING_PROGRESS',
+  'AUDIO_DIAG'
 ]);
+
+/** Latest capture health from the offscreen document (read by tests through the service worker). */
+let audioDiag: unknown = null;
+(self as unknown as { __astAudioDiag?: () => unknown }).__astAudioDiag = () => audioDiag;
 
 // MV3 service workers are killed after ~30s without events, wiping in-memory
 // state - e.g. during a long pause in a video. The captioning tab therefore
@@ -173,6 +178,10 @@ class SubtitleService {
 
         case 'TRANSLATE_SUBTITLE_LINE':
           return await this.translateSubtitleLine(message, sender);
+
+        case 'AUDIO_DIAG':
+          audioDiag = (message as { diag?: unknown }).diag ?? null;
+          return { success: true };
 
         case 'TRANSCRIPTION_RESULT':
           await this.handleTranscriptionResult(message.text, message.timing);

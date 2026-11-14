@@ -20,7 +20,7 @@ const captionRecorder = () => {
   if (w.__captions) return;
   w.__captions = [];
   const video = () => {
-    const all = [...document.querySelectorAll('video')] as HTMLVideoElement[];
+    const all = [...document.querySelectorAll('video, audio')] as HTMLMediaElement[];
     return all.find(v => !v.paused) ?? all[0] ?? null;
   };
   const byId = new Map<string, any>();
