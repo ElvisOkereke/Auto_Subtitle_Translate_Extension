@@ -92,6 +92,10 @@ export interface DisplaySubtitleMessage extends ExtensionMessage {
   timing?: Record<string, number>;
   /** Lets a later UPGRADE_SUBTITLE (Claude's version) replace this caption while it is shown. */
   captionId?: string;
+  /** The transcribed (untranslated) text. */
+  source?: string;
+  /** When the speech of this caption ended (epoch ms, Date.now()): lets the page place it in video time. */
+  speechEndedAt?: number;
 }
 
 export interface UpgradeSubtitleMessage extends ExtensionMessage {

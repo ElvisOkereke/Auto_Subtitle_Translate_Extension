@@ -307,6 +307,8 @@ class SubtitleService {
         text: shown ?? source,
         language: shown ? (await getSettings()).targetLanguage : 'auto',
         captionId,
+        source,
+        speechEndedAt: timing?.speechEndedAt,
         timing: { ...timing, translationMs: performance.now() - translateStartedAt }
       });
       return;
@@ -318,6 +320,8 @@ class SubtitleService {
       text: finalText,
       language,
       captionId,
+      source,
+      speechEndedAt: timing?.speechEndedAt,
       timing: { ...timing, translationMs: performance.now() - translateStartedAt }
     });
     if (plan.best) {

@@ -63,7 +63,7 @@ export class SubtitleOverlay {
 
           case 'DISPLAY_SUBTITLE': {
             const displayMsg = message as DisplaySubtitleMessage;
-            this.displaySubtitle(displayMsg.text, displayMsg.timing, displayMsg.captionId);
+            this.displaySubtitle(displayMsg.text, displayMsg.timing, displayMsg.captionId, displayMsg.source, displayMsg.speechEndedAt);
             break;
           }
 
@@ -183,7 +183,7 @@ export class SubtitleOverlay {
     this.notices = null;
   }
 
-  displaySubtitle(text: string, timing?: Record<string, number>, captionId?: string): void {
+  displaySubtitle(text: string, timing?: Record<string, number>, captionId?: string, source?: string, speechEndedAt?: number): void {
     if (!this.isActive || !text) return;
     if (!this.captions) this.createOverlay();
 
@@ -191,6 +191,8 @@ export class SubtitleOverlay {
     line.className = `subtitle-text ${this.fontSize}`;
     line.textContent = text;
     if (captionId) line.dataset.captionId = captionId;
+    if (source) line.dataset.source = source;
+    if (typeof speechEndedAt === 'number') line.dataset.speechEndedAt = String(speechEndedAt);
     if (timing) {
       // Lets the E2E/perf harness measure pipeline latency.
       line.dataset.timing = JSON.stringify({ ...timing, displayedAt: Date.now() });

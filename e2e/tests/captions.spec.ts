@@ -92,6 +92,10 @@ test('speech in a tab becomes translated subtitles', async ({ context, fixtureUR
   console.log(`caption latency after speech end: ${latencyMs}ms`, timing);
   test.info().annotations.push({ type: 'latencyMs', description: String(latencyMs) });
   expect(latencyMs).toBeLessThan(5000);
+  // Each caption carries what was heard and when that speech ended (the page places it in video time).
+  expect(normalize((await last.getAttribute('data-source')) ?? '')).toContain('the weather is very nice today');
+  const speechEndedAt = Number(await last.getAttribute('data-speech-ended-at'));
+  expect(Math.abs(speechEndedAt - speechEnd)).toBeLessThan(1000);
   await page.screenshot({ path: test.info().outputPath('subtitle.png') });
 
   await popup.click('#toggleButton');

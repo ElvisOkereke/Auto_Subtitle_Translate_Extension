@@ -70,6 +70,14 @@ describe('content script subtitle overlay', () => {
     expect(overlay()!.querySelector('.subtitle-status')!.textContent).toBe('Speech model ready');
   });
 
+  it('caption lines keep their source text and speech-end time as data attributes', async () => {
+    await chromeMock.dispatch({ type: 'TOGGLE_SUBTITLES' });
+    await chromeMock.dispatch({ type: 'DISPLAY_SUBTITLE', text: 'Hello', language: 'en', captionId: 'c1', source: '안녕하세요', speechEndedAt: 1_700_000_000_000 });
+    const line = overlay()!.querySelector<HTMLElement>('.subtitle-text')!;
+    expect(line.dataset.source).toBe('안녕하세요');
+    expect(line.dataset.speechEndedAt).toBe('1700000000000');
+  });
+
   it('an upgrade replaces a displayed caption’s text in place', async () => {
     await chromeMock.dispatch({ type: 'TOGGLE_SUBTITLES' });
     await chromeMock.dispatch({ type: 'DISPLAY_SUBTITLE', text: 'DeepL one', language: 'en', captionId: 'c1' });

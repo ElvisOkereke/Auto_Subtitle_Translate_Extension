@@ -35,6 +35,10 @@ function restartWorkerOnCpu(): void {
   getWorker();
 }
 
+/** Speech end per segment id (epoch ms), sent with the transcription so the page can place it in video time. */
+const speechEndedAt = new Map<number, number>();
+const SPEECH_END_HANGOVER_MS = 400; // the segmenter's silence hangover (vad.ts)
+
 function handleWorkerMessage(event: MessageEvent): void {
   const { type } = event.data;
   if (type === 'result') {
@@ -46,7 +50,8 @@ function handleWorkerMessage(event: MessageEvent): void {
           segmentId: event.data.segmentId,
           audioMs: event.data.audioMs,
           queueMs: event.data.queueMs,
-          inferenceMs: event.data.inferenceMs
+          inferenceMs: event.data.inferenceMs,
+          speechEndedAt: speechEndedAt.get(event.data.segmentId) ?? Date.now()
         }
       });
     }
@@ -99,6 +104,9 @@ async function startCapture(streamId: string, sourceLanguage: string): Promise<v
     const frame = new Float32Array(event.inputBuffer.getChannelData(0));
     const segment = segmenter?.pushFrame(frame);
     if (segment) {
+      // The segment closed after the silence hangover (or at the length cap): speech ended about then.
+      speechEndedAt.set(segmentCounter + 1, Date.now() - SPEECH_END_HANGOVER_MS);
+      if (speechEndedAt.size > 64) speechEndedAt.delete(speechEndedAt.keys().next().value!);
       getWorker().postMessage(
         { type: 'transcribe', audio: segment, language: currentSourceLanguage, segmentId: ++segmentCounter },
         [segment.buffer]
