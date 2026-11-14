@@ -134,7 +134,18 @@ All 29 lines translated; key terms present in 9/11 lines that have them
 (`npm run e2e:judge`) — consistent with the translation benchmark above; the
 translation-engine piece (Claude with context) targets this.
 
-## Real-world benchmark (subtitle mode) — `npm run bench:youtube`, `npm run bench:local`
+## Real-world benchmark (subtitle mode) — `npm run bench:youtube` (live), `npm run bench:local`
+
+Two suites. **Live** (`bench:youtube`, real YouTube) is the one to run for every
+change. **Local** (`bench:local`, the same windows played from downloaded copies)
+is for what live can't show:
+- the VP9/WebM path (YouTube serves AV1 to the test Chrome);
+- full-length runs without YouTube's ~40 s cutoff, ads or reloads (reproducible
+  misses);
+- forcing paths such as Best mode without read-ahead.
+
+It runs on demand. The **baseline** is measured once, on the build before a step's
+fixes, and kept below as the "before" column.
 
 Eight YouTube videos with burned-in subtitles in five languages (Korean League
 of Legends ×4, Chinese football commentary, Portuguese-subtitled football
