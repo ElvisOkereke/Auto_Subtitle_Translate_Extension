@@ -111,6 +111,7 @@ interface RunResult {
   windowHidden?: number;
   /** Real YouTube: distinct video heights seen while playing. */
   videoHeights?: number[];
+  translationErrors?: { count: number; samples: string[] };
 }
 
 async function report(run: string, mode: EngineMode, video: BenchVideo, r: RunResult) {
@@ -166,6 +167,7 @@ async function report(run: string, mode: EngineMode, video: BenchVideo, r: RunRe
     joins: r.joins ?? [],
     windowHidden: r.windowHidden ?? null,
     videoHeights: r.videoHeights ?? null,
+    translationErrors: r.translationErrors ?? null,
     ocrCer: cer,
     stats: r.stats,
   };
@@ -287,6 +289,14 @@ test.skip(!anthropicRelayAvailable(), 'no Anthropic credentials (ANTHROPIC_AUTH_
 // frames in covered windows. Each window scores only the lines of its own piece.
 const SEGMENT_S = 30;
 
+/** Translation failures logged by the content script ("Subtitle translation failed: ..."), per run. */
+let translationErrors: string[] = [];
+const watchConsole = (page: Page) =>
+  page.on('console', m => {
+    const text = m.text();
+    if (/Subtitle translation failed|Read-ahead OCR failed|Claude/.test(text)) translationErrors.push(text.slice(0, 200));
+  });
+
 const SLOT_W = 1280;
 const SLOT_H = 720;
 const slots = new WeakMap<BrowserContext, Page[]>();
@@ -308,6 +318,7 @@ async function slotPage(context: BrowserContext, slot: number, row: number): Pro
   await cdp.send('Browser.setWindowBounds', { windowId, bounds: { left: slot * SLOT_W, top: row * SLOT_H, width: SLOT_W, height: SLOT_H, windowState: 'normal' } });
   await cdp.detach();
   keepPage(page);
+  watchConsole(page);
   pages[slot] = page;
   return page;
 }
@@ -418,6 +429,7 @@ test.describe('real YouTube', () => {
       hiddenPolls = 0;
       playPolls = 0;
       heights = [];
+      translationErrors = [];
       const records: ShownRecord[] = [];
       const timeline = new Map<number, TimelineEntry>();
       const stats: ModeStats[] = [];
@@ -459,6 +471,7 @@ test.describe('real YouTube', () => {
         joins,
         windowHidden: playPolls ? hiddenPolls / playPolls : 0,
         videoHeights: [...new Set(heights)].sort((a, b) => a - b),
+        translationErrors: { count: translationErrors.length, samples: [...new Set(translationErrors)].slice(0, 5) },
       });
       if (retries.length) console.warn(`window setup retried: ${retries.join('; ')}`);
 
