@@ -107,6 +107,10 @@ interface RunResult {
   format: string | null;
   /** Real YouTube: where one sliding window handed over to the next (absolute seconds). */
   joins?: number[];
+  /** Real YouTube: share of playback polls that found the playing window hidden. */
+  windowHidden?: number;
+  /** Real YouTube: distinct video heights seen while playing. */
+  videoHeights?: number[];
 }
 
 async function report(run: string, mode: EngineMode, video: BenchVideo, r: RunResult) {
@@ -160,6 +164,8 @@ async function report(run: string, mode: EngineMode, video: BenchVideo, r: RunRe
     staleWhilePaused: staleWhilePaused(r.records, r.timeline),
     pausedLines: r.records.filter(x => x.pausedAtShow).map(x => ({ lineStart: x.lineStart, shownAt: x.shownAt, text: x.text, source: sourceAt(x.lineStart) ?? null })),
     joins: r.joins ?? [],
+    windowHidden: r.windowHidden ?? null,
+    videoHeights: r.videoHeights ?? null,
     ocrCer: cer,
     stats: r.stats,
   };
@@ -318,6 +324,12 @@ async function parkAt(page: Page, t: number): Promise<void> {
 }
 
 /** Plays one piece [from, to); pauses PAUSE_WALL_MS once when it passes pauseAt. */
+/** Polls of a playing window that found it hidden (covered or in the background): frames stop there. */
+let hiddenPolls = 0;
+let playPolls = 0;
+/** Video heights seen while playing (YouTube may lower the quality). */
+let heights: number[] = [];
+
 async function playSegment(page: Page, from: number, to: number, pauseAt: number): Promise<{ played: number; blocked: string | null }> {
   let paused = !(pauseAt >= from && pauseAt < to);
   let last = from;
@@ -328,8 +340,11 @@ async function playSegment(page: Page, from: number, to: number, pauseAt: number
     await page.waitForTimeout(500);
     const st = await page.evaluate(() => {
       const v = document.querySelector('video')!;
-      return { t: v.currentTime, ad: !!document.querySelector('#movie_player.ad-showing'), error: document.querySelector('.ytp-error')?.textContent?.trim() ?? null };
+      return { t: v.currentTime, h: v.videoHeight, hidden: document.visibilityState !== 'visible', ad: !!document.querySelector('#movie_player.ad-showing'), error: document.querySelector('.ytp-error')?.textContent?.trim() ?? null };
     });
+    playPolls++;
+    heights.push(st.h);
+    if (st.hidden) hiddenPolls++;
     if (st.error) return { played: last - from, blocked: st.error };
     if (st.ad) await waitOutAds(page);
     last = st.t;
@@ -400,6 +415,9 @@ test.describe('real YouTube', () => {
         return page;
       };
 
+      hiddenPolls = 0;
+      playPolls = 0;
+      heights = [];
       const records: ShownRecord[] = [];
       const timeline = new Map<number, TimelineEntry>();
       const stats: ModeStats[] = [];
@@ -439,6 +457,8 @@ test.describe('real YouTube', () => {
         blocked: blocks.length ? blocks.join('; ') : null,
         format,
         joins,
+        windowHidden: playPolls ? hiddenPolls / playPolls : 0,
+        videoHeights: [...new Set(heights)].sort((a, b) => a - b),
       });
       if (retries.length) console.warn(`window setup retried: ${retries.join('; ')}`);
 
