@@ -35,8 +35,19 @@ export function referenceStretch(video: BenchVideo): { id: string; start: number
   return stretch;
 }
 
+/** Where the local benchmark cut of a video starts (absolute seconds), from fetch_video_fixtures.py. */
+export function cutOffset(video: BenchVideo): number {
+  const meta = path.join(__dirname, '..', '.cache', 'videos', `${video.id}.b.json`);
+  return JSON.parse(fs.readFileSync(meta, 'utf8')).offset;
+}
+
 /** Reference lines of the video's window, in absolute video seconds. */
 export function referenceLines(video: BenchVideo): RefLine[] {
+  if (video.mode === 'audio') {
+    // YouTube captions (fetch_caption_reference.py), already in absolute video time.
+    const caps: { lines: { start: number; end: number; text: string }[] } = JSON.parse(fs.readFileSync(path.join(FIXTURES, video.reference!), 'utf8'));
+    return caps.lines.map(l => ({ start: l.start, end: l.end, ko: l.text }));
+  }
   const ref: ReferenceFile = JSON.parse(fs.readFileSync(path.join(FIXTURES, video.reference!), 'utf8'));
   const stretch = referenceStretch(video);
   return ref.lines
