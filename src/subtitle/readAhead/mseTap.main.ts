@@ -4,7 +4,6 @@
 // ahead of playback with WebCodecs and posts crops of the subtitle box to the
 // isolated-world content script. Decision record: docs/superpowers/decisions/2026-11-12-read-ahead.md
 import { TapTrack, TrackRegistry, codecOf, retypeTrack, tappedContainer } from './trackRegistry';
-import { webCodecsVideoCodec } from './webm';
 import { nextFragment } from './fragmentPicker';
 
 interface Box {
