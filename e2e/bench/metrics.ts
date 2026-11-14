@@ -190,14 +190,25 @@ export function shownWhilePaused(shown: ShownRecord[]): number {
 }
 
 /**
- * Share of reference lines whose timeline entry (start within [start - 0.6, end])
- * was translated before the line appeared.
+ * Share of reference lines translated before they appeared. With `matches`, a
+ * matched line uses the timeline entry it was actually shown from (its
+ * lineStart) and an unmatched line counts as not ready; without, the first
+ * entry starting within [start - 0.6, end].
  */
-export function readyBeforeShown(timeline: Array<{ start: number; translatedAt: number | null }>, ref: RefLine[]): number {
+export function readyBeforeShown(
+  timeline: Array<{ start: number; translatedAt: number | null }>,
+  ref: RefLine[],
+  matches?: LineMatch[]
+): number {
   if (!ref.length) return 1;
   let ready = 0;
   for (const line of ref) {
-    const entry = timeline.find(t => t.start >= line.start - 0.6 && t.start <= line.end);
+    const m = matches?.find(x => x.ref === line);
+    const entry = matches
+      ? m?.shown
+        ? timeline.find(t => Math.abs(t.start - m.shown!.lineStart) < 0.002)
+        : undefined
+      : timeline.find(t => t.start >= line.start - 0.6 && t.start <= line.end);
     if (entry && entry.translatedAt !== null && entry.translatedAt < line.start) ready++;
   }
   return ready / ref.length;

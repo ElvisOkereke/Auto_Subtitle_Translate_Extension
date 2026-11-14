@@ -31,6 +31,9 @@ const translation = new TranslationService({
   // The popup shows the last Claude failure (e.g. a rejected key) until Claude works again.
   reportClaudeError: error => (error ? chrome.storage.session.set({ claudeError: error }) : chrome.storage.session.remove('claudeError')),
 });
+// Tests reset in-memory translation state between runs (reachable only from extension contexts).
+(self as unknown as { __astResetTranslationState?: () => void }).__astResetTranslationState = () => translation.reset();
+
 const NO_VIDEO = { videoId: null, url: '', title: '', channel: '', description: '' };
 
 const HANDLED_MESSAGE_TYPES = new Set<string>([

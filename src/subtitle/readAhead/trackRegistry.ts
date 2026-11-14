@@ -2,7 +2,7 @@
 // names, which fMP4 video tracks were seen, and pruning so a long session (or a
 // page that churns players) never accumulates streams it no longer plays.
 import { Fmp4Fragment, Fmp4Init, Fmp4Parser } from './fmp4';
-import { MediaParser, WebmParser } from './webm';
+import { MediaParser, WebmParser, webCodecsVideoCodec } from './webm';
 
 export interface TapTrack<M> {
   mediaSource: M;
@@ -11,6 +11,28 @@ export interface TapTrack<M> {
   init: Fmp4Init | null;
   fragments: Fmp4Fragment[];
   bytes: number;
+}
+
+/** Video container of a SourceBuffer MIME type the tap reads, or null. */
+export function tappedContainer(mime: string): 'mp4' | 'webm' | null {
+  return (mime.match(/^video\/(mp4|webm)/i)?.[1].toLowerCase() as 'mp4' | 'webm' | undefined) ?? null;
+}
+
+/** WebCodecs codec string from a SourceBuffer MIME type. */
+export const codecOf = (mime: string) => webCodecsVideoCodec(mime.match(/codecs="?([^",]+)/i)?.[1] ?? '');
+
+/**
+ * SourceBuffer.changeType(): the next segments may be another container and
+ * codec. The parser follows the new container and what the old one parsed is
+ * dropped (it can't be decoded with the new configuration).
+ */
+export function retypeTrack<M extends object>(track: TapTrack<M>, mime: string): void {
+  const container = tappedContainer(mime) ?? 'mp4';
+  track.parser = container === 'webm' ? new WebmParser() : new Fmp4Parser();
+  track.codec = codecOf(mime);
+  track.init = null;
+  track.fragments = [];
+  track.bytes = 0;
 }
 
 export class TrackRegistry<M extends object> {
@@ -47,6 +69,11 @@ export class TrackRegistry<M extends object> {
 
   removeTrack(track: TapTrack<M>): void {
     this.tracks = this.tracks.filter(t => t !== track);
+  }
+
+  /** Puts back a track removed while its codec was unsupported (changeType made it decodable). */
+  restoreTrack(mediaSource: M, track: TapTrack<M>): void {
+    if (track.mediaSource === mediaSource && !this.tracks.includes(track)) this.tracks.push(track);
   }
 
   /** 'sourceclose': the MediaSource is detached for good. */

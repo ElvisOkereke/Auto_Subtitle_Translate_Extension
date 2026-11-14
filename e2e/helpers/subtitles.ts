@@ -183,5 +183,7 @@ export async function clearTranslationState(sw: { evaluate: (fn: () => Promise<u
     const all = await chrome.storage.local.get(null);
     const keys = Object.keys(all).filter(k => k.startsWith('glossary:') || k === 'translationUsage');
     if (keys.length) await chrome.storage.local.remove(keys);
+    // In-memory state too (topic summaries, Claude cooldown): a reused browser keeps its service worker.
+    (self as unknown as { __astResetTranslationState?: () => void }).__astResetTranslationState?.();
   });
 }

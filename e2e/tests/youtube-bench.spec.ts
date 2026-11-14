@@ -128,13 +128,14 @@ async function report(run: string, mode: EngineMode, video: BenchVideo, r: RunRe
   const offsets = matched.map(m => m.shown!.lineStart - m.ref.start).sort((a, b) => a - b);
   // Lines not ready in time: how long after the subtitle appeared the translation showed.
   const waits = matched.map(m => m.shown!.shownAt - m.ref.start).filter(w => w > 0.05).sort((a, b) => a - b);
-  const entryFor = (line: { start: number; end: number }) => r.timeline.find(t => t.start >= line.start - 0.6 && t.start <= line.end);
-  const claudeReady = ref.filter(l => {
-    const e = entryFor(l);
-    return e?.betterAt !== null && e?.betterAt !== undefined && e.betterAt < l.start;
+  // The timeline entry a shown line actually came from (not just any entry in its window).
+  const entryOf = (m: (typeof matches)[number]) => (m.shown ? r.timeline.find(t => Math.abs(t.start - m.shown!.lineStart) < 0.002) : undefined);
+  const claudeReady = matches.filter(m => {
+    const e = entryOf(m);
+    return e?.betterAt !== null && e?.betterAt !== undefined && e.betterAt < m.ref.start;
   }).length;
   const pairs = matched.flatMap(m => {
-    const e = entryFor(m.ref);
+    const e = entryOf(m);
     return e?.translation ? [{ ko: m.ref.ko, en: e.translation, reference: m.ref.en }] : [];
   });
   const out = {
@@ -152,7 +153,7 @@ async function report(run: string, mode: EngineMode, video: BenchVideo, r: RunRe
     missesBySize: missesBySize(matches),
     misses: matches.filter(m => !m.shown).map(m => `${m.ref.start.toFixed(2)}-${m.ref.end.toFixed(2)} ${m.ref.ko}`),
     missCauses: classifyMisses(matches, r.timeline, r.records),
-    readyBeforeShown: readyBeforeShown(r.timeline, ref),
+    readyBeforeShown: readyBeforeShown(r.timeline, ref, matches),
     claudeReadyBeforeShown: ref.length ? claudeReady / ref.length : null,
     waitP50: waits.length ? waits[Math.floor(waits.length / 2)] : 0,
     waitP90: waits.length ? waits[Math.floor(waits.length * 0.9)] : 0,

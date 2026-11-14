@@ -140,6 +140,20 @@ describe('TranslationService', () => {
     expect(f.topicCalls).toBe(1);
   });
 
+  it('reset() forgets per-video topics and the Claude cooldown (test runs start from the same state)', async () => {
+    const f = fakes();
+    await f.service.translateLine(request());
+    expect(f.topicCalls).toBe(1);
+    f.setClaudeFailure(new APIError('rate limited', 429));
+    await f.service.translateLine(request({ text: 'a' }));
+    f.setClaudeFailure(null);
+    // What clearTranslationState does: stored glossary/topic state gone, then the in-memory reset.
+    for (const k of Object.keys(f.area.data)) if (k.startsWith('glossary:')) delete f.area.data[k];
+    f.service.reset();
+    expect((await f.service.translateLine(request({ text: 'b' }))).engine).toBe('claude'); // no cooldown left
+    expect(f.topicCalls).toBe(2); // the topic is summarised again (not served from memory)
+  });
+
   it('read-ahead lines are batched; a live line is not held for the batch window', async () => {
     const f = fakes();
     await f.service.translateLine(request({ text: 'warm-up' })); // topic step done

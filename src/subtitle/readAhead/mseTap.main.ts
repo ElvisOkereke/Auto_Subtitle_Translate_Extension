@@ -3,7 +3,7 @@
 // SourceBuffers and, when subtitle mode asks for it, decodes those fragments
 // ahead of playback with WebCodecs and posts crops of the subtitle box to the
 // isolated-world content script. Decision record: docs/superpowers/decisions/2026-11-12-read-ahead.md
-import { TapTrack, TrackRegistry } from './trackRegistry';
+import { TapTrack, TrackRegistry, codecOf, retypeTrack, tappedContainer } from './trackRegistry';
 import { webCodecsVideoCodec } from './webm';
 import { nextFragment } from './fragmentPicker';
 
@@ -45,9 +45,27 @@ const DISCONTINUITY_SECONDS = 0.5;
   const sbTracks = new WeakMap<SourceBuffer, Track>();
   const disabled = new WeakSet<Track>();
   function disable(track: Track): void {
+    if (disabled.has(track)) return;
     disabled.add(track);
     registry.removeTrack(track);
     stats.unsupported++;
+  }
+
+  /** (Re)checks that WebCodecs can decode the track's codec; turns read-ahead off or back on for it. */
+  function checkSupport(ms: MediaSource, track: Track): void {
+    if (typeof VideoDecoder === 'undefined' || !track.codec) {
+      disable(track);
+      return;
+    }
+    VideoDecoder.isConfigSupported({ codec: track.codec })
+      .then(r => {
+        if (!r.supported) disable(track);
+        else if (disabled.has(track)) {
+          disabled.delete(track);
+          registry.restoreTrack(ms, track);
+        }
+      })
+      .catch(() => disable(track));
   }
   const watched = new WeakSet<MediaSource>();
 
@@ -61,18 +79,14 @@ const DISCONTINUITY_SECONDS = 0.5;
   const origAdd = MediaSource.prototype.addSourceBuffer;
   MediaSource.prototype.addSourceBuffer = function (this: MediaSource, mime: string) {
     const sb = origAdd.call(this, mime);
-    const container = mime.match(/^video\/(mp4|webm)/i)?.[1].toLowerCase() as 'mp4' | 'webm' | undefined;
+    const container = tappedContainer(mime);
     if (container) {
-      const codec = webCodecsVideoCodec(mime.match(/codecs="?([^",]+)/i)?.[1] ?? '');
+      const codec = codecOf(mime);
       const track = registry.addTrack(this, codec, container);
       sbTracks.set(sb, track);
       // A codec WebCodecs can't decode here leaves read-ahead off for this track
       // (the live path carries the experience); nothing is thrown into the page.
-      if (typeof VideoDecoder === 'undefined') disable(track);
-      else
-        VideoDecoder.isConfigSupported({ codec })
-          .then(r => (r.supported ? undefined : disable(track)))
-          .catch(() => disable(track));
+      checkSupport(this, track);
       if (!watched.has(this)) {
         watched.add(this);
         this.addEventListener('sourceclose', event => registry.closeMediaSource(event.target as MediaSource));
@@ -87,8 +101,10 @@ const DISCONTINUITY_SECONDS = 0.5;
       if (typeof sb.changeType === 'function') {
         const changeType = sb.changeType.bind(sb);
         sb.changeType = (type: string) => {
-          track.parser.reset();
-          track.codec = webCodecsVideoCodec(type.match(/codecs="?([^",]+)/i)?.[1] ?? track.codec);
+          // The next segments may be another container/codec: new parser, old data dropped, support re-checked.
+          retypeTrack(track, type);
+          if (!tappedContainer(type)) disable(track);
+          else checkSupport(this, track);
           return changeType(type);
         };
       }

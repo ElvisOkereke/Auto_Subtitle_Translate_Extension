@@ -1,4 +1,7 @@
 import fs from 'node:fs';
+import { retypeTrack } from '../trackRegistry';
+import { WebmParser } from '../webm';
+import { Fmp4Parser } from '../fmp4';
 import path from 'node:path';
 import { TrackRegistry } from '../trackRegistry';
 
@@ -72,5 +75,33 @@ describe('manifest', () => {
     expect(tap.world).toBe('MAIN');
     expect(tap.matches).not.toContain('<all_urls>');
     expect(tap.matches).toEqual(['*://*.youtube.com/*', 'http://127.0.0.1/*', 'http://localhost/*']);
+  });
+});
+
+describe('retypeTrack (SourceBuffer.changeType)', () => {
+  it('switches the parser to the new container and drops what the old one parsed', () => {
+    const r = new TrackRegistry<object>();
+    const t = r.addTrack({}, 'av01.0.04M.08', 'mp4');
+    t.init = { timescale: 1, configBox: null, description: null, width: 1, height: 1 };
+    t.fragments.push({ start: 0, samples: [] } as any);
+    t.bytes = 10;
+    retypeTrack(t, 'video/webm; codecs="vp9"');
+    expect(t.parser).toBeInstanceOf(WebmParser);
+    expect(t.codec).toBe('vp09.00.10.08');
+    expect({ init: t.init, fragments: t.fragments.length, bytes: t.bytes }).toEqual({ init: null, fragments: 0, bytes: 0 });
+    retypeTrack(t, 'video/mp4; codecs="av01.0.08M.08"');
+    expect(t.parser).toBeInstanceOf(Fmp4Parser);
+    expect(t.codec).toBe('av01.0.08M.08');
+  });
+
+  it('a removed track can be restored once (no duplicates)', () => {
+    const r = new TrackRegistry<object>();
+    const m = {};
+    const t = r.addTrack(m, 'vp9', 'webm');
+    r.removeTrack(t);
+    expect(r.trackCount).toBe(0);
+    r.restoreTrack(m, t);
+    r.restoreTrack(m, t);
+    expect(r.trackCount).toBe(1);
   });
 });

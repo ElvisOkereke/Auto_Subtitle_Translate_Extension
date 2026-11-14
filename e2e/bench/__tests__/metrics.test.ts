@@ -125,6 +125,16 @@ describe('benchmark metrics', () => {
     expect(out.examples.map(e => e.cause)).toEqual(['not-read', 'read-not-shown', 'misread']);
   });
 
+  it('readiness uses the entry the shown line came from, not just any entry in the window', () => {
+    const refs: RefLine[] = [{ start: 10, end: 12, ko: '정확한문장' }];
+    const timeline = [
+      { start: 9.6, translatedAt: 5 }, // a misread fragment, translated early
+      { start: 10.1, translatedAt: 10.5 }, // the line actually shown, translated late
+    ];
+    const shown = [rec({ lineStart: 10.1, shownAt: 10.5, text: '정확한문장' })];
+    expect(readyBeforeShown(timeline, refs, matchLines(refs, shown))).toBe(0);
+  });
+
   it('ratio of reference lines translated before they appeared', () => {
     const refs: RefLine[] = [
       { start: 10, end: 11, ko: '가' },

@@ -135,6 +135,8 @@ export const test = base.extend<ExtensionFixtures & ExtensionOptions, { server: 
     const poolKey = persistent ?? `temp-${testInfo.parallelIndex}`;
     const reused = reuseBrowser ? browserPool.get(poolKey) : undefined;
     if (reused && reused.context.browser()?.isConnected() !== false) {
+      // The MV3 worker may have gone idle since the last test: wake it before use.
+      await extensionWorkerStarts(reused.context, extensionId);
       const logs: string[] = [];
       const onConsole = (m: any) => logs.push(`[${m.page()?.url() ?? 'worker'}] ${m.type()}: ${m.text()}`);
       reused.context.on('console', onConsole);
