@@ -132,40 +132,35 @@ YouTube / any <video> page
 ## Status (November 2026)
 
 **Done and verified**
-- Subtitles mode with read-ahead
+- Subtitles mode with read-ahead, now on both YouTube video formats (AV1/MP4
+  and VP9/WebM)
+- Translated lines stay up long enough to read: at least 1.5 s, longer for
+  long lines, counted in video time so pausing freezes them, and a line never
+  lingers over the next subtitle
 - Audio mode
 - Screen Translate
 - Context-aware Claude translation with glossary
 - Hosted subscription service (built and tested locally)
 - Redesigned popup with light and dark themes
+- **Real-world benchmark:**
+  - 8 YouTube videos with burned-in subtitles in 5 languages (Korean, Chinese,
+    Portuguese, Russian, French), covering League, football and TV drama;
+  - reference subtitles checked frame by frame;
+  - runs on real YouTube as a sliding window (YouTube stops automated playback
+    after ~40 s), with 2–3 parallel workers, using real DeepL and Claude.
 
-**In progress: real-world sync and benchmarks**
-(spec: `docs/superpowers/specs/2026-11-13-real-world-sync-readahead-design.md`)
-- **Real-YouTube benchmark:** a fixed set of 8 videos in 5 subtitle languages
-  (Korean, Chinese, Portuguese, Russian, French), covering League, football
-  and TV drama. It runs on real YouTube as a sliding window of 30 s pieces
-  (YouTube stops automated playback after ~40 s), plus full-length local
-  copies. Real DeepL and Claude are used in all three engine modes.
-- **Metrics:**
-  - lines missed, by duration and text size;
-  - share of lines ready before they appear;
-  - time on screen against a reading-time minimum;
-  - lines shown while paused;
-  - OCR error;
-  - Claude-judged quality.
-- **Baseline findings:**
-  - Translated lines left the screen as soon as the source subtitle did, so
-    quick lines were hard to read.
-  - Read-ahead didn't run for YouTube's VP9/WebM format.
-  - Some fast or stylised lines were missed.
-  - Best mode (Claude only) was ready as often as Fast mode, with much higher
-    quality.
-- **Changes under way:**
-  - a minimum reading time counted in video time;
-  - a WebM/VP9 demuxer so read-ahead works on every YouTube format;
-  - fixes for missed lines, driven by the benchmark data.
+  Results (`docs/performance.md`):
+  - lines leaving the screen before they could be read went from a third to a
+    half of all lines to none;
+  - lines ready before they appear went from 0% to up to 100% on VP9;
+  - small Chinese subtitles went from 28 to 43 of 47 lines on real YouTube.
 
 **Next**
+- **Remaining misses:** subtitles that fall short of the 97% coverage target on
+  the hardest videos (fast-cut compilations, a match clock inside the subtitle
+  box, two-line subtitles at 720p, stylised captions), and an open
+  investigation into occasional undisplayed lines in Fast then Best mode on
+  real YouTube.
 - **Audio mode read-ahead:** transcribe YouTube's buffered audio ahead of
   playback, so captions are timed to the video and follow pause and seek.
 - **Automatic subtitle detection,** so no box has to be drawn.
