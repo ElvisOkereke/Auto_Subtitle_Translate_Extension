@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import type { BrowserContext, Page } from '@playwright/test';
+import type { BrowserContext, Page, Worker } from '@playwright/test';
 import { test, expect, keepPage } from '../helpers/extension';
 import { CACHE, ROOT } from '../helpers/paths';
 import Anthropic from '@anthropic-ai/sdk';
@@ -11,11 +11,15 @@ import { anthropicRelayAvailable, type FixtureServer } from '../helpers/server';
 import { astTest } from '../helpers/bridge';
 import { clearTranslationState, dragBox, modeStats, recordOverlay, recordOverlayOnEveryLoad, shownRecords, type ModeStats } from '../helpers/subtitles';
 import { recordSourceBufferTypes, sourceBufferTypes, waitOutAds } from '../helpers/youtube';
-import { benchVideos, referenceLines, referenceStretch, type BenchVideo } from '../bench/videos';
+import { benchVideos, cutOffset, referenceLines, referenceStretch, type BenchVideo } from '../bench/videos';
+import { recordCaptions, recordCaptionsOnEveryLoad, shownCaptions, type CaptionRecord } from '../helpers/captions';
 import {
   coverageByDuration,
   matchLines,
   classifyMisses,
+  captionDelays,
+  transcriptCer,
+  wordsCovered,
   missBuckets,
   missesBySize,
   readyBeforeShown,
@@ -513,5 +517,129 @@ test.describe('local copies', () => {
         expect(out.staleWhilePaused, 'a line that was not on screen appeared while the video was paused').toBe(0);
       });
     }
+  }
+});
+
+// ---- Audio mode (live captions from the tab's sound) ----
+
+const audioVideos = benchVideos.filter(v => v.mode === 'audio' && v.reference);
+
+/** Turns Audio mode on in a tab (what the popup's Start live captions does). */
+async function startAudioMode(sw: Worker, page: Page, tabIdOf: (p: Page) => Promise<number>): Promise<void> {
+  const tabId = await tabIdOf(page);
+  await expect
+    .poll(
+      async () => {
+        const state = (await sw.evaluate(id => chrome.tabs.sendMessage(id, { type: 'GET_SUBTITLE_STATE' }).catch(() => null), tabId)) as any;
+        if (state?.active) return true;
+        await sw.evaluate(id => chrome.tabs.sendMessage(id, { type: 'TOGGLE_SUBTITLES' }).catch(() => null), tabId);
+        return false;
+      },
+      { timeout: 60_000, intervals: [1000, 2000, 3000] }
+    )
+    .toBe(true);
+}
+
+async function audioReport(run: string, mode: EngineMode, video: BenchVideo, captions: CaptionRecord[], played: number, extra: Record<string, unknown> = {}) {
+  const window: [number, number] = [video.start, video.start + Math.min(video.duration, played)];
+  const ref = referenceLines(video).filter(l => l.start >= window[0] && l.end <= window[1]);
+  const delays = captionDelays(ref, captions);
+  const pairs = captions.filter(c => c.source && c.text && c.text !== c.source).slice(0, 40).map(c => ({ ko: c.source, en: c.text }));
+  const out = {
+    id: video.id,
+    run,
+    mode,
+    label: LABEL,
+    kind: 'audio',
+    played,
+    captions: captions.length,
+    referenceLines: ref.length,
+    transcriptCer: transcriptCer(ref, captions, window),
+    wordsCovered: wordsCovered(ref, captions),
+    delayFromSpeechEndP50: delays.fromSpeechEndP50,
+    delayFromSpeechEndP90: delays.fromSpeechEndP90,
+    delaysMatched: delays.matched,
+    timeOnScreen: timeOnScreen(captions),
+    shownWhilePaused: shownWhilePaused(captions),
+    upgradesOnScreen: captions.filter(c => c.quality === 'better').length,
+    judgeScore: await judge(video, pairs),
+    sample: pairs.slice(0, 5),
+    ...extra,
+  };
+  fs.mkdirSync(OUT, { recursive: true });
+  fs.writeFileSync(path.join(OUT, `audio-${run}-${mode}-${video.id}.json`), JSON.stringify(out, null, 2));
+  console.log(JSON.stringify({ ...out, sample: undefined }));
+  return out;
+}
+
+test.describe('audio real YouTube', () => {
+  test.use({ profileDir: path.join(CACHE, 'profile-youtube'), headed: true });
+  test.skip(browserKind() !== 'chrome', 'real YouTube runs use installed Chrome (E2E_BROWSER=chrome)');
+
+  for (const mode of MODES) for (const video of audioVideos) {
+    test(`audio benchmark ${video.id} [${mode}]`, async ({ context, configure, sw, server, tabIdOf }, testInfo) => {
+      test.setTimeout(900_000);
+      await configure({ ...engineSettings(mode, server), sourceLanguage: video.lang });
+      await clearTranslationState(sw);
+      await recordCaptionsOnEveryLoad(context);
+      const row = testInfo.parallelIndex % 2;
+      const pieces = Math.ceil(video.duration / SEGMENT_S);
+      const from = (k: number) => video.start + k * SEGMENT_S;
+      const to = (k: number) => Math.min(video.start + video.duration, from(k + 1));
+      const prepare = async (k: number) => {
+        const page = await slotPage(context, k % 2, row);
+        await page.goto(`https://www.youtube.com/watch?v=${video.id}&t=${Math.floor(from(k))}s`);
+        await parkAt(page, from(k));
+        return page;
+      };
+      const captions: CaptionRecord[] = [];
+      let played = 0;
+      let page = await prepare(0);
+      let pending: Promise<Page> | null = pieces > 1 ? prepare(1) : null;
+      for (let k = 0; k < pieces; k++) {
+        // One tab captures at a time: captions start in this window at the hand-over.
+        await startAudioMode(sw, page, tabIdOf);
+        const r = await playSegment(page, from(k), to(k), video.start + PAUSE_AFTER_S);
+        played += r.played;
+        await page.waitForTimeout(4000); // the last phrase's caption arrives after its speech
+        captions.push(...(await shownCaptions(page)).filter(c => c.shownAt >= from(k) && c.shownAt < to(k) + 4));
+        if (k + 1 < pieces) {
+          const next = await pending!;
+          await page.goto('about:blank');
+          page = next;
+          pending = k + 2 < pieces ? prepare(k + 2) : null;
+        }
+      }
+      await page.goto('about:blank');
+      const out = await audioReport('youtube', mode, video, captions, played);
+      expect(out.captions, 'no captions appeared').toBeGreaterThan(0);
+    });
+  }
+});
+
+test.describe('audio local copies', () => {
+  for (const mode of MODES) for (const video of audioVideos) {
+    test(`audio benchmark ${video.id} (local) [${mode}]`, async ({ context, fixtureURL, configure, sw, server, tabIdOf }) => {
+      test.setTimeout(600_000);
+      const offset = cutOffset(video);
+      await configure({ ...engineSettings(mode, server), sourceLanguage: video.lang });
+      await clearTranslationState(sw);
+      const page = await context.newPage();
+      await page.goto(`${fixtureURL}/video-subs.html?v=${video.id}&file=${encodeURIComponent(video.id)}&stretch=b`);
+      await page.waitForFunction(() => (window as any).__fixture.video.readyState >= 1);
+      await recordCaptions(page);
+      const toLocal = (t: number) => t - offset;
+      await page.evaluate(t => {
+        const v = document.querySelector('video')!;
+        v.pause();
+        v.currentTime = t;
+      }, toLocal(video.start));
+      await startAudioMode(sw, page, tabIdOf);
+      const { played } = await playWindow(page, video, toLocal);
+      await page.waitForTimeout(4000);
+      const captions = (await shownCaptions(page)).map(c => ({ ...c, shownAt: c.shownAt + offset, lineStart: c.lineStart + offset, hiddenAt: c.hiddenAt === null ? null : c.hiddenAt + offset }));
+      const out = await audioReport('local', mode, video, captions, played);
+      expect(out.captions, 'no captions appeared').toBeGreaterThan(0);
+    });
   }
 });

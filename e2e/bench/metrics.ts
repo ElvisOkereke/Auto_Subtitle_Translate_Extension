@@ -213,3 +213,82 @@ export function readyBeforeShown(
   }
   return ready / ref.length;
 }
+
+// ---- audio captions ----
+
+const chars = (s: string) => [...stripTag(s).replace(/[\s.,!?¡¿…。、！？「」"'·-]+/g, '')];
+
+/** Longest common subsequence length of two strings' characters (punctuation and spaces ignored). */
+function lcs(a: string, b: string): number {
+  const x = chars(a);
+  const y = chars(b);
+  if (!x.length || !y.length) return 0;
+  let prev = new Array(y.length + 1).fill(0);
+  for (let i = 1; i <= x.length; i++) {
+    const cur = [0];
+    for (let j = 1; j <= y.length; j++) cur.push(x[i - 1] === y[j - 1] ? prev[j - 1] + 1 : Math.max(prev[j], cur[j - 1]));
+    prev = cur;
+  }
+  return prev[y.length];
+}
+
+type Caption = ShownRecord & { source?: string };
+const sourceOf = (c: Caption) => c.source ?? stripTag(c.text);
+
+/**
+ * Character error rate of everything transcribed against the reference inside a
+ * window, independent of how the speech was split into captions. Captions
+ * shown up to 8 s after the window count (live captions lag the speech).
+ */
+export function transcriptCer(ref: RefLine[], shown: Caption[], window: [number, number]): number {
+  const r = ref.filter(l => l.start >= window[0] && l.start < window[1]).map(l => l.ko).join('');
+  const h = [...shown]
+    .filter(c => c.shownAt >= window[0] && c.shownAt < window[1] + 8)
+    .sort((a, b) => a.shownAt - b.shownAt)
+    .map(sourceOf)
+    .join('');
+  const { errors, length } = charErrorRate(chars(r).join(''), chars(h).join(''));
+  return length ? errors / length : 0;
+}
+
+/**
+ * How long after its speech ended each caption appeared: every caption is
+ * matched to the reference line it shares the most characters with (at least
+ * half of that line, ending within 15 s before it appeared).
+ */
+export function captionDelays(ref: RefLine[], shown: Caption[]): { fromSpeechEndP50: number | null; fromSpeechEndP90: number | null; matched: number } {
+  const delays: number[] = [];
+  for (const c of shown) {
+    let best: { line: RefLine; overlap: number } | null = null;
+    for (const line of ref) {
+      if (line.end > c.shownAt + 1 || line.end < c.shownAt - 15) continue;
+      const overlap = lcs(line.ko, sourceOf(c));
+      if (overlap >= chars(line.ko).length / 2 && (!best || overlap > best.overlap)) best = { line, overlap };
+    }
+    if (best) delays.push(c.shownAt - best.line.end);
+  }
+  delays.sort((a, b) => a - b);
+  // Nearest-rank percentile.
+  const at = (q: number) => (delays.length ? delays[Math.max(0, Math.ceil(delays.length * q) - 1)] : null);
+  return { fromSpeechEndP50: at(0.5), fromSpeechEndP90: at(0.9), matched: delays.length };
+}
+
+/**
+ * Share of the reference's characters that appeared on screen near their time:
+ * for each reference line, the characters it shares with captions shown from
+ * 1 s before it to 8 s after it ended.
+ */
+export function wordsCovered(ref: RefLine[], shown: Caption[]): number {
+  let total = 0;
+  let covered = 0;
+  for (const line of ref) {
+    const near = shown
+      .filter(c => c.shownAt >= line.start - 1 && c.shownAt <= line.end + 8)
+      .sort((a, b) => a.shownAt - b.shownAt)
+      .map(sourceOf)
+      .join('');
+    total += chars(line.ko).length;
+    covered += lcs(line.ko, near);
+  }
+  return total ? covered / total : 0;
+}
