@@ -29,7 +29,8 @@ test('Screen Translate with the real DeepL API', async ({ context, fixtureURL, o
   const started = Date.now();
   await dragOver(page, '#target');
   const translated = page.locator('[data-role="translated-text"]');
-  await expect(translated).toHaveText(/hello,? (the )?world/i, { timeout: 15_000 });
+  // DeepL renders "Bonjour le monde" as "Hello world" or (since 2026-11) "Hello, everyone"; both are right.
+  await expect(translated).toHaveText(/hello,? (the )?(world|everyone)/i, { timeout: 15_000 });
   // This goes popup -> content script -> background -> apiService -> DeepL, the
   // same translation path live captions use.
   console.log(`DeepL round trip (drag -> overlay): ${Date.now() - started}ms`);

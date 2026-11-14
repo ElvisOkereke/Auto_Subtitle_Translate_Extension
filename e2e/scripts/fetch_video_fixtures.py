@@ -10,9 +10,15 @@ Outputs (gitignored) in e2e/.cache/videos/:
       track per file - the fixture page feeds them to two SourceBuffers like
       YouTube does: video as fragmented MP4 (YouTube's container; the VP9
       frames are stream-copied so OCR ground truth stays exact), audio WebM.
+  _zIrbXw-SVs.<s>.video.webm   the same video track as WebM (VP9 read-ahead tests)
+  <id>.b.*   for every other subtitles video in e2e/bench/videos.json: its
+      benchmark window (start-5 .. start+duration+5) cut the same way, plus
+      <id>.b.json {"offset": <absolute start of the cut, seconds>}
 Idempotent: existing files are kept.
 """
+import json
 import os
+import re
 import subprocess
 import sys
 
@@ -27,7 +33,7 @@ def ffmpeg_exe() -> str:
     return imageio_ffmpeg.get_ffmpeg_exe()
 
 
-def download(full_path: str) -> None:
+def download(full_path: str, video_id: str = VIDEO_ID) -> None:
     if os.path.exists(full_path):
         return
     subprocess.run([
@@ -36,12 +42,24 @@ def download(full_path: str) -> None:
         '-f', 'bestvideo[height<=1080][vcodec^=vp9]+bestaudio[acodec=opus]',
         '--merge-output-format', 'webm',
         '-o', full_path,
-        f'https://youtu.be/{VIDEO_ID}',
+        f'https://youtu.be/{video_id}',
     ], check=True)
 
 
-def cut(full_path: str, stretch: str, start: int, duration: int) -> None:
-    out = os.path.join(VIDEOS, f'{VIDEO_ID}.{stretch}.webm')
+def cut_start(full_path: str, start: float) -> float:
+    """Absolute time where a stream-copy cut at `start` really begins (it snaps to the video keyframe before it)."""
+    out = subprocess.run([ffmpeg_exe(), '-loglevel', 'error', '-ss', str(start), '-i', full_path, '-map', '0:v',
+                          '-c', 'copy', '-copyts', '-frames:v', '1', '-f', 'framecrc', '-'],
+                         capture_output=True, text=True, check=True).stdout
+    tb = re.search(r'#tb 0: (\d+)/(\d+)', out)
+    pkt = re.search(r'^0,\s*(-?\d+),', out, re.M)
+    if not tb or not pkt:
+        raise RuntimeError('could not read the cut start time')
+    return int(pkt.group(1)) * int(tb.group(1)) / int(tb.group(2))
+
+
+def cut(full_path: str, stretch: str, start: float, duration: float, video_id: str = VIDEO_ID) -> None:
+    out = os.path.join(VIDEOS, f'{video_id}.{stretch}.webm')
     if os.path.exists(out):
         return
     # Stream copy keeps the original pixels (OCR ground truth is labelled from
@@ -55,13 +73,14 @@ def cut(full_path: str, stretch: str, start: int, duration: int) -> None:
     ], check=True)
 
 
-def split_tracks(stretch: str) -> None:
-    src = os.path.join(VIDEOS, f'{VIDEO_ID}.{stretch}.webm')
+def split_tracks(stretch: str, video_id: str = VIDEO_ID) -> None:
+    src = os.path.join(VIDEOS, f'{video_id}.{stretch}.webm')
     for kind, stream, ext, extra in (
         ('video', '0:v', 'mp4', ['-movflags', 'frag_keyframe+empty_moov+default_base_moof']),
+        ('video', '0:v', 'webm', []),
         ('audio', '0:a', 'webm', []),
     ):
-        out = os.path.join(VIDEOS, f'{VIDEO_ID}.{stretch}.{kind}.{ext}')
+        out = os.path.join(VIDEOS, f'{video_id}.{stretch}.{kind}.{ext}')
         if not os.path.exists(out):
             subprocess.run([ffmpeg_exe(), '-loglevel', 'error', '-y', '-i', src, '-map', stream, '-c', 'copy', *extra, out], check=True)
 
@@ -74,6 +93,23 @@ def main() -> None:
         cut(full, stretch, start, duration)
         split_tracks(stretch)
         print(f'{stretch}: {os.path.join(VIDEOS, f"{VIDEO_ID}.{stretch}.webm")}')
+    with open(os.path.join(ROOT, 'e2e', 'bench', 'videos.json'), encoding='utf-8') as f:
+        bench = json.load(f)['videos']
+    for v in bench:
+        if v['mode'] != 'subtitles' or v['id'] == VIDEO_ID:
+            continue
+        vid = v['id']
+        full = os.path.join(VIDEOS, f'{vid}.webm')
+        download(full, vid)
+        start = max(0, v['start'] - 5)
+        meta = os.path.join(VIDEOS, f'{vid}.b.json')
+        if not os.path.exists(meta):
+            offset = cut_start(full, start)
+            with open(meta, 'w', encoding='utf-8') as f:
+                json.dump({'offset': offset}, f)
+        cut(full, 'b', start, v['duration'] + 10, vid)
+        split_tracks('b', vid)
+        print(f'{vid}.b: {os.path.join(VIDEOS, f"{vid}.b.webm")}')
 
 
 if __name__ == '__main__':

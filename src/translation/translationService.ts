@@ -163,6 +163,21 @@ export class TranslationService {
     this.batcher = new ClaudeBatcher({ maxLines, windowMs, run: (key, lines, priority) => this.runClaudeBatch(key, lines, priority) });
   }
 
+  /**
+   * Forgets in-memory per-video state (topic summaries, batch contexts) and
+   * Claude's error cooldown, as a fresh service worker would. Used by tests so
+   * every run starts from the same state.
+   */
+  reset(): void {
+    this.topics.clear();
+    this.topicFailedAt.clear();
+    this.batchContexts.clear();
+    this.coolUntil = 0;
+    this.brokenConfig = null;
+    this.authWarned = false;
+    this.errorReported = false;
+  }
+
   /** Claude engine config from settings, or null when Claude access isn't set up. */
   private claudeConfig(settings: ExtensionSettings, secrets: Secrets, overrides: EndpointOverrides): ClaudeConfig | null {
     if (settings.claudeAccess === 'subscription') {

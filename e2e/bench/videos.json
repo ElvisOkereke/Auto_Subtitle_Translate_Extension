@@ -1,0 +1,133 @@
+{
+  "note": "Fixed benchmark set (spec 2026-11-13). Times are absolute video seconds; references live in e2e/fixtures/subtitles/.",
+  "videos": [
+    {
+      "id": "_zIrbXw-SVs",
+      "mode": "subtitles",
+      "lang": "ko",
+      "start": 540,
+      "duration": 120,
+      "box": {
+        "x": 0.2,
+        "y": 0.75,
+        "w": 0.6,
+        "h": 0.14
+      },
+      "reference": "_zIrbXw-SVs.timeline.json",
+      "referenceStretch": "s2",
+      "notes": "Korean League video with burned-in subtitles; hand-labelled reference (stretch s2 starts at 535.77 s)."
+    },
+    {
+      "id": "ug5IsDJ9bhs",
+      "mode": "subtitles",
+      "lang": "ko",
+      "start": 300,
+      "duration": 120,
+      "box": {
+        "x": 0.2,
+        "y": 0.75,
+        "w": 0.6,
+        "h": 0.14
+      },
+      "reference": "ug5IsDJ9bhs.timeline.json",
+      "notes": "IRELKING #24: bottom-centre subtitles; live chat overlay on the right changes constantly (distractor)."
+    },
+    {
+      "id": "x8YWHt8giVY",
+      "mode": "subtitles",
+      "lang": "ko",
+      "start": 400,
+      "duration": 120,
+      "box": {
+        "x": 0.2,
+        "y": 0.75,
+        "w": 0.6,
+        "h": 0.14
+      },
+      "reference": "x8YWHt8giVY.timeline.json",
+      "notes": "IRELKING #4: bottom-centre subtitles over game and champion-select screens."
+    },
+    {
+      "id": "w3RZwfzYEcs",
+      "mode": "subtitles",
+      "lang": "ko",
+      "start": 100,
+      "duration": 120,
+      "box": {
+        "x": 0.2,
+        "y": 0.75,
+        "w": 0.6,
+        "h": 0.14
+      },
+      "reference": "w3RZwfzYEcs.timeline.json",
+      "notes": "Different editor: large stylised captions with zooms (box to be confirmed from frames)."
+    },
+    {
+      "id": "Ac-5H_Wgk7I",
+      "mode": "subtitles",
+      "lang": "zh-Hans",
+      "start": 180,
+      "duration": 120,
+      "box": {
+        "x": 0.15,
+        "y": 0.86,
+        "w": 0.7,
+        "h": 0.12
+      },
+      "reference": "Ac-5H_Wgk7I.timeline.json",
+      "notes": "Football (Chinese commentary compilation, CCTV clips): small Simplified Chinese subtitles at the bottom."
+    },
+    {
+      "id": "dcbt04jp7B8",
+      "mode": "subtitles",
+      "lang": "pt",
+      "start": 20,
+      "duration": 120,
+      "box": {
+        "x": 0.12,
+        "y": 0.8,
+        "w": 0.76,
+        "h": 0.19
+      },
+      "reference": "dcbt04jp7B8.timeline.json",
+      "notes": "Football interview (Ronaldo, Guti; Spanish speech): yellow Portuguese subtitles, one or two lines, over a stats graphic."
+    },
+    {
+      "id": "IM-v1aW_AtI",
+      "mode": "subtitles",
+      "lang": "ru",
+      "start": 20,
+      "duration": 120,
+      "box": {
+        "x": 0.0,
+        "y": 0.83,
+        "w": 1.0,
+        "h": 0.15
+      },
+      "reference": "IM-v1aW_AtI.timeline.json",
+      "notes": "Football post-match interview: Russian subtitles at the bottom."
+    },
+    {
+      "id": "N5BAtJ2qMXo",
+      "mode": "subtitles",
+      "lang": "fr",
+      "start": 30,
+      "duration": 120,
+      "box": {
+        "x": 0.0,
+        "y": 0.74,
+        "w": 1.0,
+        "h": 0.14
+      },
+      "reference": "N5BAtJ2qMXo.timeline.json",
+      "notes": "Japanese TV drama (samurai): French subtitles inside a pillarboxed picture."
+    }
+  ],
+  "detectionCandidates": [
+    {
+      "id": "n5NmLaL8X8s",
+      "lang": "ja",
+      "notes": "Variety clip: Japanese captions move around the whole frame; no fixed box fits. Use when automatic subtitle detection is built."
+    }
+  ]
+}

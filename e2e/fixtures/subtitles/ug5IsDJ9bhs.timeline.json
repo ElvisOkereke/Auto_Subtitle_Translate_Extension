@@ -1,0 +1,154 @@
+{
+ "video": "ug5IsDJ9bhs",
+ "labelledBy": "extension OCR at 10 fps, hand-checked: 2 corrections (drops, merges, text fixes); boundaries refined by per-frame OCR at 10 fps",
+ "note": "Times are relative to the benchmark cut ug5IsDJ9bhs.b.webm, which starts at 290.4 s of the video.",
+ "stretches": [
+  {
+   "id": "b",
+   "start": 290.4,
+   "end": 420.4,
+   "file": "ug5IsDJ9bhs.b.webm"
+  }
+ ],
+ "lines": [
+  {
+   "stretch": "b",
+   "start": 4.7,
+   "end": 5.1,
+   "ko": "까비!",
+   "h": 53,
+   "segments": [
+    7,
+    8,
+    9
+   ]
+  },
+  {
+   "stretch": "b",
+   "start": 16.5,
+   "end": 17.7,
+   "ko": "야 점멸을 왜..",
+   "h": 54,
+   "segments": [
+    29,
+    30,
+    31,
+    32
+   ]
+  },
+  {
+   "stretch": "b",
+   "start": 17.7,
+   "end": 19,
+   "ko": "여기다가 안 타고 왜..",
+   "h": 53,
+   "segments": [
+    33,
+    34,
+    35,
+    36
+   ]
+  },
+  {
+   "stretch": "b",
+   "start": 34.2,
+   "end": 35.4,
+   "ko": "그냥 쿨하게 점멸로 피하네?",
+   "h": 54,
+   "segments": [
+    57,
+    58,
+    59
+   ]
+  },
+  {
+   "stretch": "b",
+   "start": 38,
+   "end": 39,
+   "ko": "트페 궁 빠졌고?",
+   "h": 54,
+   "segments": [
+    70,
+    71
+   ]
+  },
+  {
+   "stretch": "b",
+   "start": 55.1,
+   "end": 56.1,
+   "ko": "와 이게 죽네?!",
+   "h": 53,
+   "segments": [
+    79,
+    80
+   ]
+  },
+  {
+   "stretch": "b",
+   "start": 76.1,
+   "end": 77,
+   "ko": "잡을 만한데?",
+   "h": 55,
+   "segments": [
+    117,
+    118
+   ]
+  },
+  {
+   "stretch": "b",
+   "start": 77,
+   "end": 78.1,
+   "ko": "비에고 아래 내려갔잖아!",
+   "h": 54,
+   "segments": [
+    119
+   ]
+  },
+  {
+   "stretch": "b",
+   "start": 93.9,
+   "end": 94.4,
+   "ko": "플 있나?",
+   "h": 53,
+   "segments": [
+    132,
+    133
+   ]
+  },
+  {
+   "stretch": "b",
+   "start": 119.5,
+   "end": 121.4,
+   "ko": "(상당히 불리한 게임)",
+   "h": 1,
+   "segments": [
+    171,
+    172
+   ]
+  },
+  {
+   "stretch": "b",
+   "start": 122.5,
+   "end": 123.7,
+   "ko": "게임이 순탄치가 않네?",
+   "h": 54,
+   "segments": [
+    175
+   ]
+  },
+  {
+   "stretch": "b",
+   "start": 133.1,
+   "end": 134.6,
+   "ko": "아 저거 스턴 맞췄으면 잡은 건데!",
+   "h": 56,
+   "segments": [
+    189,
+    190,
+    191
+   ]
+  }
+ ],
+ "corrected": true,
+ "timingRefined": 2
+}

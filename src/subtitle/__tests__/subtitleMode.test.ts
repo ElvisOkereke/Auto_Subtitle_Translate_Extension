@@ -74,6 +74,7 @@ async function harness(
     setBox: () => undefined,
     stop: () => undefined,
     lead: 0,
+    framesAccepted: 0,
   };
   h.mode = await SubtitleMode.start({
     video,
@@ -151,6 +152,147 @@ describe('SubtitleMode', () => {
     const before = h.fastCalls;
     await liveLine(h, SIG(90), 108.8, text(35));
     expect(h.fastCalls).toBeGreaterThan(before);
+  });
+
+  it('read-ahead re-reads an open line, so a change the image signature misses is still caught', async () => {
+    const h = (current = await harness());
+    // Small text in a big box: the next subtitle barely changes the box image (same signature).
+    // Frames arrive over time; OCR answers in between (as in a real stream).
+    for (let t = 100; t < 103; t += 0.125) {
+      h.raFrame(crop(t < 101.5 ? 1 : 2), SIG(200), t);
+      await flush(2);
+    }
+    await flush(10);
+    expect(h.mode.timeline.at(100.5)?.source).toBe(text(1));
+    expect(h.mode.timeline.at(102.6)?.source).toBe(text(2));
+  });
+
+  it('one blank read during a re-check does not end a line that is still there', async () => {
+    const h = (current = await harness());
+    // The box image never changes. Re-checks read at 100.875, 101.625, ...: the first OCRs blank, the next read the line again.
+    for (let t = 100; t < 103; t += 0.125) {
+      h.raFrame(crop(Math.abs(t - 100.875) < 0.01 ? -1 : 1), SIG(200), t);
+      await flush(2);
+    }
+    await flush(10);
+    const line = h.mode.timeline.at(100.2)!;
+    expect(line.source).toBe(text(1));
+    expect(h.mode.timeline.at(102.5)).toBe(line); // still the same, uninterrupted line
+  });
+
+  it('two blank re-checks in a row end the line at the first blank', async () => {
+    const h = (current = await harness());
+    for (let t = 100; t < 103; t += 0.125) {
+      h.raFrame(crop(t >= 100.875 ? -1 : 1), SIG(200), t);
+      await flush(2);
+    }
+    await flush(10);
+    const line = h.mode.timeline.at(100.2)!;
+    expect(line.end).toBeCloseTo(100.875, 2);
+    expect(h.mode.timeline.at(102.5)).toBeNull();
+  });
+
+  it('stats say which path showed each line', async () => {
+    const h = (current = await harness());
+    // Read ahead: a subtitle at 30..31, then an empty box.
+    for (let t = 30; t < 31; t += 0.125) h.raFrame(crop(3), SIG(200), t);
+    for (let t = 31; t < 32; t += 0.125) h.raFrame(crop(-1), SIG(0), t);
+    await flush();
+    (h.video as any).currentTime = 30.2;
+    h.onFrame(SIG(200), 30.2, async () => crop(-1));
+    expect(h.overlayText()).toBe(`EN ${text(3)}`);
+    // Live: a line read ahead of nothing (before the read-ahead range).
+    await liveLine(h, SIG(120), 10, text(1));
+    expect(h.overlayText()).toBe(`EN ${text(1)}`);
+    expect({ readAhead: h.mode.linesFromReadAhead, live: h.mode.linesFromLive }).toEqual({ readAhead: 1, live: 1 });
+  });
+
+  describe('reading time', () => {
+    /** A subtitle at 20.0 (confirmed 20.1) whose source disappears at 20.4 (confirmed 20.5). */
+    async function flashLine(h: Harness) {
+      await liveLine(h, SIG(200), 20.0, text(1));
+      expect(h.overlayText()).toBe(`EN ${text(1)}`);
+      h.liveText = '';
+      (h.video as any).currentTime = 20.4;
+      h.onFrame(SIG(0), 20.4, async () => crop(-1));
+      h.onFrame(SIG(0), 20.5, async () => crop(-1));
+      await flush();
+    }
+    const frame = (h: Harness, t: number) => {
+      (h.video as any).currentTime = t;
+      h.onFrame(SIG(0), t, async () => crop(-1));
+    };
+
+    it('a short subtitle lingers for its reading time, in video time', async () => {
+      const h = (current = await harness({ readAhead: false }));
+      await flashLine(h);
+      expect(h.overlayText()).toBe(`EN ${text(1)}`); // source gone, translation stays
+      // Paused: no frames for a while, the line stays.
+      (h.video as any).paused = true;
+      await new Promise(r => setTimeout(r, 300));
+      expect(h.overlayText()).toBe(`EN ${text(1)}`);
+      (h.video as any).paused = false;
+      for (let t = 20.6; t < 21.55; t += 0.1) frame(h, t);
+      expect(h.overlayText()).toBe(`EN ${text(1)}`); // shown 20.1, minimum 1.5 s -> until 21.6
+      frame(h, 21.65);
+      expect(h.overlayText()).toBeNull();
+    });
+
+    it('a newer subtitle replaces a lingering one at once', async () => {
+      const h = (current = await harness({ readAhead: false }));
+      await flashLine(h);
+      await liveLine(h, SIG(120), 20.7, text(2));
+      expect(h.overlayText()).toBe(`EN ${text(2)}`);
+    });
+
+    it('the next subtitle ends the line on screen even before its own translation arrives (live)', async () => {
+      const h = (current = await harness({ readAhead: false, plan: { fast: false, best: true }, holdBest: true }));
+      await liveLine(h, SIG(200), 20.0, text(1));
+      h.heldBest.shift()!();
+      await flush();
+      expect(h.overlayText()).toBe(`CLAUDE ${text(1)}`);
+      await liveLine(h, SIG(120), 20.6, text(2)); // B's translation is still pending
+      expect(h.overlayText()).toBeNull();
+    });
+
+    it('the next subtitle ends the line on screen even before its own translation arrives (read-ahead)', async () => {
+      const h = (current = await harness({ plan: { fast: false, best: true }, holdBest: true }));
+      for (let t = 100; t < 101; t += 0.125) {
+        h.raFrame(crop(1), SIG(200), t);
+        await flush(2);
+      }
+      for (let t = 101; t < 102; t += 0.125) {
+        h.raFrame(crop(2), SIG(120), t);
+        await flush(2);
+      }
+      h.heldBest.shift()!(); // only A's translation arrives
+      await flush();
+      (h.video as any).currentTime = 100.5;
+      h.onFrame(SIG(200), 100.5, async () => crop(-1));
+      expect(h.overlayText()).toBe(`CLAUDE ${text(1)}`);
+      (h.video as any).currentTime = 101.3;
+      h.onFrame(SIG(120), 101.3, async () => crop(-1));
+      expect(h.overlayText()).toBeNull(); // not A lingering over B's subtitle
+      h.heldBest.shift()!(); // B arrives: shown
+      await flush();
+      expect(h.overlayText()).toBe(`CLAUDE ${text(2)}`);
+    });
+
+    it('seek clears a lingering line', async () => {
+      const h = (current = await harness({ readAhead: false }));
+      await flashLine(h);
+      (h.video as any).currentTime = 50;
+      h.video.dispatchEvent(new Event('seeking'));
+      expect(h.overlayText()).toBeNull();
+    });
+
+    it('an ad clears a lingering line', async () => {
+      const h = (current = await harness({ readAhead: false }));
+      await flashLine(h);
+      h.video.closest('.html5-video-player')!.classList.add('ad-showing');
+      await flush();
+      expect(h.overlayText()).toBeNull();
+    });
   });
 
   it('seeking closes the line that was on screen (it must not stretch over the rest of the video)', async () => {

@@ -5,6 +5,7 @@
 // with no OCR or translation.
 import { FrameHandler, FrameSampler, adShowing } from './frameSampler';
 import { LineTracker } from './lineTracker';
+import { LineDisplay } from './displayPolicy';
 import { SubtitleOverlay } from './overlay';
 import { Timeline, TimelineLine, TimelineStorage } from './timeline';
 import { isSameLine } from './textSimilarity';
@@ -52,6 +53,8 @@ export type SubtitleModeState = 'loading' | 'running' | 'paused-ad' | 'stopped';
 
 const MIN_CONFIDENCE = 0.5;
 const RECHECK_MS = 750; // re-read a displayed line if nothing triggered a read for this long
+/** Read-ahead re-reads an open line this often (video seconds): small text in a big box can change without moving the image signature. */
+const RA_RECHECK_S = 0.75;
 const SAVE_EVERY_MS = 10_000;
 const MAX_READ_AHEAD_QUEUE = 32;
 const MAX_OPEN_LINE_S = 8; // a saved line with no end is closed after this long
@@ -64,6 +67,13 @@ export class SubtitleMode {
   ocrCalls = 0;
   raOcrCalls = 0;
   translateCalls = 0;
+  /** Lines first shown from a read-ahead entry vs a live read (which path is carrying the experience). */
+  linesFromReadAhead = 0;
+  linesFromLive = 0;
+  private readonly shownLines = new WeakSet<TimelineLine>();
+  /** What is on screen and until when (reading time, video time). */
+  private readonly display = new LineDisplay();
+  private displayedLine: TimelineLine | null = null;
   /** Video time at which each line's translation arrived, keyed by line start. */
   readonly translatedAt = new Map<number, number>();
   /** Video time at which each line's Claude ('better') translation arrived. */
@@ -71,7 +81,11 @@ export class SubtitleMode {
 
   // Read-ahead: frames decoded ahead of playback run through their own tracker.
   private readonly raTracker = new LineTracker({ changeThreshold: 0.04, stableFrames: 2 });
-  private raQueue: { t: number; crop: ImageBitmap }[] = [];
+  private raQueue: { t: number; crop: ImageBitmap; recheck?: boolean }[] = [];
+  /** A re-check read blank here; the line ends only if the next read is blank too. */
+  private raBlankAt: number | null = null;
+  /** Video time of the last frame queued for read-ahead OCR. */
+  private raLastQueuedAt = -Infinity;
   private raReadingAt: number | null = null;
   private raCurrent: TimelineLine | null = null;
   private raFrom = Infinity;
@@ -82,6 +96,11 @@ export class SubtitleMode {
   /** Seconds of video read ahead of the playhead. */
   get readAheadLead(): number {
     return this.deps.readAhead?.lead ?? 0;
+  }
+
+  /** Frames the read-ahead source has accepted (0 means the live path carries everything). */
+  get readAheadFrames(): number {
+    return this.deps.readAhead?.framesAccepted ?? 0;
   }
 
   private readonly tracker = new LineTracker({ changeThreshold: 0.04, stableFrames: 2 });
@@ -201,7 +220,7 @@ export class SubtitleMode {
       this.epoch++;
       this.pending = null;
       this.current = null;
-      this.overlay.clear();
+      this.clearNow();
     } else if (!ad && this.state === 'paused-ad') {
       this.state = 'running';
       this.tracker.reset();
@@ -225,6 +244,50 @@ export class SubtitleMode {
     this.pending = null;
     this.tracker.reset();
     this.current = null;
+    this.clearNow();
+  }
+
+  /** Puts a translated line on screen and counts which path first showed it. */
+  private showLine(line: TimelineLine, at: number = Math.max(line.start, this.video.currentTime)): void {
+    if (!line.translation) return;
+    this.overlay.show(line.translation, { lineStart: line.start, quality: line.quality === 'better' ? 'better' : 'fast' });
+    // A better translation of the line on screen keeps its timing; a different line replaces it.
+    if (this.displayedLine !== line) {
+      this.displayedLine = line;
+      this.display.replace(line.translation, at);
+      if (line.end !== null) this.display.sourceEnded(line.end);
+    }
+    if (this.shownLines.has(line)) return;
+    this.shownLines.add(line);
+    if (line.origin === 'read-ahead') this.linesFromReadAhead++;
+    else this.linesFromLive++;
+  }
+
+  /**
+   * A different subtitle started at `at`: whatever is on screen ends now (a line
+   * never lingers over the next subtitle), and the new one shows once translated.
+   */
+  private nextLine(line: TimelineLine, at: number): void {
+    this.current = line;
+    if (this.displayedLine && this.displayedLine !== line) this.clearNow();
+    if (line.translation) this.showLine(line, at);
+  }
+
+  /** The source subtitle of the line on screen ended: it stays for its reading time. */
+  private sourceEnded(at: number): void {
+    this.display.sourceEnded(at);
+    this.tick(at);
+  }
+
+  /** Clears the line once its time is up (video time). */
+  private tick(at: number): void {
+    if (this.displayedLine && this.display.tick(at) === 'clear') this.clearNow();
+  }
+
+  /** Seek, ad, stop: nothing of the old position may stay on screen. */
+  private clearNow(): void {
+    this.display.reset();
+    this.displayedLine = null;
     this.overlay.clear();
   }
 
@@ -232,16 +295,14 @@ export class SubtitleMode {
   private showKnown(t: number): boolean {
     const known = this.timeline.at(t);
     if (!known || known.end === null || !known.translation) return false;
-    if (this.current !== known) {
-      this.current = known;
-      this.overlay.show(known.translation, { lineStart: known.start, quality: known.quality === 'better' ? 'better' : 'fast' });
-    }
+    if (this.current !== known) this.nextLine(known, t);
     return true;
   }
 
   private onFrame(sig: Uint8Array, t: number, grab: () => Promise<ImageBitmap>): void {
     if (this.state !== 'running') return;
     this.lastFrameAt = t;
+    this.tick(t);
     // A closed, translated line on the timeline covers this moment: no OCR needed.
     if (this.showKnown(t)) return;
     if (this.readAheadCovers(t)) {
@@ -253,26 +314,27 @@ export class SubtitleMode {
         this.timeline.close(line.start, Math.max(line.start, t));
         line = null;
       }
-      if (line?.translation) {
-        if (this.current !== line) {
-          this.current = line;
-          this.overlay.show(line.translation, { lineStart: line.start, quality: line.quality === 'better' ? 'better' : 'fast' });
-        }
-      } else if (!line && this.current) {
+      if (line) {
+        // Translated or not, this is the subtitle on screen now.
+        if (this.current !== line) this.nextLine(line, t);
+      } else if (this.current) {
+        const ended = this.current.end ?? t;
         this.current = null;
-        this.overlay.clear();
+        this.sourceEnded(ended);
       }
       return;
     }
     if (this.current && this.current.end !== null && t >= this.current.end) {
+      const ended = this.current.end;
       this.current = null;
-      this.overlay.clear();
+      this.sourceEnded(ended);
     }
     const event = this.tracker.push(sig, t);
     if (event) this.requestRead(event.at, grab());
   }
 
   private recheck(): void {
+    if (this.state === 'running' && !this.video.paused) this.tick(this.video.currentTime);
     if (this.state !== 'running' || this.video.paused || !this.current || this.reading || this.current.end !== null) return;
     if (performance.now() - this.lastReadAt < RECHECK_MS) return;
     const frame = this.sampler.sampleNow();
@@ -313,6 +375,7 @@ export class SubtitleMode {
 
   private resetReadAhead(): void {
     this.raTracker.reset();
+    this.raBlankAt = null;
     this.raQueue.forEach(q => q.crop.close());
     this.raQueue = [];
     this.closeReadAheadLine(this.raTo);
@@ -354,6 +417,12 @@ export class SubtitleMode {
         return;
       }
       this.raQueue.push({ t: event.since, crop });
+      this.raLastQueuedAt = t;
+      void this.pumpReadAhead();
+    } else if (this.raCurrent?.end === null && t - this.raLastQueuedAt >= RA_RECHECK_S && this.raGap === null && this.raQueue.length < MAX_READ_AHEAD_QUEUE / 2) {
+      // No change seen, but a line is open: re-read now and then (like the live path's recheck).
+      this.raQueue.push({ t, crop, recheck: true });
+      this.raLastQueuedAt = t;
       void this.pumpReadAhead();
     } else {
       crop.close();
@@ -363,14 +432,14 @@ export class SubtitleMode {
   /** Read-ahead OCR runs one at a time, in order, and only while the live path isn't reading. */
   private async pumpReadAhead(): Promise<void> {
     while (this.raQueue.length && this.raReadingAt === null && !this.reading && this.state === 'running') {
-      const { t, crop } = this.raQueue.shift()!;
+      const { t, crop, recheck } = this.raQueue.shift()!;
       this.raReadingAt = t;
       const epoch = this.epoch;
       try {
         this.raOcrCalls++;
         const result = await this.deps.ocr.recognize(crop, this.lang, 'accurate');
         if (epoch === this.epoch && this.state === 'running') {
-          this.handleReadAheadText(t, result.confidence >= MIN_CONFIDENCE ? result.text : '');
+          this.handleReadAheadText(t, result.confidence >= MIN_CONFIDENCE ? result.text : '', !!recheck);
         }
       } catch (error) {
         console.warn('Read-ahead OCR failed:', error);
@@ -380,12 +449,21 @@ export class SubtitleMode {
     }
   }
 
-  private handleReadAheadText(t: number, text: string): void {
+  private handleReadAheadText(t: number, text: string, recheck = false): void {
     if (!text) {
-      if (this.raCurrent && this.raCurrent.end === null) this.timeline.close(this.raCurrent.start, t);
+      // One blank re-check (a bad frame, low confidence) doesn't end a line whose
+      // image never changed: wait for a second blank read, then end it at the first.
+      if (recheck && this.raCurrent?.end === null && this.raBlankAt === null) {
+        this.raBlankAt = t;
+        return;
+      }
+      const end = this.raBlankAt ?? t;
+      this.raBlankAt = null;
+      if (this.raCurrent && this.raCurrent.end === null) this.timeline.close(this.raCurrent.start, end);
       this.raCurrent = null;
       return;
     }
+    this.raBlankAt = null;
     if (this.raCurrent && isSameLine(text, this.raCurrent.source)) return;
     if (this.raCurrent && this.raCurrent.end === null) this.timeline.close(this.raCurrent.start, t);
     const existing = this.timeline.at(t);
@@ -393,7 +471,7 @@ export class SubtitleMode {
       this.raCurrent = existing; // the live path already has this line
       return;
     }
-    const line = this.timeline.upsert({ start: t, end: null, source: text });
+    const line = this.timeline.upsert({ start: t, end: null, source: text, origin: 'read-ahead' });
     this.raCurrent = line;
     void this.translate(line, 'readahead');
   }
@@ -404,21 +482,20 @@ export class SubtitleMode {
         if (this.current.end === null) this.timeline.close(this.current.start, t);
         this.current = null;
       }
-      this.overlay.clear();
+      this.sourceEnded(t);
       return;
     }
     if (this.current && isSameLine(text, this.current.source)) return; // same subtitle still on screen
     const known = this.timeline.at(t);
     if (known && isSameLine(text, known.source)) {
       // Read ahead (or seen before): reuse it instead of creating a duplicate line.
-      this.current = known;
-      if (known.translation) this.overlay.show(known.translation, { lineStart: known.start, quality: known.quality === 'better' ? 'better' : 'fast' });
+      this.nextLine(known, Math.max(known.start, this.video.currentTime));
       return;
     }
 
     if (this.current && this.current.end === null) this.timeline.close(this.current.start, t);
-    const line = this.timeline.upsert({ start: t, end: null, source: text });
-    this.current = line;
+    const line = this.timeline.upsert({ start: t, end: null, source: text, origin: 'live' });
+    this.nextLine(line, t);
     void this.translate(line, 'live');
   }
 
@@ -466,7 +543,7 @@ export class SubtitleMode {
     if (!this.translatedAt.has(line.start)) this.translatedAt.set(line.start, this.video.currentTime);
     if (line.quality === 'better' && !this.betterAt.has(line.start)) this.betterAt.set(line.start, this.video.currentTime);
     if (this.current === line && this.state === 'running') {
-      this.overlay.show(line.translation!, { lineStart: line.start, quality: line.quality === 'better' ? 'better' : 'fast' });
+      this.showLine(line);
     }
   }
 }

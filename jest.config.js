@@ -22,7 +22,19 @@ const server = {
   moduleFileExtensions: ['ts', 'js', 'json']
 };
 
+// Benchmark metric functions (e2e/bench): pure, Node environment.
+const bench = {
+  displayName: 'bench',
+  testEnvironment: 'node',
+  roots: ['<rootDir>/e2e/bench'],
+  testMatch: ['**/__tests__/**/*.test.ts'],
+  transform: {
+    '^.+\.ts$': ['ts-jest', { tsconfig: 'e2e/bench/tsconfig.json' }]
+  },
+  moduleFileExtensions: ['ts', 'js', 'json']
+};
+
 module.exports = {
-  projects: [extension, server],
+  projects: [extension, server, bench],
   collectCoverageFrom: ['src/**/*.ts', 'server/src/**/*.ts', '!src/**/*.d.ts', '!src/test/**']
 };

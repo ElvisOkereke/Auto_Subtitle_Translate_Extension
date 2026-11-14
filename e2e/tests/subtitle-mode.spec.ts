@@ -7,6 +7,7 @@ import { browserKind } from '../helpers/launch';
 import { astTest } from '../helpers/bridge';
 import { charErrorRate } from '../helpers/cer';
 import { timelineFixture, modeStats, shownRecords, openFixture, startViaPopup, playUntil } from '../helpers/subtitles';
+import { minDisplaySeconds, shownWhilePaused, timeOnScreen } from '../bench/metrics';
 
 // Live path of subtitle mode on the local YouTube-like fixture with real OCR and
 // mock DeepL ("[EN-US] <text>"). Read-ahead is disabled here (Task 9 covers it).
@@ -22,6 +23,29 @@ const strip = (t: string) => t.replace(/^\[EN-US\]\s*/, '');
 test.beforeEach(async ({ configure, sw }) => {
   await configure({ translationProvider: 'deepl', deeplApiKey: 'k:fx', targetLanguage: 'en', subtitleLanguage: 'ko' });
   await sw.evaluate(() => chrome.storage.local.set({ devSubtitle: { readAhead: false } }));
+});
+
+test('short subtitles stay on screen for their reading time; nothing appears while paused', async ({ context, fixtureURL, openPopup }) => {
+  test.setTimeout(300_000);
+  const page = await context.newPage();
+  await openFixture(page, fixtureURL);
+  await startViaPopup(page, openPopup);
+  await playUntil(page, 30);
+  await page.evaluate(() => (document.querySelector('video') as HTMLVideoElement).pause());
+  await page.waitForTimeout(2000);
+  await playUntil(page, 75);
+
+  const records = await shown(page);
+  const onScreen = timeOnScreen(records);
+  const tooShort = records
+    .filter((r, i) => r.hiddenAt !== null && !(records[i + 1] && Math.abs(records[i + 1].shownAt - r.hiddenAt) <= 0.05))
+    .filter(r => r.hiddenAt! - r.shownAt < minDisplaySeconds(strip(r.text)) - 0.05)
+    .map(r => `${r.shownAt.toFixed(2)}-${r.hiddenAt!.toFixed(2)} ${strip(r.text)}`);
+  console.log(JSON.stringify({ records: records.length, onScreen, tooShort }, null, 1));
+  expect(records.length).toBeGreaterThan(5);
+  expect(tooShort).toEqual([]);
+  expect(onScreen.tooShort).toBe(0);
+  expect(shownWhilePaused(records)).toBe(0);
 });
 
 test('live path translates every line of stretch s1', async ({ context, fixtureURL, openPopup, translationCalls }) => {

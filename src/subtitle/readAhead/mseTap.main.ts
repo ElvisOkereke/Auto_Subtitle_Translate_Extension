@@ -3,7 +3,8 @@
 // SourceBuffers and, when subtitle mode asks for it, decodes those fragments
 // ahead of playback with WebCodecs and posts crops of the subtitle box to the
 // isolated-world content script. Decision record: docs/superpowers/decisions/2026-11-12-read-ahead.md
-import { TapTrack, TrackRegistry } from './trackRegistry';
+import { TapTrack, TrackRegistry, codecOf, retypeTrack, tappedContainer } from './trackRegistry';
+import { nextFragment } from './fragmentPicker';
 
 interface Box {
   x: number;
@@ -24,7 +25,7 @@ const DISCONTINUITY_SECONDS = 0.5;
 
   const registry = new TrackRegistry<MediaSource>();
   // Diagnostics, readable from the page (and E2E tests).
-  const stats = ((window as any).__astTapStats = { fragments: 0, decoded: 0, posted: 0, maxDecoded: 0, resets: 0, nextTime: 0, queue: 0 });
+  const stats = ((window as any).__astTapStats = { fragments: 0, decoded: 0, posted: 0, maxDecoded: 0, resets: 0, nextTime: 0, queue: 0, unsupported: 0, fed: 0, sessions: 0, configures: 0 });
   (window as any).__astTapRegistry = registry; // diagnostics (E2E)
 
   const origCreateObjectURL = URL.createObjectURL;
@@ -41,6 +42,30 @@ const DISCONTINUITY_SECONDS = 0.5;
   };
 
   const sbTracks = new WeakMap<SourceBuffer, Track>();
+  const disabled = new WeakSet<Track>();
+  function disable(track: Track): void {
+    if (disabled.has(track)) return;
+    disabled.add(track);
+    registry.removeTrack(track);
+    stats.unsupported++;
+  }
+
+  /** (Re)checks that WebCodecs can decode the track's codec; turns read-ahead off or back on for it. */
+  function checkSupport(ms: MediaSource, track: Track): void {
+    if (typeof VideoDecoder === 'undefined' || !track.codec) {
+      disable(track);
+      return;
+    }
+    VideoDecoder.isConfigSupported({ codec: track.codec })
+      .then(r => {
+        if (!r.supported) disable(track);
+        else if (disabled.has(track)) {
+          disabled.delete(track);
+          registry.restoreTrack(ms, track);
+        }
+      })
+      .catch(() => disable(track));
+  }
   const watched = new WeakSet<MediaSource>();
 
   const origRemove = MediaSource.prototype.removeSourceBuffer;
@@ -53,10 +78,14 @@ const DISCONTINUITY_SECONDS = 0.5;
   const origAdd = MediaSource.prototype.addSourceBuffer;
   MediaSource.prototype.addSourceBuffer = function (this: MediaSource, mime: string) {
     const sb = origAdd.call(this, mime);
-    if (/^video\/mp4/i.test(mime)) {
-      const codec = mime.match(/codecs="?([^",]+)/i)?.[1] ?? '';
-      const track = registry.addTrack(this, codec);
+    const container = tappedContainer(mime);
+    if (container) {
+      const codec = codecOf(mime);
+      const track = registry.addTrack(this, codec, container);
       sbTracks.set(sb, track);
+      // A codec WebCodecs can't decode here leaves read-ahead off for this track
+      // (the live path carries the experience); nothing is thrown into the page.
+      checkSupport(this, track);
       if (!watched.has(this)) {
         watched.add(this);
         this.addEventListener('sourceclose', event => registry.closeMediaSource(event.target as MediaSource));
@@ -71,13 +100,16 @@ const DISCONTINUITY_SECONDS = 0.5;
       if (typeof sb.changeType === 'function') {
         const changeType = sb.changeType.bind(sb);
         sb.changeType = (type: string) => {
-          track.parser.reset();
-          track.codec = type.match(/codecs="?([^",]+)/i)?.[1] ?? track.codec;
+          // The next segments may be another container/codec: new parser, old data dropped, support re-checked.
+          retypeTrack(track, type);
+          if (!tappedContainer(type)) disable(track);
+          else checkSupport(this, track);
           return changeType(type);
         };
       }
       const append = sb.appendBuffer.bind(sb);
       sb.appendBuffer = (data: BufferSource) => {
+        if (disabled.has(track)) return append(data);
         try {
           const view = data instanceof ArrayBuffer ? new Uint8Array(data) : new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
           const { init, fragments } = track.parser.push(view.slice(), sb.timestampOffset);
@@ -135,6 +167,7 @@ const DISCONTINUITY_SECONDS = 0.5;
     }
 
     private configure(track: Track): void {
+      stats.configures++;
       this.decoder?.close();
       this.track = track;
       this.needKey = true;
@@ -155,20 +188,13 @@ const DISCONTINUITY_SECONDS = 0.5;
       this.pumping = true;
       try {
         for (;;) {
+          if (this.stopped) return;
           const track = activeTrack();
           if (!track) return;
           if (track !== this.track || this.decoder?.state === 'closed') this.configure(track);
           const now = mainVideo()?.currentTime ?? 0;
           const fresh = this.nextTime === -Infinity;
-          // Fresh start: the fragment containing the playhead (fragments begin at
-          // keyframes in practice). Otherwise: the first fragment starting where the
-          // previous one ended - never the one just decoded.
-          const next = fresh
-            ? track.fragments.find(f => {
-                const last = f.samples[f.samples.length - 1];
-                return last.time + last.duration > now - 0.5;
-              })
-            : track.fragments.find(f => f.start >= this.nextTime - 0.05);
+          const next = nextFragment(track.fragments, this.nextTime, now);
           if (!next) return;
           if (!fresh && next.start - this.nextTime > DISCONTINUITY_SECONDS) {
             // Seek or gap: restart decoding at a keyframe.
@@ -184,6 +210,7 @@ const DISCONTINUITY_SECONDS = 0.5;
               await new Promise(r => this.decoder!.addEventListener('dequeue', r, { once: true }));
             }
             if (this.stopped) return;
+            stats.fed++;
             this.decoder!.decode(
               new EncodedVideoChunk({ type: sample.key ? 'key' : 'delta', timestamp: Math.round(sample.time * 1e6), duration: Math.round(sample.duration * 1e6), data: sample.data })
             );
@@ -242,6 +269,7 @@ const DISCONTINUITY_SECONDS = 0.5;
     if (msg?.astTap === 'start') {
       session?.stop();
       session = new Session(msg.box, msg.fps ?? 8);
+      stats.sessions++;
       void session.pump();
     } else if (msg?.astTap === 'box' && session) {
       session.setBox(msg.box);

@@ -26,8 +26,13 @@
   <p id="page-text">자막이 아닌 일반 페이지 텍스트입니다</p>
 </div>
 <script>
-  // ?v=<videoId>&stretch=s1|s2 - plays e2e/.cache/videos/_zIrbXw-SVs.<stretch>.webm
-  // through MediaSource in 1 MB slices, like YouTube's MSE player.
+  // ?v=<videoId>&stretch=s1|s2[&file=<id>][&container=mp4|webm] - plays
+  // e2e/.cache/videos/<file>.<stretch>.* (file defaults to _zIrbXw-SVs) through
+  // MediaSource in 1 MB slices, like YouTube's MSE player. container=webm feeds
+  // the video track as VP9 in WebM (what YouTube serves without AV1) instead of fMP4.
+  const params = new URLSearchParams(location.search);
+  const FILE = params.get('file') || '_zIrbXw-SVs';
+  const CONTAINER = params.get('container') === 'webm' ? 'webm' : 'mp4';
   const video = document.querySelector('video');
   const player = document.getElementById('movie_player');
   const SLICE = 1 << 20;
@@ -60,13 +65,15 @@
   // One SourceBuffer per track, fed in 1 MB slices - the way YouTube's player works.
   async function load(stretch) {
     const token = ++loadToken;
-    const base = `/videos/_zIrbXw-SVs.${stretch}`;
+    const base = `/videos/${FILE}.${stretch}`;
     window.__fixture.sourceBuffers = [];
     const ms = new MediaSource();
     video.src = URL.createObjectURL(ms);
     await new Promise(r => ms.addEventListener('sourceopen', r, { once: true }));
     await Promise.all([
-      feed(ms, `${base}.video.mp4`, 'video/mp4; codecs="vp09.00.41.08"', token),
+      CONTAINER === 'webm'
+        ? feed(ms, `${base}.video.webm`, 'video/webm; codecs="vp9"', token)
+        : feed(ms, `${base}.video.mp4`, 'video/mp4; codecs="vp09.00.41.08"', token),
       feed(ms, `${base}.audio.webm`, 'audio/webm; codecs="opus"', token),
     ]);
     if (token === loadToken && ms.readyState === 'open') ms.endOfStream();
@@ -85,7 +92,6 @@
     },
   };
 
-  const params = new URLSearchParams(location.search);
   load(params.get('stretch') || 's1');
 </script>
 </body>

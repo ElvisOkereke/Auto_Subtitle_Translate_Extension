@@ -8,6 +8,8 @@ export interface TimelineLine {
   source: string;
   translation: string | null;
   quality: TranslationQuality;
+  /** Which path first read this line (absent in timelines saved before it was recorded). */
+  origin?: 'read-ahead' | 'live';
 }
 
 const RANK: Record<TranslationQuality, number> = { none: 0, fast: 1, better: 2 };

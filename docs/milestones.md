@@ -4,6 +4,23 @@ Wins worth sharing, newest first. Each has the headline, the proof (a number
 or what was shown working), and where the evidence lives. Numbers come from
 automated runs in a real browser (details: [performance.md](performance.md)).
 
+## 2026-11-13 — Tested on real YouTube in 5 languages; subtitles you can actually read
+
+- **A real-world benchmark**: 8 YouTube videos with burned-in subtitles in
+  Korean, Chinese, Portuguese, Russian and French (League of Legends, football,
+  a TV drama), with reference subtitles checked frame by frame. It plays on
+  real YouTube by sliding across fresh windows (YouTube stops automated
+  playback after ~40 s), using real DeepL and Claude.
+- **No more lines vanishing before you can read them**: before the fix, a third
+  to a half of the translated lines left the screen early; now none do. Each
+  line gets at least 1.5 s, more for long lines, and pausing freezes it.
+- **Read-ahead now works on YouTube's other video format (VP9)**: lines ready
+  before they appear went from 0% to up to 100% there, and the Claude-only mode
+  stopped losing most lines.
+- **Small subtitles**: the Chinese football clip went from 28 to 43 of 47 lines
+  on real YouTube.
+- The benchmark runs 2–3× faster with parallel workers.
+
 ## 2026-11-12 — A redesigned popup, in light and dark
 
 - The popup now opens on what you actually do: a subtitle-style **caption bar**
