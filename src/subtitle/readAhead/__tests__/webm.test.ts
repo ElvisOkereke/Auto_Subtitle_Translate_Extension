@@ -68,3 +68,33 @@ describe('webCodecsVideoCodec', () => {
     expect(webCodecsVideoCodec('av01.0.04M.08')).toBe('av01.0.04M.08');
   });
 });
+
+// 2 s, 440 Hz sine, Opus 48 kHz mono (ffmpeg lavfi), clusters of ~1 s.
+const OPUS = new Uint8Array(fs.readFileSync(path.join(__dirname, 'fixtures/tiny-opus.webm')));
+
+describe('WebmParser (audio track)', () => {
+  it('reads the Opus track: codec, sample rate, channels and the OpusHead description', () => {
+    const { init, fragments } = pushAll(new WebmParser('audio'), [OPUS]);
+    expect(init?.audio).toEqual({ codec: 'opus', sampleRate: 48000, channels: 1 });
+    expect(String.fromCharCode(...init!.description!.subarray(0, 8))).toBe('OpusHead');
+    const samples = fragments.flatMap(f => f.samples);
+    expect(samples.length).toBeGreaterThan(50); // 20 ms Opus frames
+    expect(samples.every(s => s.key)).toBe(true);
+    for (let i = 1; i < samples.length; i++) expect(samples[i].time).toBeGreaterThan(samples[i - 1].time);
+    const last = samples[samples.length - 1];
+    expect(last.time + last.duration).toBeGreaterThan(1.9);
+    expect(last.time + last.duration).toBeLessThan(2.2);
+  });
+
+  it('the video parser ignores an audio-only file', () => {
+    const { init, fragments } = pushAll(new WebmParser(), [OPUS]);
+    expect(init).toBeUndefined();
+    expect(fragments).toEqual([]);
+  });
+
+  it('audio parses the same split at every byte boundary', () => {
+    const whole = pushAll(new WebmParser('audio'), [OPUS]);
+    const split = pushAll(new WebmParser('audio'), Array.from(OPUS, (_, i) => OPUS.subarray(i, i + 1)));
+    expect(split.fragments.flatMap(f => f.samples).map(s => s.time)).toEqual(whole.fragments.flatMap(f => f.samples).map(s => s.time));
+  });
+});

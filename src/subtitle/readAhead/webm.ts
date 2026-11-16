@@ -1,8 +1,9 @@
 // webm.ts - incremental demuxer for WebM (Matroska) as appended to an MSE
 // SourceBuffer: what YouTube serves as VP9 for clients without AV1 decode.
 // Produces the same shapes as fmp4.ts (one fragment per Cluster) so the tap
-// can feed either to WebCodecs. Single video track. Data comes from the page
-// (untrusted): sizes are bounded and anything malformed resets the parser.
+// can feed either to WebCodecs. One track: the video track, or with
+// `new WebmParser('audio')` the audio track (YouTube's Opus audio). Data comes
+// from the page (untrusted): sizes are bounded and anything malformed resets the parser.
 
 import type { Fmp4Fragment, Fmp4Init, Fmp4Sample } from './fmp4';
 
@@ -26,6 +27,9 @@ const ID = {
   Video: 0xe0,
   PixelWidth: 0xb0,
   PixelHeight: 0xba,
+  Audio: 0xe1,
+  SamplingFrequency: 0xb5,
+  Channels: 0x9f,
   Cluster: 0x1f43b675,
   Timecode: 0xe7,
   SimpleBlock: 0xa3,
@@ -105,7 +109,17 @@ interface Pending {
   offset: number;
 }
 
+/** Matroska CodecID -> WebCodecs audio codec string (decoders this tap can feed). */
+const AUDIO_CODECS: Record<string, string> = { A_OPUS: 'opus', A_VORBIS: 'vorbis' };
+
+function readFloat(b: Uint8Array, start: number, end: number): number {
+  const view = new DataView(b.buffer, b.byteOffset + start, end - start);
+  return end - start === 4 ? view.getFloat32(0) : end - start === 8 ? view.getFloat64(0) : 0;
+}
+
 export class WebmParser implements MediaParser {
+  constructor(private readonly kind: 'video' | 'audio' = 'video') {}
+
   private buf: Uint8Array = new Uint8Array(0);
   /** Bytes to skip of an element we don't need (may span appends). */
   private skip = 0;
@@ -215,6 +229,8 @@ export class WebmParser implements MediaParser {
       let width = 0;
       let height = 0;
       let defaultDuration = 0;
+      let sampleRate = 0;
+      let channels = 1;
       for (const c of children(b, entry.body, entry.end)) {
         if (c.id === ID.TrackNumber) number = readUint(b, c.body, c.end);
         else if (c.id === ID.TrackType) type = readUint(b, c.body, c.end);
@@ -226,7 +242,27 @@ export class WebmParser implements MediaParser {
             if (v.id === ID.PixelWidth) width = readUint(b, v.body, v.end);
             else if (v.id === ID.PixelHeight) height = readUint(b, v.body, v.end);
           }
+        } else if (c.id === ID.Audio) {
+          for (const a of children(b, c.body, c.end)) {
+            if (a.id === ID.SamplingFrequency) sampleRate = readFloat(b, a.body, a.end);
+            else if (a.id === ID.Channels) channels = readUint(b, a.body, a.end) || 1;
+          }
         }
+      }
+      if (this.kind === 'audio') {
+        if (type !== 2 || !AUDIO_CODECS[codecId]) continue;
+        this.videoTrack = number; // the one track this parser follows
+        this.defaultDuration = defaultDuration ? defaultDuration / 1e9 : null;
+        // Opus always decodes at 48 kHz, whatever the container says.
+        const rate = codecId === 'A_OPUS' ? 48000 : Math.round(sampleRate) || 48000;
+        return {
+          timescale: 1e9 / this.timecodeScale,
+          configBox: null,
+          description: codecPrivate,
+          width: 0,
+          height: 0,
+          audio: { codec: AUDIO_CODECS[codecId], sampleRate: rate, channels },
+        };
       }
       if (type !== 1) continue; // video only
       this.videoTrack = number;
@@ -261,10 +297,11 @@ export class WebmParser implements MediaParser {
     const p = start + len;
     const relative = ((b[p] << 8) | b[p + 1]) << 16 >> 16; // int16
     const flags = b[p + 2];
-    if (flags & 0x06) return; // laced blocks: not used for video
+    if (flags & 0x06) return; // laced blocks: not used for video (nor by YouTube's Opus)
     this.blocks.push({
       relative: this.clusterTimecode + relative,
-      key: key ?? !!(flags & 0x80),
+      // Every audio frame decodes on its own.
+      key: this.kind === 'audio' ? true : (key ?? !!(flags & 0x80)),
       data: b.slice(p + 3, end),
       offset,
     });

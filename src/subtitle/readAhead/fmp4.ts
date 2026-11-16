@@ -9,6 +9,8 @@ export interface Fmp4Init {
   description: Uint8Array | null;
   width: number;
   height: number;
+  /** Audio tracks (WebM): WebCodecs AudioDecoder configuration; `description` is the codec private data (OpusHead). */
+  audio?: { codec: string; sampleRate: number; channels: number };
 }
 
 export interface Fmp4Sample {
