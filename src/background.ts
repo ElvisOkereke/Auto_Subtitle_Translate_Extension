@@ -259,6 +259,7 @@ class SubtitleService {
       await this.ensureOffscreenDocument();
       const response = await chrome.runtime.sendMessage({
         type: 'START_OFFSCREEN_CAPTURE',
+        tabId, // read-ahead audio is accepted from this tab only
         streamId,
         sourceLanguage
       });
@@ -318,6 +319,8 @@ class SubtitleService {
         captionId,
         source,
         speechEndedAt: timing?.speechEndedAt,
+        videoStart: timing?.videoStart,
+        videoEnd: timing?.videoEnd,
         timing: { ...timing, translationMs: performance.now() - translateStartedAt }
       });
       return;
@@ -331,6 +334,8 @@ class SubtitleService {
       captionId,
       source,
       speechEndedAt: timing?.speechEndedAt,
+      videoStart: timing?.videoStart,
+      videoEnd: timing?.videoEnd,
       timing: { ...timing, translationMs: performance.now() - translateStartedAt }
     });
     if (plan.best) {

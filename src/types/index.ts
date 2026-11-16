@@ -44,6 +44,9 @@ export type MessageType =
   | 'STOP_OFFSCREEN_CAPTURE'
   | 'TRANSCRIPTION_RESULT'
   | 'AUDIO_DIAG'
+  | 'READ_AHEAD_AUDIO'
+  | 'READ_AHEAD_STATE'
+  | 'READ_AHEAD_RESET'
   | 'TRANSCRIPTION_ERROR'
   | 'MODEL_LOADING_PROGRESS'
   | 'CAPTION_ERROR'
@@ -97,6 +100,9 @@ export interface DisplaySubtitleMessage extends ExtensionMessage {
   source?: string;
   /** When the speech of this caption ended (epoch ms, Date.now()): lets the page place it in video time. */
   speechEndedAt?: number;
+  /** Read-ahead captions: where their speech starts and ends in video time (shown then, not on arrival). */
+  videoStart?: number;
+  videoEnd?: number;
 }
 
 export interface UpgradeSubtitleMessage extends ExtensionMessage {
