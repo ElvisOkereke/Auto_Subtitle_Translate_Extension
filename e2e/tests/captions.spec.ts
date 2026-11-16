@@ -5,6 +5,7 @@ import { test, expect } from '../helpers/extension';
 import { CACHE, FIXTURES } from '../helpers/paths';
 import { speechEndSeconds } from '../helpers/audio';
 import { browserKind } from '../helpers/launch';
+import { recordCaptions, shownCaptions } from '../helpers/captions';
 
 // Real pipeline: tab audio -> tabCapture -> offscreen VAD -> Whisper (transformers.js)
 // -> mock translation API -> subtitle overlay. The Whisper model is downloaded
@@ -68,9 +69,36 @@ test.beforeEach(async ({ configure }) => {
   });
 });
 
+test('no caption appears while the media is paused, and nothing stale after resume', async ({ context, fixtureURL, openPopup }) => {
+  const page = await context.newPage();
+  await page.goto(`${fixtureURL}/captions.html?audio=hello.wav`);
+  await startCaptions(page, openPopup);
+  await waitForModel(page);
+  await recordCaptions(page);
+  await play(page);
+  // Pause during the first phrase's processing (its caption would land while paused), then resume.
+  await page.waitForTimeout(1500);
+  const pausedAt = await page.evaluate(() => {
+    const m = document.getElementById('media') as HTMLAudioElement;
+    m.pause();
+    return m.currentTime;
+  });
+  await page.waitForTimeout(3000);
+  expect(await captionLines(page).count()).toBe(0); // nothing appeared while paused
+  await page.evaluate(() => (document.getElementById('media') as HTMLAudioElement).play());
+  await expect(captionLines(page).first()).toBeVisible({ timeout: 60_000 }); // the second phrase still captions
+  await page.waitForTimeout(3000);
+  const records = await shownCaptions(page);
+  console.log(JSON.stringify({ pausedAt, records: records.map(r => ({ shownAt: r.shownAt, lineStart: r.lineStart, paused: r.pausedAtShow, text: r.text })) }));
+  expect(records.filter(r => r.pausedAtShow)).toEqual([]);
+  // Every caption shown after resume carries speech that ended at most 5 s (media time) before it appeared.
+  for (const r of records) expect(r.shownAt - r.lineStart).toBeLessThanOrEqual(5.2);
+});
+
 test('speech in a tab becomes translated subtitles', async ({ context, fixtureURL, openPopup, translationCalls, sw }) => {
   const page = await context.newPage();
   await page.goto(`${fixtureURL}/captions.html?audio=hello.wav`);
+  await recordCaptions(page);
   const popup = await startCaptions(page, openPopup);
   await waitForModel(page);
 
@@ -79,8 +107,11 @@ test('speech in a tab becomes translated subtitles', async ({ context, fixtureUR
   const last = captionLines(page).filter({ hasText: /weather/i });
   await expect(last).toBeVisible({ timeout: 60_000 });
 
-  const shown = (await captionLines(page).allTextContents()).join(' ');
-  expect(shown).toMatch(/^\[FR\] /);
+  // Each line stays for its reading time, so a short first line may be gone by
+  // the time the second appears: check every caption that was shown.
+  const records = await shownCaptions(page);
+  for (const r of records) expect(r.text).toMatch(/^\[FR\] /);
+  const shown = records.map(r => r.text).join(' ');
   expect(normalize(shown)).toContain('hello world');
   expect(normalize(shown)).toContain('the weather is very nice today');
   expect(translationCalls[0]).toMatchObject({ provider: 'deepl', target: 'FR', source: 'EN' });

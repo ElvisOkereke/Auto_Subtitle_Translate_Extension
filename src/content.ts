@@ -10,11 +10,12 @@ import {
   SubtitlePosition,
   FontSize
 } from './types';
+import { VideoClock } from './audio/videoClock';
+import { CaptionPolicy } from './audio/captionPolicy';
 
-const SUBTITLE_LINGER_MS = 6000;
 const STATUS_LINGER_MS = 2500;
 const ERROR_LINGER_MS = 6000;
-const MAX_VISIBLE_LINES = 2;
+const TICK_MS = 250;
 
 const POSITION_STYLES: Record<SubtitlePosition, Partial<CSSStyleDeclaration>> = {
   top: { top: '8%', bottom: '', transform: 'translateX(-50%)' },
@@ -31,6 +32,14 @@ export class SubtitleOverlay {
   private notices: HTMLDivElement | null = null;
   private position: SubtitlePosition = 'bottom';
   private fontSize: FontSize = 'medium';
+  // Captions follow the playing media element's time: pause freezes them, seek
+  // clears them, stale or out-of-order captions are dropped (CaptionPolicy).
+  private policy = new CaptionPolicy();
+  private clock: VideoClock | null = null;
+  private media: HTMLMediaElement | null = null;
+  private unobserve: (() => void) | null = null;
+  private ticker: number | null = null;
+  private captionSeq = 0;
 
   constructor() {
     this.setupMessageListener();
@@ -122,6 +131,7 @@ export class SubtitleOverlay {
   async toggleSubtitles(): Promise<void> {
     if (this.isActive) {
       this.isActive = false;
+      this.stopFollowing();
       this.removeOverlay();
       await this.sendSafely({ type: 'STOP_CAPTURE' });
       return;
@@ -129,6 +139,7 @@ export class SubtitleOverlay {
 
     this.isActive = true;
     this.createOverlay();
+    this.startFollowing();
     const response = await this.sendSafely({ type: 'START_CAPTURE' });
     if (!response?.success) {
       this.isActive = false;
@@ -148,6 +159,7 @@ export class SubtitleOverlay {
     if (!this.isActive) return;
     // Capture was stopped from elsewhere (e.g. captions started on another tab).
     this.isActive = false;
+    this.stopFollowing();
     this.showStatus('Captions stopped');
   }
 
@@ -183,14 +195,93 @@ export class SubtitleOverlay {
     this.notices = null;
   }
 
+  // ---- following the media element ----
+
+  /** The media element captions follow: the one playing, else the largest. */
+  private pickMedia(): HTMLMediaElement | null {
+    const all = [...document.querySelectorAll<HTMLMediaElement>('video, audio')];
+    const area = (m: HTMLMediaElement) => {
+      const r = m.getBoundingClientRect();
+      return r.width * r.height;
+    };
+    return all.find(m => !m.paused) ?? all.sort((a, b) => area(b) - area(a))[0] ?? null;
+  }
+
+  private follow(media: HTMLMediaElement | null): void {
+    if (media === this.media) return;
+    this.unobserve?.();
+    this.unobserve = null;
+    this.media = media;
+    this.clock = null;
+    if (!media) return;
+    const clock = new VideoClock();
+    this.clock = clock;
+    const unobserveClock = clock.observe(media as HTMLVideoElement, () => !!media.closest('.html5-video-player')?.classList.contains('ad-showing'));
+    const onSeeking = () => this.removeCaptions(this.policy.clear());
+    media.addEventListener('seeking', onSeeking);
+    this.unobserve = () => {
+      unobserveClock();
+      media.removeEventListener('seeking', onSeeking);
+    };
+  }
+
+  private readonly onAnyPlay = (event: Event) => {
+    if (event.target instanceof HTMLMediaElement) this.follow(event.target);
+  };
+
+  private startFollowing(): void {
+    this.follow(this.pickMedia());
+    document.addEventListener('play', this.onAnyPlay, true);
+    this.ticker = window.setInterval(() => this.tick(), TICK_MS);
+  }
+
+  private stopFollowing(): void {
+    document.removeEventListener('play', this.onAnyPlay, true);
+    if (this.ticker !== null) window.clearInterval(this.ticker);
+    this.ticker = null;
+    this.follow(null);
+    this.policy.clear();
+  }
+
+  /** Current position: the media element's time, or the wall clock on pages without one. */
+  private now(): { videoTime: number; paused: boolean; adShowing: boolean } {
+    const m = this.media;
+    if (!m) return { videoTime: Date.now() / 1000, paused: false, adShowing: false };
+    return { videoTime: m.currentTime, paused: m.paused, adShowing: !!m.closest('.html5-video-player')?.classList.contains('ad-showing') };
+  }
+
+  private tick(): void {
+    const now = this.now();
+    if (now.paused) return; // video time stands still: lines stay
+    this.removeCaptions(this.policy.tick(now.videoTime));
+  }
+
+  private removeCaptions(ids: string[]): void {
+    if (!this.captions || !ids.length) return;
+    for (const el of [...this.captions.querySelectorAll<HTMLElement>('.subtitle-text')]) {
+      if (ids.includes(el.dataset.captionId ?? '')) el.remove();
+    }
+  }
+
   displaySubtitle(text: string, timing?: Record<string, number>, captionId?: string, source?: string, speechEndedAt?: number): void {
     if (!this.isActive || !text) return;
     if (!this.captions) this.createOverlay();
+    if (!this.media || !document.contains(this.media)) this.follow(this.pickMedia());
+    const id = captionId ?? `local-${++this.captionSeq}`;
+
+    const now = this.now();
+    const ended = typeof speechEndedAt === 'number' ? speechEndedAt : Date.now();
+    const speechEndVideo = this.clock ? this.clock.videoTimeAt(ended) : this.media ? null : ended / 1000;
+    const decision = this.policy.offer(
+      { id, text, speechEndVideo },
+      { ...now, paused: now.paused || (this.clock?.pausedSince(ended) ?? false), seekedSinceSpeech: this.clock?.seekedSince(ended) ?? false }
+    );
+    if (decision === 'drop') return;
 
     const line = document.createElement('div');
     line.className = `subtitle-text ${this.fontSize}`;
     line.textContent = text;
-    if (captionId) line.dataset.captionId = captionId;
+    line.dataset.captionId = id;
     if (source) line.dataset.source = source;
     if (typeof speechEndedAt === 'number') line.dataset.speechEndedAt = String(speechEndedAt);
     if (timing) {
@@ -198,11 +289,11 @@ export class SubtitleOverlay {
       line.dataset.timing = JSON.stringify({ ...timing, displayedAt: Date.now() });
     }
     this.captions!.appendChild(line);
-    while (this.captions!.children.length > MAX_VISIBLE_LINES) {
-      this.captions!.firstElementChild!.remove();
+    // The roll: lines the policy no longer keeps (a third pushed the oldest out).
+    const keep = new Set(this.policy.visible());
+    for (const el of [...this.captions!.querySelectorAll<HTMLElement>('.subtitle-text')]) {
+      if (!keep.has(el.dataset.captionId ?? '')) el.remove();
     }
-
-    window.setTimeout(() => line.remove(), SUBTITLE_LINGER_MS);
   }
 
   upgradeSubtitle(captionId: string, text: string): void {

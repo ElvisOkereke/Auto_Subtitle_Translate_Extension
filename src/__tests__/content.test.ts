@@ -70,12 +70,60 @@ describe('content script subtitle overlay', () => {
     expect(overlay()!.querySelector('.subtitle-status')!.textContent).toBe('Speech model ready');
   });
 
+  describe('captions follow the media element', () => {
+    function media(paused: boolean, currentTime: number) {
+      const el = document.createElement('video');
+      Object.defineProperty(el, 'paused', { value: paused, writable: true, configurable: true });
+      Object.defineProperty(el, 'currentTime', { value: currentTime, writable: true, configurable: true });
+      document.body.appendChild(el);
+      return el as HTMLVideoElement & { paused: boolean; currentTime: number };
+    }
+    const lines = () => [...(overlay()?.querySelectorAll<HTMLElement>('.subtitle-text') ?? [])].map(el => el.textContent);
+
+    it('a caption arriving while the video is paused is not shown', async () => {
+      media(true, 30);
+      await chromeMock.dispatch({ type: 'TOGGLE_SUBTITLES' });
+      await chromeMock.dispatch({ type: 'DISPLAY_SUBTITLE', text: 'late', language: 'en', captionId: 'c1', speechEndedAt: Date.now() - 500 });
+      expect(lines()).toEqual([]);
+    });
+
+    it('captions stay for their reading time (video time) and freeze while paused', async () => {
+      const v = media(false, 30);
+      await chromeMock.dispatch({ type: 'TOGGLE_SUBTITLES' });
+      await chromeMock.dispatch({ type: 'DISPLAY_SUBTITLE', text: 'Hi', language: 'en', captionId: 'c1', speechEndedAt: Date.now() - 200 });
+      expect(lines()).toEqual(['Hi']);
+      // Paused at 31: however long we wait, video time stays at 31 < 30 + 1.5.
+      v.currentTime = 31;
+      v.paused = true;
+      v.dispatchEvent(new Event('pause'));
+      await new Promise(r => setTimeout(r, 400));
+      expect(lines()).toEqual(['Hi']);
+      // Playing again past its reading time: gone.
+      v.paused = false;
+      v.currentTime = 31.6;
+      v.dispatchEvent(new Event('play'));
+      v.dispatchEvent(new Event('timeupdate'));
+      await new Promise(r => setTimeout(r, 400));
+      expect(lines()).toEqual([]);
+    });
+
+    it('a seek clears the captions on screen', async () => {
+      const v = media(false, 30);
+      await chromeMock.dispatch({ type: 'TOGGLE_SUBTITLES' });
+      await chromeMock.dispatch({ type: 'DISPLAY_SUBTITLE', text: 'before the seek', language: 'en', captionId: 'c1', speechEndedAt: Date.now() - 200 });
+      v.currentTime = 90;
+      v.dispatchEvent(new Event('seeking'));
+      expect(lines()).toEqual([]);
+    });
+  });
+
   it('caption lines keep their source text and speech-end time as data attributes', async () => {
     await chromeMock.dispatch({ type: 'TOGGLE_SUBTITLES' });
-    await chromeMock.dispatch({ type: 'DISPLAY_SUBTITLE', text: 'Hello', language: 'en', captionId: 'c1', source: '안녕하세요', speechEndedAt: 1_700_000_000_000 });
+    const endedAt = Date.now() - 300; // a fresh caption (stale ones are dropped)
+    await chromeMock.dispatch({ type: 'DISPLAY_SUBTITLE', text: 'Hello', language: 'en', captionId: 'c1', source: '안녕하세요', speechEndedAt: endedAt });
     const line = overlay()!.querySelector<HTMLElement>('.subtitle-text')!;
     expect(line.dataset.source).toBe('안녕하세요');
-    expect(line.dataset.speechEndedAt).toBe('1700000000000');
+    expect(line.dataset.speechEndedAt).toBe(String(endedAt));
   });
 
   it('an upgrade replaces a displayed caption’s text in place', async () => {
