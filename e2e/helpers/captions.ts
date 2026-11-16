@@ -6,6 +6,8 @@ export interface CaptionRecord extends ShownRecord {
   captionId: string;
   /** The transcribed text (data-source). */
   source: string;
+  /** Read-ahead captions: where their speech starts in video time (null for live captions). */
+  videoStart?: number | null;
 }
 
 /**
@@ -40,11 +42,15 @@ const captionRecorder = () => {
       if (!rec) {
         const endedAt = Number(el.dataset.speechEndedAt);
         const rate = v?.playbackRate ?? 1;
+        // Read-ahead lines know their speech in video time.
+        const videoStart = el.dataset.videoStart !== undefined ? Number(el.dataset.videoStart) : null;
+        const videoEnd = el.dataset.videoEnd !== undefined ? Number(el.dataset.videoEnd) : null;
         rec = {
           captionId: id,
           shownAt: now,
           hiddenAt: null,
-          lineStart: Number.isFinite(endedAt) && endedAt > 0 ? now - ((Date.now() - endedAt) / 1000) * rate : now,
+          lineStart: videoEnd !== null ? videoEnd : Number.isFinite(endedAt) && endedAt > 0 ? now - ((Date.now() - endedAt) / 1000) * rate : now,
+          videoStart,
           text: el.textContent ?? '',
           source: el.dataset.source ?? '',
           quality: el.dataset.quality ?? 'fast',

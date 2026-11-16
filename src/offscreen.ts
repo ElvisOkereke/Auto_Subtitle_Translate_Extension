@@ -3,6 +3,7 @@ import { ExtensionMessage } from './types';
 import { SpeechSegmenter, DEFAULT_VAD_CONFIG } from './utils/vad';
 import { TimedSegmenter, TimedSegment } from './audio/timedSegmenter';
 import { fromInt16Base64 } from './audio/readAhead/pcm';
+import { isNonSpeech } from './audio/nonSpeech';
 
 // 1024 samples = 64 ms per frame: fine-grained enough that end-of-speech is
 // detected promptly (4096 = 256 ms added up to ~200 ms of caption latency).
@@ -38,7 +39,7 @@ function restartWorkerOnCpu(): void {
 }
 
 /** Capture health, reported to the background every 2 s while capturing (tests read it). */
-const diag = { frames: 0, peakRms: 0, segments: 0, results: 0, emptyResults: 0, errors: 0, lastError: '', suppressed: 0, raChunks: 0, raSegments: 0, raResults: 0, raSkipped: 0 };
+const diag = { frames: 0, peakRms: 0, segments: 0, results: 0, emptyResults: 0, errors: 0, lastError: '', nonSpeech: 0, suppressed: 0, raChunks: 0, raSegments: 0, raResults: 0, raSkipped: 0 };
 let diagTimer: number | null = null;
 function reportDiag(): void {
   chrome.runtime.sendMessage({ type: 'AUDIO_DIAG', diag: { ...diag, at: Date.now() } }).catch(() => undefined);
@@ -130,7 +131,9 @@ function handleWorkerMessage(event: MessageEvent): void {
     else diag.emptyResults++;
     const ahead = readAhead.meta.get(event.data.segmentId);
     if (ahead) diag.raResults++;
-    if (event.data.text && event.data.text.trim()) {
+    // Sound annotations ("[音楽]", "(拍手)", "♪") are not words: no caption.
+    if (event.data.text && event.data.text.trim() && isNonSpeech(event.data.text)) diag.nonSpeech++;
+    else if (event.data.text && event.data.text.trim()) {
       chrome.runtime.sendMessage({
         type: 'TRANSCRIPTION_RESULT',
         text: event.data.text,
