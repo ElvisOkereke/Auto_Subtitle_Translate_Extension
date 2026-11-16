@@ -328,19 +328,21 @@ async function slotPage(context: BrowserContext, slot: number, row: number): Pro
   return page;
 }
 
-/** play(), retried when YouTube swaps the video's source under it ("interrupted by a new load request"). */
+/**
+ * Starts playback without waiting for play()'s promise: it never settles when
+ * playback can't start (YouTube buffering for good, or swapping the source),
+ * which hung whole runs. The polling loops watch progress instead.
+ */
 async function play(page: Page): Promise<void> {
-  for (let attempt = 0; ; attempt++) {
-    try {
-      await page.evaluate(() => document.querySelector('video')!.play());
-      return;
-    } catch (e) {
-      if (attempt >= 3 || !/interrupted|AbortError/i.test(String(e))) throw e;
-      await page.waitForTimeout(1000);
-      await page.waitForSelector('video.html5-main-video', { timeout: 30_000 });
-    }
-  }
+  await page.waitForSelector('video', { timeout: 30_000 });
+  await page.evaluate(() => {
+    document.querySelector('video')!.play().catch(() => undefined);
+  });
 }
+
+/** Seconds without progress before play is re-issued, and before a piece counts as stalled. */
+const NUDGE_AFTER_S = 15;
+const STALLED_AFTER_S = 60;
 
 async function parkAt(page: Page, t: number): Promise<void> {
   await page.waitForSelector('video.html5-main-video', { timeout: 30_000 });
@@ -376,6 +378,7 @@ let heights: number[] = [];
 async function playSegment(page: Page, from: number, to: number, pauseAt: number): Promise<{ played: number; blocked: string | null }> {
   let paused = !(pauseAt >= from && pauseAt < to);
   let last = from;
+  let progressAt = Date.now();
   await page.bringToFront();
   await page.waitForSelector('video.html5-main-video', { timeout: 30_000 });
   // A window prepared ahead may have been resumed by YouTube while it waited: back to the piece's start.
@@ -398,12 +401,17 @@ async function playSegment(page: Page, from: number, to: number, pauseAt: number
     if (st.hidden) hiddenPolls++;
     if (st.error) return { played: last - from, blocked: st.error };
     if (st.ad) await waitOutAds(page);
+    if (st.t > last + 0.1) progressAt = Date.now();
+    const still = (Date.now() - progressAt) / 1000;
+    if (still > STALLED_AFTER_S) return { played: Math.max(0, last - from), blocked: `stalled at ${last.toFixed(1)} s` };
+    if (still > NUDGE_AFTER_S && Math.floor(still) % NUDGE_AFTER_S === 0) await play(page);
     last = st.t;
     if (!paused && st.t >= pauseAt) {
       paused = true;
       await page.evaluate(() => document.querySelector('video')!.pause());
       await page.waitForTimeout(PAUSE_WALL_MS);
       await play(page);
+      progressAt = Date.now();
     }
     if (st.t >= to) {
       await page.evaluate(() => document.querySelector('video')!.pause());
@@ -654,6 +662,7 @@ test.describe('audio real YouTube', () => {
         played += Math.min(r.played, to(k) - from(k));
         health.push({
           piece: k,
+          blocked: r.blocked,
           diag: await sw.evaluate(() => (self as any).__astAudioDiag?.() ?? null),
           dropped: await page.evaluate(() => JSON.parse(document.getElementById('subtitle-overlay-extension')?.dataset.dropped ?? '{}')),
           audioTrack: await page.evaluate(() => {
