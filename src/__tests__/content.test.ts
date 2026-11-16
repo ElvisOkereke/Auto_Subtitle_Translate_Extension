@@ -115,6 +115,27 @@ describe('content script subtitle overlay', () => {
       v.dispatchEvent(new Event('seeking'));
       expect(lines()).toEqual([]);
     });
+
+    it('a caption arriving during a YouTube ad is not shown', async () => {
+      const player = document.createElement('div');
+      player.className = 'html5-video-player ad-showing';
+      document.body.appendChild(player);
+      const v = media(false, 5);
+      player.appendChild(v);
+      await chromeMock.dispatch({ type: 'TOGGLE_SUBTITLES' });
+      await chromeMock.dispatch({ type: 'DISPLAY_SUBTITLE', text: 'during the ad', language: 'en', captionId: 'c1', speechEndedAt: Date.now() - 200 });
+      expect(lines()).toEqual([]);
+    });
+
+    it('with several videos, captions follow the one that is playing', async () => {
+      // A large paused video (e.g. a muted preview) and the small one actually playing.
+      const big = media(true, 400);
+      big.getBoundingClientRect = () => ({ width: 1280, height: 720 }) as DOMRect;
+      media(false, 30);
+      await chromeMock.dispatch({ type: 'TOGGLE_SUBTITLES' });
+      await chromeMock.dispatch({ type: 'DISPLAY_SUBTITLE', text: 'from the playing one', language: 'en', captionId: 'c1', speechEndedAt: Date.now() - 200 });
+      expect(lines()).toEqual(['from the playing one']);
+    });
   });
 
   it('caption lines keep their source text and speech-end time as data attributes', async () => {
