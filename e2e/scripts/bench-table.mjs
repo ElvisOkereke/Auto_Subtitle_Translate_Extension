@@ -57,13 +57,13 @@ for (const run of ['youtube', 'local']) {
       if (!b && !as.some(Boolean)) continue;
       const col = f => `${b ? f(b) : '–'} → ${as.length ? cell(as, r => (r ? f(r) : '–')) : '–'}`;
       audioRows.push(
-        `| ${run} | ${mode} | ${v.id} (${v.lang}) | ${col(r => `${r.captions}/${r.referenceLines}`)} | ${col(r => pct(r.transcriptCer))} | ${col(r => pct(r.wordsCovered))} | ${col(r => pct(r.onScreenWhileTalking))} | ${col(r => secs(r.longestGapWhileTalking))} | ${col(r => `${secs(r.delayFromSpeechEndP50)} / ${secs(r.delayFromSpeechEndP90)}`)} | ${col(r => r.timeOnScreen?.tooShort ?? '–')} | ${col(r => r.shownWhilePaused ?? '–')} |`
+        `| ${run} | ${mode} | ${v.id} (${v.lang}) | ${col(r => `${r.captions}/${r.referenceLines}`)} | ${col(r => pct(r.transcriptCer))} | ${col(r => pct(r.wordsCovered))} | ${col(r => pct(r.onScreenWhileTalking))} | ${col(r => secs(r.longestGapWhileTalking))} | ${col(r => `${secs(r.delayFromSpeechEndP50)} / ${secs(r.delayFromSpeechEndP90)}`)} | ${col(r => (r.startOffset?.matched ? `${secs(r.startOffset.absP50)} / ${pct(r.startOffset.within05)}` : '–'))} | ${col(r => r.timeOnScreen?.tooShort ?? '–')} | ${col(r => r.shownWhilePaused ?? '–')} |`
       );
     }
   }
 }
 if (audioRows.length) {
-  console.log('\n| run | mode | video | captions / ref lines | transcript CER | words covered | on screen while talking | longest gap | delay P50 / P90 | too short | shown while paused |');
-  console.log("|---|---|---|---|---|---|---|---|---|---|---|");
+  console.log('\n| run | mode | video | captions / ref lines | transcript CER | words covered | on screen while talking | longest gap | delay P50 / P90 | start offset P50 / within 0.5 s | too short | shown while paused |');
+  console.log("|---|---|---|---|---|---|---|---|---|---|---|---|");
   console.log(audioRows.join('\n'));
 }

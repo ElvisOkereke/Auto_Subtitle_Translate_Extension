@@ -332,3 +332,22 @@ export function speechCovered(ref: RefLine[], shown: ShownRecord[], window: [num
   }
   return { share: total ? covered / total : 0, longestGap };
 }
+
+/**
+ * Read-ahead timing: for each caption, the earliest reference line it covers
+ * (half or more of that line's characters in the caption), and how far the
+ * caption's appearance is from that line's start. Absolute P50/P90 and the
+ * share within 0.5 s (the spec's target).
+ */
+export function captionStartOffsets(ref: RefLine[], shown: Caption[]): { absP50: number | null; absP90: number | null; within05: number | null; matched: number } {
+  const offsets: number[] = [];
+  for (const c of shown) {
+    const covered = ref.filter(l => l.start >= c.shownAt - 3 && l.start <= c.shownAt + 10 && lcs(l.ko, sourceOf(c)) >= chars(l.ko).length / 2);
+    if (!covered.length) continue;
+    const first = covered.reduce((a, b) => (b.start < a.start ? b : a));
+    offsets.push(Math.abs(c.shownAt - first.start));
+  }
+  offsets.sort((a, b) => a - b);
+  const at = (q: number) => (offsets.length ? offsets[Math.max(0, Math.ceil(offsets.length * q) - 1)] : null);
+  return { absP50: at(0.5), absP90: at(0.9), within05: offsets.length ? offsets.filter(o => o <= 0.5).length / offsets.length : null, matched: offsets.length };
+}

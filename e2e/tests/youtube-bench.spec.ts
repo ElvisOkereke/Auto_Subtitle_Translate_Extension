@@ -21,6 +21,7 @@ import {
   transcriptCer,
   wordsCovered,
   speechCovered,
+  captionStartOffsets,
   missBuckets,
   missesBySize,
   readyBeforeShown,
@@ -608,6 +609,9 @@ async function audioReport(run: string, mode: EngineMode, video: BenchVideo, cap
     // What a viewer sees: share of talking time with a caption on screen, longest talking stretch without one.
     onScreenWhileTalking: speechCovered(ref, captions, window).share,
     longestGapWhileTalking: speechCovered(ref, captions, window).longestGap,
+    // Read-ahead: how far each caption's appearance is from its words' start (target within 0.5 s).
+    startOffset: captionStartOffsets(ref, captions),
+    readAheadCaptions: captions.filter(c => typeof c.videoStart === 'number').length,
     delayFromSpeechEndP50: delays.fromSpeechEndP50,
     delayFromSpeechEndP90: delays.fromSpeechEndP90,
     delaysMatched: delays.matched,
@@ -671,6 +675,11 @@ test.describe('audio real YouTube', () => {
           blocked: r.blocked,
           diag: await sw.evaluate(() => (self as any).__astAudioDiag?.() ?? null),
           dropped: await page.evaluate(() => JSON.parse(document.getElementById('subtitle-overlay-extension')?.dataset.dropped ?? '{}')),
+          path: await page.evaluate(() => document.getElementById('subtitle-overlay-extension')?.dataset.path ?? null),
+          readAhead: await page.evaluate(() => {
+            const o = document.getElementById('subtitle-overlay-extension');
+            return { scheduled: Number(o?.dataset.raScheduled ?? 0), dropped: JSON.parse(o?.dataset.raDropped ?? '{}'), tap: (window as any).__astAudioTapStats ?? null };
+          }),
           audioTrack: await page.evaluate(() => {
             const t = (document.getElementById('movie_player') as any)?.getAudioTrack?.();
             const info: any = Object.values(t ?? {}).find((x: any) => x && typeof x === 'object' && 'isAutoDubbed' in x);

@@ -1,4 +1,4 @@
-import { captionDelays, speechCovered, transcriptCer, wordsCovered, type RefLine, type ShownRecord } from '../metrics';
+import { captionDelays, captionStartOffsets, speechCovered, transcriptCer, wordsCovered, type RefLine, type ShownRecord } from '../metrics';
 
 const cap = (over: Partial<ShownRecord & { source: string }>): ShownRecord & { source: string } => ({
   shownAt: 0,
@@ -62,5 +62,34 @@ describe('speechCovered: is a caption on screen while someone is talking', () =>
   it('a caption still up when the run ended counts until the window end', () => {
     const r = speechCovered(ref, [cap({ shownAt: 36, hiddenAt: null })], [0, 38]);
     expect(r.share).toBeCloseTo(2 / 18); // speech in window: 10-20, 30-38
+  });
+});
+
+describe('captionStartOffsets: does a caption start when its words do (read-ahead target ±0.5 s)', () => {
+  const ref: RefLine[] = [
+    { start: 10, end: 12, ko: '안녕하세요 여러분' },
+    { start: 12.5, end: 14, ko: '오늘 경기 시작합니다' },
+    { start: 20, end: 22, ko: '골입니다' },
+  ];
+
+  it('offset from the earliest reference line the caption covers; share within 0.5 s', () => {
+    const shown = [
+      cap({ shownAt: 10.2, source: '안녕하세요 여러분 오늘 경기 시작합니다' }), // covers lines 1-2: +0.2
+      cap({ shownAt: 21, source: '골입니다' }), // +1.0
+    ];
+    const r = captionStartOffsets(ref, shown);
+    expect(r.matched).toBe(2);
+    expect(r.absP50).toBeCloseTo(0.2);
+    expect(r.absP90).toBeCloseTo(1.0);
+    expect(r.within05).toBeCloseTo(0.5);
+  });
+
+  it('a caption early by 0.3 s counts as within', () => {
+    const r = captionStartOffsets(ref, [cap({ shownAt: 19.7, source: '골입니다' })]);
+    expect(r.within05).toBe(1);
+  });
+
+  it('captions matching nothing are not counted', () => {
+    expect(captionStartOffsets(ref, [cap({ shownAt: 30, source: '전혀 다른 말' })]).matched).toBe(0);
   });
 });
