@@ -562,6 +562,9 @@ test.describe('local copies', () => {
 const audioVideos = benchVideos.filter(v => v.mode === 'audio' && v.reference);
 
 /** Turns Audio mode on in a tab (what the popup's Start live captions does). */
+/** Seconds an audio piece plays past its end so the last phrase's caption can arrive. */
+const CAPTION_TAIL_S = 4;
+
 async function startAudioMode(sw: Worker, page: Page, tabIdOf: (p: Page) => Promise<number>): Promise<void> {
   const tabId = await tabIdOf(page);
   await expect
@@ -619,7 +622,7 @@ test.describe('audio real YouTube', () => {
 
   for (const mode of MODES) for (const video of audioVideos) {
     test(`audio benchmark ${video.id} [${mode}]`, async ({ context, configure, sw, server, tabIdOf }, testInfo) => {
-      test.setTimeout(900_000);
+      test.setTimeout(1_800_000); // includes a first-time speech model download (up to 20 min)
       await configure({ ...engineSettings(mode, server), sourceLanguage: video.lang });
       await clearTranslationState(sw);
       await recordCaptionsOnEveryLoad(context);
@@ -644,10 +647,11 @@ test.describe('audio real YouTube', () => {
         await startAudioMode(sw, page, tabIdOf);
         // A build in a new folder is a new extension id with an empty model cache: the first
         // window waits (paused) for the speech model, so no run measures a model download.
-        if (k === 0) await waitForSpeechModel(page);
-        const r = await playSegment(page, from(k), to(k), video.start + PAUSE_AFTER_S);
-        played += r.played;
-        await page.waitForTimeout(4000); // the last phrase's caption arrives after its speech
+        if (k === 0) await waitForSpeechModel(page, 1_200_000);
+        // Play on past the piece's end while the last phrase's caption arrives (a viewer's
+        // video keeps playing; pausing here would make the extension rightly drop it).
+        const r = await playSegment(page, from(k), to(k) + CAPTION_TAIL_S, video.start + PAUSE_AFTER_S);
+        played += Math.min(r.played, to(k) - from(k));
         health.push({
           piece: k,
           diag: await sw.evaluate(() => (self as any).__astAudioDiag?.() ?? null),
@@ -658,7 +662,8 @@ test.describe('audio real YouTube', () => {
             return info ? { name: info.name, dubbed: info.isAutoDubbed } : null;
           }),
         });
-        captions.push(...(await shownCaptions(page)).filter(c => c.shownAt >= from(k) && c.shownAt < to(k) + 4));
+        // Each piece keeps the captions whose speech ended inside it (the next window replays the tail).
+        captions.push(...(await shownCaptions(page)).filter(c => c.lineStart >= from(k) && c.lineStart < to(k)));
         if (k + 1 < pieces) {
           const next = await pending!;
           await page.goto('about:blank');
