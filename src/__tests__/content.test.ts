@@ -88,21 +88,26 @@ describe('content script subtitle overlay', () => {
       expect(JSON.parse(overlay()!.dataset.dropped!)).toEqual({ paused: 1 });
     });
 
-    it('captions stay for their reading time (video time) and freeze while paused', async () => {
+    it('the newest caption holds (video time) and freezes while paused', async () => {
       const v = media(false, 30);
       await chromeMock.dispatch({ type: 'TOGGLE_SUBTITLES' });
       await chromeMock.dispatch({ type: 'DISPLAY_SUBTITLE', text: 'Hi', language: 'en', captionId: 'c1', speechEndedAt: Date.now() - 200 });
       expect(lines()).toEqual(['Hi']);
-      // Paused at 31: however long we wait, video time stays at 31 < 30 + 1.5.
+      // Paused at 31: however long we wait, video time stays at 31.
       v.currentTime = 31;
       v.paused = true;
       v.dispatchEvent(new Event('pause'));
       await new Promise(r => setTimeout(r, 400));
       expect(lines()).toEqual(['Hi']);
-      // Playing again past its reading time: gone.
+      // Playing again past its reading time: as the newest line it still holds...
       v.paused = false;
       v.currentTime = 31.6;
       v.dispatchEvent(new Event('play'));
+      v.dispatchEvent(new Event('timeupdate'));
+      await new Promise(r => setTimeout(r, 400));
+      expect(lines()).toEqual(['Hi']);
+      // ...until 7 s of video after it appeared.
+      v.currentTime = 37.1;
       v.dispatchEvent(new Event('timeupdate'));
       await new Promise(r => setTimeout(r, 400));
       expect(lines()).toEqual([]);

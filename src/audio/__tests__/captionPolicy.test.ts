@@ -50,9 +50,10 @@ describe('CaptionPolicy (live audio captions, video time)', () => {
     p.offer({ id: 'a', text: 'Hi', speechEndVideo: 10 }, playing(10.5)); // 1.5 s minimum
     p.offer({ id: 'b', text: 'x'.repeat(60), speechEndVideo: 10.6 }, playing(11)); // 4 s
     expect(p.tick(11.9)).toEqual([]);
-    expect(p.tick(12.0)).toEqual(['a']);
-    expect(p.tick(14.9)).toEqual([]);
-    expect(p.tick(15.0)).toEqual(['b']);
+    expect(p.tick(12.0)).toEqual(['a']); // a newer line is up: the older one goes at its reading time
+    expect(p.tick(15.0)).toEqual([]); // b is the newest: it holds past its reading time (4 s)...
+    expect(p.tick(17.9)).toEqual([]);
+    expect(p.tick(18.0)).toEqual(['b']); // ...until 7 s after it appeared
   });
 
   it('nothing advances while the video is paused (no ticks): a paused line stays', () => {
@@ -68,6 +69,7 @@ describe('CaptionPolicy (live audio captions, video time)', () => {
     p.offer({ id: 'a', text: 'Hi', speechEndVideo: 10 }, playing(10.5));
     expect(p.upgrade('a', 'Hello', 10.5)).toBe(true);
     expect(p.upgrade('gone', 'x', 10.5)).toBe(false);
+    p.offer({ id: 'b', text: 'next', speechEndVideo: 10.8 }, playing(11));
     expect(p.tick(12.0)).toEqual(['a']); // still 10.5 + 1.5 (from the shown text)
   });
 
@@ -81,7 +83,8 @@ describe('CaptionPolicy (live audio captions, video time)', () => {
   it('unknown speech time (no clock yet): shown, timed from now', () => {
     const p = new CaptionPolicy();
     expect(p.offer({ id: 'a', text: 'Hi', speechEndVideo: null }, playing(20))).toBe('show');
-    expect(p.tick(21.5)).toEqual(['a']);
+    expect(p.tick(21.5)).toEqual([]); // the newest line holds...
+    expect(p.tick(27)).toEqual(['a']); // ...up to 7 s
   });
 });
 
@@ -108,6 +111,7 @@ describe('CaptionPolicy at other playback rates, upgrades, unknown times (final 
   it('at 2x, a line still stays its reading time in real seconds', () => {
     const p = new CaptionPolicy();
     p.offer({ id: 'a', text: 'Hi', speechEndVideo: 10 }, playing(10.5, { rate: 2 })); // 1.5 s real = 3 s of video
+    p.offer({ id: 'b', text: 'next', speechEndVideo: 10.8 }, playing(11, { rate: 2 }));
     expect(p.tick(13.4)).toEqual([]);
     expect(p.tick(13.5)).toEqual(['a']);
   });
@@ -116,6 +120,7 @@ describe('CaptionPolicy at other playback rates, upgrades, unknown times (final 
     const p = new CaptionPolicy();
     p.offer({ id: 'a', text: 'Hi', speechEndVideo: 10 }, playing(10.5)); // until 12
     expect(p.upgrade('a', 'x'.repeat(60), 11, 1)).toBe(true); // 4 s from 11 -> 15
+    p.offer({ id: 'b', text: 'next', speechEndVideo: 11.2 }, playing(11.5));
     expect(p.tick(14.9)).toEqual([]);
     expect(p.tick(15)).toEqual(['a']);
   });
@@ -124,5 +129,31 @@ describe('CaptionPolicy at other playback rates, upgrades, unknown times (final 
     const p = new CaptionPolicy();
     p.offer({ id: 'a', text: 'x', speechEndVideo: null }, playing(20));
     expect(p.offer({ id: 'b', text: 'y', speechEndVideo: 19.5 }, playing(20.1))).toBe('show');
+  });
+});
+
+describe('CaptionPolicy: the newest line holds until the next caption (screen not left empty)', () => {
+  it('the newest line stays past its reading time, up to 7 s after it appeared', () => {
+    const p = new CaptionPolicy();
+    p.offer({ id: 'a', text: 'Hi', speechEndVideo: 10 }, playing(10.5));
+    expect(p.tick(12.5)).toEqual([]);
+    expect(p.tick(17.4)).toEqual([]);
+    expect(p.tick(17.5)).toEqual(['a']);
+  });
+
+  it('when the next caption arrives after the reading time, the held line goes at once', () => {
+    const p = new CaptionPolicy();
+    p.offer({ id: 'a', text: 'Hi', speechEndVideo: 10 }, playing(10.5));
+    expect(p.tick(14)).toEqual([]);
+    p.offer({ id: 'b', text: 'next', speechEndVideo: 13.8 }, playing(14.2));
+    expect(p.tick(14.25)).toEqual(['a']);
+    expect(p.visible()).toEqual(['b']);
+  });
+
+  it('at 2x the hold is 7 real seconds (14 s of video)', () => {
+    const p = new CaptionPolicy();
+    p.offer({ id: 'a', text: 'Hi', speechEndVideo: 10 }, playing(10.5, { rate: 2 }));
+    expect(p.tick(24.4)).toEqual([]);
+    expect(p.tick(24.5)).toEqual(['a']);
   });
 });

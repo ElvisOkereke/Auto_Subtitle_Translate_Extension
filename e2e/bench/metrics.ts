@@ -292,3 +292,43 @@ export function wordsCovered(ref: RefLine[], shown: Caption[]): number {
   }
   return total ? covered / total : 0;
 }
+
+/** Merges intervals [a, b] into a sorted, disjoint list. */
+function union(intervals: [number, number][]): [number, number][] {
+  const sorted = intervals.filter(([a, b]) => b > a).sort((x, y) => x[0] - y[0]);
+  const out: [number, number][] = [];
+  for (const [a, b] of sorted) {
+    const last = out[out.length - 1];
+    if (last && a <= last[1]) last[1] = Math.max(last[1], b);
+    else out.push([a, b]);
+  }
+  return out;
+}
+
+/**
+ * What a viewer sees: the share of talking time (reference caption spans inside
+ * the window) with a caption on screen, and the longest stretch of talking with
+ * none. A caption still up when the run ended counts until the window end.
+ */
+export function speechCovered(ref: RefLine[], shown: ShownRecord[], window: [number, number]): { share: number; longestGap: number } {
+  const clip = ([a, b]: [number, number]): [number, number] => [Math.max(a, window[0]), Math.min(b, window[1])];
+  const speech = union(ref.map(l => clip([l.start, l.end])));
+  const onScreen = union(shown.map(s => clip([s.shownAt, s.hiddenAt ?? window[1]])));
+  let total = 0;
+  let covered = 0;
+  let longestGap = 0;
+  for (const [a, b] of speech) {
+    total += b - a;
+    let cursor = a;
+    for (const [c, d] of onScreen) {
+      if (d <= a || c >= b) continue;
+      const from = Math.max(a, c);
+      const to = Math.min(b, d);
+      longestGap = Math.max(longestGap, from - cursor);
+      covered += to - from;
+      cursor = Math.max(cursor, to);
+    }
+    longestGap = Math.max(longestGap, b - cursor);
+  }
+  return { share: total ? covered / total : 0, longestGap };
+}

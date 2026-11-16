@@ -20,6 +20,7 @@ import {
   captionDelays,
   transcriptCer,
   wordsCovered,
+  speechCovered,
   missBuckets,
   missesBySize,
   readyBeforeShown,
@@ -604,6 +605,9 @@ async function audioReport(run: string, mode: EngineMode, video: BenchVideo, cap
     referenceLines: ref.length,
     transcriptCer: transcriptCer(ref, captions, window),
     wordsCovered: wordsCovered(ref, captions),
+    // What a viewer sees: share of talking time with a caption on screen, longest talking stretch without one.
+    onScreenWhileTalking: speechCovered(ref, captions, window).share,
+    longestGapWhileTalking: speechCovered(ref, captions, window).longestGap,
     delayFromSpeechEndP50: delays.fromSpeechEndP50,
     delayFromSpeechEndP90: delays.fromSpeechEndP90,
     delaysMatched: delays.matched,
@@ -614,6 +618,8 @@ async function audioReport(run: string, mode: EngineMode, video: BenchVideo, cap
     sample: pairs.slice(0, 5),
     // Seconds from the end of each caption's speech to its appearance (video time).
     lateness: captions.map(c => Math.round((c.shownAt - c.lineStart) * 10) / 10),
+    // Every caption as shown (video seconds), so later metrics can be computed without a re-run.
+    records: captions.map(c => ({ shownAt: c.shownAt, hiddenAt: c.hiddenAt, lineStart: c.lineStart, quality: c.quality, source: c.source, text: c.text })),
     ...extra,
   };
   fs.mkdirSync(OUT, { recursive: true });
@@ -672,7 +678,12 @@ test.describe('audio real YouTube', () => {
           }),
         });
         // Each piece keeps the captions whose speech ended inside it (the next window replays the tail).
-        captions.push(...(await shownCaptions(page)).filter(c => c.lineStart >= from(k) && c.lineStart < to(k)));
+        captions.push(
+          ...(await shownCaptions(page))
+            .filter(c => c.lineStart >= from(k) && c.lineStart < to(k))
+            // Still up when this window is left: it was on screen until then.
+            .map(c => ({ ...c, hiddenAt: c.hiddenAt ?? to(k) + CAPTION_TAIL_S }))
+        );
         if (k + 1 < pieces) {
           const next = await pending!;
           await page.goto('about:blank');
