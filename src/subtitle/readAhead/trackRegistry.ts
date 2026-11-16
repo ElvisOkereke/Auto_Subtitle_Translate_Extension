@@ -6,6 +6,8 @@ import { MediaParser, WebmParser, webCodecsVideoCodec } from './webm';
 
 export interface TapTrack<M> {
   mediaSource: M;
+  /** 'audio' for the audio SourceBuffer (audio read-ahead); video otherwise. */
+  kind: 'video' | 'audio';
   codec: string;
   parser: MediaParser;
   init: Fmp4Init | null;
@@ -21,15 +23,29 @@ export function tappedContainer(mime: string): 'mp4' | 'webm' | null {
 /** WebCodecs codec string from a SourceBuffer MIME type. */
 export const codecOf = (mime: string) => webCodecsVideoCodec(mime.match(/codecs="?([^",]+)/i)?.[1] ?? '');
 
+/** Which tapped track a SourceBuffer MIME type is: video (fMP4/WebM), audio (WebM: YouTube's Opus), or none. */
+export function tappedKind(mime: string): 'video' | 'audio' | null {
+  if (tappedContainer(mime)) return 'video';
+  return /^audio\/webm/i.test(mime) ? 'audio' : null;
+}
+
+/** WebCodecs audio codec string from a SourceBuffer MIME type. */
+export const audioCodecOf = (mime: string) => (mime.match(/codecs="?([^",]+)/i)?.[1] ?? '').trim().toLowerCase();
+
 /**
  * SourceBuffer.changeType(): the next segments may be another container and
  * codec. The parser follows the new container and what the old one parsed is
  * dropped (it can't be decoded with the new configuration).
  */
 export function retypeTrack<M extends object>(track: TapTrack<M>, mime: string): void {
-  const container = tappedContainer(mime) ?? 'mp4';
-  track.parser = container === 'webm' ? new WebmParser() : new Fmp4Parser();
-  track.codec = codecOf(mime);
+  if (track.kind === 'audio') {
+    track.parser = new WebmParser('audio');
+    track.codec = audioCodecOf(mime);
+  } else {
+    const container = tappedContainer(mime) ?? 'mp4';
+    track.parser = container === 'webm' ? new WebmParser() : new Fmp4Parser();
+    track.codec = codecOf(mime);
+  }
   track.init = null;
   track.fragments = [];
   track.bytes = 0;
@@ -60,9 +76,9 @@ export class TrackRegistry<M extends object> {
     if (!inUse) this.urls.delete(url);
   }
 
-  addTrack(mediaSource: M, codec: string, container: 'mp4' | 'webm' = 'mp4'): TapTrack<M> {
-    const parser = container === 'webm' ? new WebmParser() : new Fmp4Parser();
-    const track: TapTrack<M> = { mediaSource, codec, parser, init: null, fragments: [], bytes: 0 };
+  addTrack(mediaSource: M, codec: string, container: 'mp4' | 'webm' = 'mp4', kind: 'video' | 'audio' = 'video'): TapTrack<M> {
+    const parser = kind === 'audio' ? new WebmParser('audio') : container === 'webm' ? new WebmParser() : new Fmp4Parser();
+    const track: TapTrack<M> = { mediaSource, kind, codec, parser, init: null, fragments: [], bytes: 0 };
     this.tracks.push(track);
     return track;
   }
@@ -84,18 +100,28 @@ export class TrackRegistry<M extends object> {
 
   /** The newest initialised video track of the MediaSource the video element plays. */
   active(videoSrc: string | null | undefined): TapTrack<M> | null {
+    return this.newest(videoSrc, 'video');
+  }
+
+  /** The newest initialised audio track of the MediaSource the video element plays. */
+  activeAudio(videoSrc: string | null | undefined): TapTrack<M> | null {
+    return this.newest(videoSrc, 'audio');
+  }
+
+  private newest(videoSrc: string | null | undefined, kind: 'video' | 'audio'): TapTrack<M> | null {
     const ms = videoSrc ? this.urls.get(videoSrc) : undefined;
     if (!ms) return null;
     for (let i = this.tracks.length - 1; i >= 0; i--) {
-      if (this.tracks[i].mediaSource === ms && this.tracks[i].init) return this.tracks[i];
+      const t = this.tracks[i];
+      if (t.mediaSource === ms && t.kind === kind && t.init) return t;
     }
     return null;
   }
 
-  /** Only the playing stream is read ahead; everything else drops its stored video. */
-  releaseInactive(active: TapTrack<M> | null): void {
+  /** Only the playing stream is read ahead; everything else drops what it stored. */
+  releaseInactive(...active: (TapTrack<M> | null)[]): void {
     for (const t of this.tracks) {
-      if (t === active) continue;
+      if (active.includes(t)) continue;
       t.fragments = [];
       t.bytes = 0;
     }
