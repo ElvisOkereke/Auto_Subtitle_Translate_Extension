@@ -13,6 +13,9 @@ import {
 import { VideoClock } from './audio/videoClock';
 import { CaptionPolicy } from './audio/captionPolicy';
 
+/** Playing media is heard only when not muted and with volume up. */
+const isAudible = (m: HTMLMediaElement): boolean => !m.muted && m.volume > 0;
+
 const STATUS_LINGER_MS = 2500;
 const ERROR_LINGER_MS = 6000;
 const TICK_MS = 250;
@@ -197,14 +200,19 @@ export class SubtitleOverlay {
 
   // ---- following the media element ----
 
-  /** The media element captions follow: the one playing, else the largest. */
+  /**
+   * The media element captions follow: the largest one playing with sound, else
+   * the largest with sound. Muted media (hover previews, background loops) is
+   * never followed: it isn't what is being heard.
+   */
   private pickMedia(): HTMLMediaElement | null {
-    const all = [...document.querySelectorAll<HTMLMediaElement>('video, audio')];
+    const audible = [...document.querySelectorAll<HTMLMediaElement>('video, audio')].filter(isAudible);
     const area = (m: HTMLMediaElement) => {
       const r = m.getBoundingClientRect();
       return r.width * r.height;
     };
-    return all.find(m => !m.paused) ?? all.sort((a, b) => area(b) - area(a))[0] ?? null;
+    const largest = (ms: HTMLMediaElement[]) => ms.sort((a, b) => area(b) - area(a))[0] ?? null;
+    return largest(audible.filter(m => !m.paused)) ?? largest(audible);
   }
 
   private follow(media: HTMLMediaElement | null): void {
@@ -213,20 +221,24 @@ export class SubtitleOverlay {
     this.unobserve = null;
     this.media = media;
     this.clock = null;
+    // Another video's times mean nothing for this one: start from a clean slate.
+    this.removeCaptions(this.policy.clear());
     if (!media) return;
     const clock = new VideoClock();
     this.clock = clock;
     const unobserveClock = clock.observe(media as HTMLVideoElement, () => !!media.closest('.html5-video-player')?.classList.contains('ad-showing'));
-    const onSeeking = () => this.removeCaptions(this.policy.clear());
-    media.addEventListener('seeking', onSeeking);
+    const onJump = () => this.removeCaptions(this.policy.clear());
+    media.addEventListener('seeking', onJump);
+    media.addEventListener('emptied', onJump);
     this.unobserve = () => {
       unobserveClock();
-      media.removeEventListener('seeking', onSeeking);
+      media.removeEventListener('seeking', onJump);
+      media.removeEventListener('emptied', onJump);
     };
   }
 
   private readonly onAnyPlay = (event: Event) => {
-    if (event.target instanceof HTMLMediaElement) this.follow(event.target);
+    if (event.target instanceof HTMLMediaElement && isAudible(event.target)) this.follow(event.target);
   };
 
   private startFollowing(): void {
@@ -240,14 +252,14 @@ export class SubtitleOverlay {
     if (this.ticker !== null) window.clearInterval(this.ticker);
     this.ticker = null;
     this.follow(null);
-    this.policy.clear();
+    this.removeCaptions(this.policy.clear()); // also on pages without media (wall clock)
   }
 
   /** Current position: the media element's time, or the wall clock on pages without one. */
-  private now(): { videoTime: number; paused: boolean; adShowing: boolean } {
+  private now(): { videoTime: number; paused: boolean; adShowing: boolean; rate: number } {
     const m = this.media;
-    if (!m) return { videoTime: Date.now() / 1000, paused: false, adShowing: false };
-    return { videoTime: m.currentTime, paused: m.paused, adShowing: !!m.closest('.html5-video-player')?.classList.contains('ad-showing') };
+    if (!m) return { videoTime: Date.now() / 1000, paused: false, adShowing: false, rate: 1 };
+    return { videoTime: m.currentTime, paused: m.paused, adShowing: !!m.closest('.html5-video-player')?.classList.contains('ad-showing'), rate: m.playbackRate || 1 };
   }
 
   private tick(): void {
@@ -266,7 +278,11 @@ export class SubtitleOverlay {
   displaySubtitle(text: string, timing?: Record<string, number>, captionId?: string, source?: string, speechEndedAt?: number): void {
     if (!this.isActive || !text) return;
     if (!this.captions) this.createOverlay();
-    if (!this.media || !document.contains(this.media)) this.follow(this.pickMedia());
+    if (!this.media || !document.contains(this.media) || this.media.paused) {
+      // Gone, or paused while another audible element plays: follow what is heard now.
+      const pick = this.pickMedia();
+      if (!this.media || !document.contains(this.media) || (pick && !pick.paused)) this.follow(pick);
+    }
     const id = captionId ?? `local-${++this.captionSeq}`;
 
     const now = this.now();
@@ -306,6 +322,8 @@ export class SubtitleOverlay {
     if (line) {
       line.textContent = text;
       line.dataset.quality = 'better';
+      const now = this.now();
+      this.policy.upgrade(captionId, text, now.videoTime, now.rate);
     }
   }
 

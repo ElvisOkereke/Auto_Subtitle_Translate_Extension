@@ -1,6 +1,6 @@
 import { CaptionPolicy } from '../captionPolicy';
 
-const playing = (videoTime: number, over: Partial<{ paused: boolean; adShowing: boolean; seekedSinceSpeech: boolean }> = {}) => ({
+const playing = (videoTime: number, over: Partial<{ paused: boolean; adShowing: boolean; seekedSinceSpeech: boolean; rate: number }> = {}) => ({
   videoTime,
   paused: false,
   adShowing: false,
@@ -66,8 +66,8 @@ describe('CaptionPolicy (live audio captions, video time)', () => {
   it('an upgrade replaces the text of a visible line and keeps its timing', () => {
     const p = new CaptionPolicy();
     p.offer({ id: 'a', text: 'Hi', speechEndVideo: 10 }, playing(10.5));
-    expect(p.upgrade('a', 'Hello')).toBe(true);
-    expect(p.upgrade('gone', 'x')).toBe(false);
+    expect(p.upgrade('a', 'Hello', 10.5)).toBe(true);
+    expect(p.upgrade('gone', 'x', 10.5)).toBe(false);
     expect(p.tick(12.0)).toEqual(['a']); // still 10.5 + 1.5 (from the shown text)
   });
 
@@ -95,5 +95,34 @@ describe('CaptionPolicy drop counts (benchmark diagnostics)', () => {
     p.offer({ id: 'e', text: 'x', speechEndVideo: 12 }, playing(12.5));
     p.offer({ id: 'f', text: 'x', speechEndVideo: 11 }, playing(12.6));
     expect(p.drops).toEqual({ paused: 1, ad: 1, seek: 1, stale: 1, order: 1 });
+  });
+});
+
+describe('CaptionPolicy at other playback rates, upgrades, unknown times (final review)', () => {
+  it('at 2x, staleness is counted in real seconds: 8 s of video is 4 s of watching', () => {
+    const p = new CaptionPolicy();
+    expect(p.offer({ id: 'a', text: 'x', speechEndVideo: 10 }, playing(18, { rate: 2 }))).toBe('show');
+    expect(p.offer({ id: 'b', text: 'x', speechEndVideo: 10.5 }, playing(21, { rate: 2 }))).toBe('drop'); // 5.25 s real
+  });
+
+  it('at 2x, a line still stays its reading time in real seconds', () => {
+    const p = new CaptionPolicy();
+    p.offer({ id: 'a', text: 'Hi', speechEndVideo: 10 }, playing(10.5, { rate: 2 })); // 1.5 s real = 3 s of video
+    expect(p.tick(13.4)).toEqual([]);
+    expect(p.tick(13.5)).toEqual(['a']);
+  });
+
+  it('an upgrade with longer text extends the line to the reading time of the new text', () => {
+    const p = new CaptionPolicy();
+    p.offer({ id: 'a', text: 'Hi', speechEndVideo: 10 }, playing(10.5)); // until 12
+    expect(p.upgrade('a', 'x'.repeat(60), 11, 1)).toBe(true); // 4 s from 11 -> 15
+    expect(p.tick(14.9)).toEqual([]);
+    expect(p.tick(15)).toEqual(['a']);
+  });
+
+  it('a caption with an unknown speech time does not block the next timed caption', () => {
+    const p = new CaptionPolicy();
+    p.offer({ id: 'a', text: 'x', speechEndVideo: null }, playing(20));
+    expect(p.offer({ id: 'b', text: 'y', speechEndVideo: 19.5 }, playing(20.1))).toBe('show');
   });
 });

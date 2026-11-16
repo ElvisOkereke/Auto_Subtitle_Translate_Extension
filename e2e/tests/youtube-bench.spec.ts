@@ -561,10 +561,10 @@ test.describe('local copies', () => {
 
 const audioVideos = benchVideos.filter(v => v.mode === 'audio' && v.reference);
 
-/** Turns Audio mode on in a tab (what the popup's Start live captions does). */
 /** Seconds an audio piece plays past its end so the last phrase's caption can arrive. */
 const CAPTION_TAIL_S = 4;
 
+/** Turns Audio mode on in a tab (what the popup's Start live captions does). */
 async function startAudioMode(sw: Worker, page: Page, tabIdOf: (p: Page) => Promise<number>): Promise<void> {
   const tabId = await tabIdOf(page);
   await expect

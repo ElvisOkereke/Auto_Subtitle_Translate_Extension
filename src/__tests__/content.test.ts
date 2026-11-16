@@ -137,6 +137,40 @@ describe('content script subtitle overlay', () => {
       await chromeMock.dispatch({ type: 'DISPLAY_SUBTITLE', text: 'from the playing one', language: 'en', captionId: 'c1', speechEndedAt: Date.now() - 200 });
       expect(lines()).toEqual(['from the playing one']);
     });
+
+    it('when another video starts, captions follow it from a clean slate', async () => {
+      const a = media(false, 600);
+      await chromeMock.dispatch({ type: 'TOGGLE_SUBTITLES' });
+      await chromeMock.dispatch({ type: 'DISPLAY_SUBTITLE', text: 'from video A', language: 'en', captionId: 'a1', speechEndedAt: Date.now() - 200 });
+      expect(lines()).toEqual(['from video A']);
+      a.paused = true;
+      a.dispatchEvent(new Event('pause'));
+      const b = media(false, 10);
+      b.dispatchEvent(new Event('play', { bubbles: false }));
+      await chromeMock.dispatch({ type: 'DISPLAY_SUBTITLE', text: 'from video B', language: 'en', captionId: 'b1', speechEndedAt: Date.now() - 200 });
+      expect(lines()).toEqual(['from video B']);
+    });
+
+    it('a muted video that plays (a hover preview, a background loop) is not followed', async () => {
+      media(false, 30); // the one with the sound
+      await chromeMock.dispatch({ type: 'TOGGLE_SUBTITLES' });
+      const preview = media(false, 2);
+      preview.muted = true;
+      preview.dispatchEvent(new Event('play'));
+      preview.paused = true; // the preview stops; the real video keeps playing
+      preview.dispatchEvent(new Event('pause'));
+      await chromeMock.dispatch({ type: 'DISPLAY_SUBTITLE', text: 'still captioned', language: 'en', captionId: 'c1', speechEndedAt: Date.now() - 200 });
+      expect(lines()).toEqual(['still captioned']);
+    });
+
+    it('a new source on the followed video (next item, no seek) clears the screen', async () => {
+      const v = media(false, 300);
+      await chromeMock.dispatch({ type: 'TOGGLE_SUBTITLES' });
+      await chromeMock.dispatch({ type: 'DISPLAY_SUBTITLE', text: 'previous video', language: 'en', captionId: 'c1', speechEndedAt: Date.now() - 200 });
+      v.currentTime = 0;
+      v.dispatchEvent(new Event('emptied'));
+      expect(lines()).toEqual([]);
+    });
   });
 
   it('caption lines keep their source text and speech-end time as data attributes', async () => {
@@ -191,6 +225,14 @@ describe('content script subtitle overlay', () => {
     await chromeMock.dispatch({ type: 'CAPTURE_STOPPED' });
     expect(await chromeMock.dispatch({ type: 'GET_SUBTITLE_STATE' })).toEqual({ active: false });
     expect(overlay()!.textContent).toContain('Captions stopped');
+  });
+
+  it('removes its caption lines when capture is stopped elsewhere', async () => {
+    await chromeMock.dispatch({ type: 'TOGGLE_SUBTITLES' });
+    await chromeMock.dispatch({ type: 'DISPLAY_SUBTITLE', text: 'last words', language: 'en', captionId: 'c1', speechEndedAt: Date.now() - 200 });
+    expect(overlay()!.querySelectorAll('.subtitle-text').length).toBe(1);
+    await chromeMock.dispatch({ type: 'CAPTURE_STOPPED' });
+    expect(overlay()!.querySelectorAll('.subtitle-text').length).toBe(0);
   });
 
   it('does not observe DOM mutations on the host page', () => {

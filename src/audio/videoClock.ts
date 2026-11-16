@@ -84,6 +84,8 @@ export class VideoClock {
       ['playing', () => push('play')],
       ['pause', () => push('pause')],
       ['seeking', () => push('seek')],
+      // A new source (the next item in a playlist) is a jump like a seek.
+      ['emptied', () => push('seek')],
       ['ratechange', () => push('rate')],
       [
         'timeupdate',
