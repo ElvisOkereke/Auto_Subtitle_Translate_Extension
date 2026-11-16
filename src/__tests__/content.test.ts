@@ -168,6 +168,68 @@ describe('content script subtitle overlay', () => {
       expect(lines()).toEqual(['still captioned']);
     });
 
+    describe('read-ahead captions (shown by video time)', () => {
+      const raLines = () => [...(overlay()?.querySelectorAll<HTMLElement>('.subtitle-text[data-video-start]') ?? [])].map(el => el.textContent);
+      const wait = (ms: number) => new Promise(r => setTimeout(r, ms));
+      const bufferedTo = (v: HTMLVideoElement, end: number) =>
+        Object.defineProperty(v, 'buffered', { value: { length: 1, start: () => 0, end: () => end }, configurable: true });
+
+      it('a caption made ahead appears when the video reaches its start, not when it arrives', async () => {
+        const v = media(false, 5);
+        await chromeMock.dispatch({ type: 'TOGGLE_SUBTITLES' });
+        await chromeMock.dispatch({ type: 'DISPLAY_SUBTITLE', text: 'ahead of time', language: 'en', captionId: 'r1', videoStart: 6, videoEnd: 7.5 });
+        await wait(150);
+        expect(raLines()).toEqual([]);
+        v.currentTime = 6.05;
+        await wait(150);
+        expect(raLines()).toEqual(['ahead of time']);
+        v.currentTime = 7.9;
+        await wait(150);
+        expect(raLines()).toEqual([]);
+      });
+
+      it('after a seek back, a caption made earlier shows again', async () => {
+        const v = media(false, 6.2);
+        await chromeMock.dispatch({ type: 'TOGGLE_SUBTITLES' });
+        await chromeMock.dispatch({ type: 'DISPLAY_SUBTITLE', text: 'once more', language: 'en', captionId: 'r1', videoStart: 6, videoEnd: 7.5 });
+        await wait(150);
+        expect(raLines()).toEqual(['once more']);
+        v.currentTime = 60;
+        v.dispatchEvent(new Event('seeking'));
+        await wait(150);
+        expect(raLines()).toEqual([]);
+        v.currentTime = 6.5;
+        v.dispatchEvent(new Event('seeking'));
+        await wait(150);
+        expect(raLines()).toEqual(['once more']);
+      });
+
+      it('a Claude upgrade before the start is the text that appears', async () => {
+        const v = media(false, 5);
+        await chromeMock.dispatch({ type: 'TOGGLE_SUBTITLES' });
+        await chromeMock.dispatch({ type: 'DISPLAY_SUBTITLE', text: 'fast', language: 'en', captionId: 'r1', videoStart: 6, videoEnd: 7.5 });
+        await chromeMock.dispatch({ type: 'UPGRADE_SUBTITLE', captionId: 'r1', text: 'better' });
+        v.currentTime = 6.1;
+        await wait(150);
+        expect(raLines()).toEqual(['better']);
+      });
+
+      it('healthy read-ahead: audio goes to the pipeline, the overlay says read-ahead, live captions are not shown', async () => {
+        const v = media(false, 10);
+        bufferedTo(v, 60);
+        await chromeMock.dispatch({ type: 'TOGGLE_SUBTITLES' });
+        for (const t of [10, 11, 12]) {
+          window.dispatchEvent(new MessageEvent('message', { data: { astAudio: true, t, pcm: new Float32Array(16000) }, source: window }));
+        }
+        await wait(300);
+        expect(chromeMock.runtime.sendMessage).toHaveBeenCalledWith(expect.objectContaining({ type: 'READ_AHEAD_AUDIO', t: 10 }));
+        expect(chromeMock.runtime.sendMessage).toHaveBeenCalledWith(expect.objectContaining({ type: 'READ_AHEAD_STATE', healthy: true }));
+        expect(overlay()!.dataset.path).toBe('read-ahead');
+        await chromeMock.dispatch({ type: 'DISPLAY_SUBTITLE', text: 'live duplicate', language: 'en', captionId: 'l1', speechEndedAt: Date.now() - 200 });
+        expect(lines()).toEqual([]);
+      });
+    });
+
     it('a new source on the followed video (next item, no seek) clears the screen', async () => {
       const v = media(false, 300);
       await chromeMock.dispatch({ type: 'TOGGLE_SUBTITLES' });
