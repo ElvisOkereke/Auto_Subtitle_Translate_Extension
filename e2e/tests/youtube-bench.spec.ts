@@ -12,7 +12,7 @@ import { astTest } from '../helpers/bridge';
 import { clearTranslationState, dragBox, modeStats, recordOverlay, recordOverlayOnEveryLoad, shownRecords, type ModeStats } from '../helpers/subtitles';
 import { recordSourceBufferTypes, sourceBufferTypes, waitOutAds } from '../helpers/youtube';
 import { benchVideos, cutOffset, referenceLines, referenceStretch, type BenchVideo } from '../bench/videos';
-import { recordCaptions, recordCaptionsOnEveryLoad, shownCaptions, type CaptionRecord } from '../helpers/captions';
+import { recordCaptions, recordCaptionsOnEveryLoad, shownCaptions, waitForSpeechModel, type CaptionRecord } from '../helpers/captions';
 import {
   coverageByDuration,
   matchLines,
@@ -640,6 +640,9 @@ test.describe('audio real YouTube', () => {
       for (let k = 0; k < pieces; k++) {
         // One tab captures at a time: captions start in this window at the hand-over.
         await startAudioMode(sw, page, tabIdOf);
+        // A build in a new folder is a new extension id with an empty model cache: the first
+        // window waits (paused) for the speech model, so no run measures a model download.
+        if (k === 0) await waitForSpeechModel(page);
         const r = await playSegment(page, from(k), to(k), video.start + PAUSE_AFTER_S);
         played += r.played;
         await page.waitForTimeout(4000); // the last phrase's caption arrives after its speech
@@ -688,6 +691,7 @@ test.describe('audio local copies', () => {
         v.currentTime = t;
       }, toLocal(video.start));
       await startAudioMode(sw, page, tabIdOf);
+      await waitForSpeechModel(page);
       const { played } = await playWindow(page, video, toLocal);
       await page.waitForTimeout(4000);
       const captions = (await shownCaptions(page)).map(c => ({ ...c, shownAt: c.shownAt + offset, lineStart: c.lineStart + offset, hiddenAt: c.hiddenAt === null ? null : c.hiddenAt + offset }));

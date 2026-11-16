@@ -25,6 +25,8 @@ const captionRecorder = () => {
   };
   const byId = new Map<string, any>();
   const scan = () => {
+    // The "Speech model ready" notice only shows for a moment: remember it was seen.
+    if (/Speech model ready/i.test(document.querySelector('.subtitle-notices')?.textContent ?? '')) w.__modelReady = true;
     const v = video();
     const now = v?.currentTime ?? 0;
     const present = new Set<string>();
@@ -74,6 +76,11 @@ export async function recordCaptions(page: Page): Promise<void> {
 /** The recorder on every page load of the context (survives reloads; real YouTube). */
 export async function recordCaptionsOnEveryLoad(context: BrowserContext): Promise<void> {
   await context.addInitScript(captionRecorder);
+}
+
+/** Waits until this page has shown "Speech model ready" (the recorder must be installed). */
+export async function waitForSpeechModel(page: Page, timeout = 540_000): Promise<void> {
+  await page.waitForFunction(() => (window as any).__modelReady === true, null, { timeout, polling: 250 });
 }
 
 export const shownCaptions = (page: Page) => page.evaluate(() => ((window as any).__captions ?? []) as CaptionRecord[]);
