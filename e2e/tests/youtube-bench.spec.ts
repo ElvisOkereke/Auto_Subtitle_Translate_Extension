@@ -338,6 +338,12 @@ async function parkAt(page: Page, t: number): Promise<void> {
     // a muted tab captures silence (Audio mode), so unmute through the player.
     player?.unMute?.();
     player?.setVolume?.(100);
+    // YouTube may play an auto-dubbed track (e.g. English TTS over Japanese commentary):
+    // always the original language's own audio.
+    const tracks: any[] = player?.getAvailableAudioTracks?.() ?? [];
+    const isOriginal = (t: any) => Object.values(t ?? {}).some((x: any) => x && typeof x === 'object' && x.isAutoDubbed === false && /original/i.test(String(x.name ?? '')));
+    const original = tracks.find(isOriginal);
+    if (original && !isOriginal(player.getAudioTrack?.())) player.setAudioTrack(original);
     const v = document.querySelector('video.html5-main-video') as HTMLVideoElement;
     v.pause();
     v.currentTime = at;
@@ -348,6 +354,8 @@ async function parkAt(page: Page, t: number): Promise<void> {
 /** Polls of a playing window that found it hidden (covered or in the background): frames stop there. */
 let hiddenPolls = 0;
 let playPolls = 0;
+/** Pieces whose prepared window had moved off the piece's start (re-seeked before playing). */
+let reparks = 0;
 /** Video heights seen while playing (YouTube may lower the quality). */
 let heights: number[] = [];
 
@@ -356,6 +364,14 @@ async function playSegment(page: Page, from: number, to: number, pauseAt: number
   let last = from;
   await page.bringToFront();
   await page.waitForSelector('video.html5-main-video', { timeout: 30_000 });
+  // A window prepared ahead may have been resumed by YouTube while it waited: back to the piece's start.
+  const moved = await page.evaluate(at => {
+    const v = document.querySelector('video')!;
+    if (Math.abs(v.currentTime - at) <= 1) return false;
+    v.currentTime = at;
+    return true;
+  }, from);
+  if (moved) reparks++;
   await page.evaluate(() => document.querySelector('video')!.play());
   for (;;) {
     await page.waitForTimeout(500);
@@ -438,6 +454,7 @@ test.describe('real YouTube', () => {
 
       hiddenPolls = 0;
       playPolls = 0;
+      reparks = 0;
       heights = [];
       translationErrors = [];
       const records: ShownRecord[] = [];
@@ -480,6 +497,7 @@ test.describe('real YouTube', () => {
         format,
         joins,
         windowHidden: playPolls ? hiddenPolls / playPolls : 0,
+        reparks,
         videoHeights: [...new Set(heights)].sort((a, b) => a - b),
         translationErrors: { count: translationErrors.length, samples: [...new Set(translationErrors)].slice(0, 5) },
       });
@@ -600,6 +618,8 @@ test.describe('audio real YouTube', () => {
         return page;
       };
       const captions: CaptionRecord[] = [];
+      const health: any[] = [];
+      reparks = 0;
       let played = 0;
       let page = await prepare(0);
       let pending: Promise<Page> | null = pieces > 1 ? prepare(1) : null;
@@ -609,6 +629,15 @@ test.describe('audio real YouTube', () => {
         const r = await playSegment(page, from(k), to(k), video.start + PAUSE_AFTER_S);
         played += r.played;
         await page.waitForTimeout(4000); // the last phrase's caption arrives after its speech
+        health.push({
+          piece: k,
+          diag: await sw.evaluate(() => (self as any).__astAudioDiag?.() ?? null),
+          audioTrack: await page.evaluate(() => {
+            const t = (document.getElementById('movie_player') as any)?.getAudioTrack?.();
+            const info: any = Object.values(t ?? {}).find((x: any) => x && typeof x === 'object' && 'isAutoDubbed' in x);
+            return info ? { name: info.name, dubbed: info.isAutoDubbed } : null;
+          }),
+        });
         captions.push(...(await shownCaptions(page)).filter(c => c.shownAt >= from(k) && c.shownAt < to(k) + 4));
         if (k + 1 < pieces) {
           const next = await pending!;
@@ -618,7 +647,8 @@ test.describe('audio real YouTube', () => {
         }
       }
       await page.goto('about:blank');
-      const out = await audioReport('youtube', mode, video, captions, played);
+      const out = await audioReport('youtube', mode, video, captions, played, { health, reparks });
+      expect(health.filter((h: any) => h.audioTrack?.dubbed), 'an auto-dubbed audio track played').toEqual([]);
       expect(out.captions, 'no captions appeared').toBeGreaterThan(0);
     });
   }

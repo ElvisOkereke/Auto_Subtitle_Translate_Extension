@@ -24,7 +24,7 @@ const captionRecorder = () => {
     return all.find(v => !v.paused) ?? all[0] ?? null;
   };
   const byId = new Map<string, any>();
-  new MutationObserver(() => {
+  const scan = () => {
     const v = video();
     const now = v?.currentTime ?? 0;
     const present = new Set<string>();
@@ -60,7 +60,11 @@ const captionRecorder = () => {
         rec.wallHiddenAt = performance.now();
       }
     }
-  }).observe(document.documentElement, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['data-quality'] });
+  };
+  // Observe the Document itself, not <html>: an init script runs before the page
+  // may replace its root element (real YouTube did), which would detach the observer.
+  new MutationObserver(scan).observe(document, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ['data-quality'] });
+  setInterval(scan, 250); // backstop: a line shown and gone between mutations is still caught at 1/4 s
 };
 
 export async function recordCaptions(page: Page): Promise<void> {
