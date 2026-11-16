@@ -338,3 +338,53 @@ Open:
 
   Each needs a targeted change, such as filtering clock text or grouping
   two-line subtitles.
+
+## Real-world benchmark (audio mode) — `npm run bench:youtube` / `bench:local`, tests `audio …`
+
+Three videos with real speech, 120 s each, in Chrome with WebGPU Whisper and
+fast-then-best translation:
+
+- `-ci-Ursh0XQ`: Korean LCK casting, two casters talking over each other;
+- `27VKumB17kE`: a Spanish documentary;
+- `5INsXNUaRdE`: Japanese football commentary.
+
+How it's measured:
+
+- **Reference:** the video's own YouTube captions (manual for Spanish, YouTube's
+  auto captions in the spoken language for Korean and Japanese).
+- **Live runs** play the real page in 30 s pieces (sliding window). Each piece
+  is captioned from its hand-over, because only one tab captures at a time.
+  The original-language audio track is pinned (YouTube may auto-dub).
+- **Columns:**
+  - captions shown against reference lines;
+  - transcript CER: alignment-free character error of the transcribed text
+    against the reference. It exceeds 100% when Whisper loops on a phrase;
+  - words covered: reference words that appear in a caption shown within 8 s;
+  - delay: from the end of the speech to the caption on screen (P50 / P90);
+  - too short: captions that left before their reading time;
+  - shown while paused: captions that appeared while the video was paused.
+
+### Audio baseline (2026-11-16, before syncing to the video)
+
+Live: two samples (A → B). Local: one sample.
+
+| run | video | captions / ref lines | transcript CER | words covered | delay P50 / P90 | too short | shown while paused |
+|---|---|---|---|---|---|---|---|
+| youtube | -ci-Ursh0XQ (ko) | 18/60 → 17/60 | 193% → 220% | 52% → 39% | 4.2 / 8.2 s → 3.5 / 4.5 s | 1 → 4 | 4 → 3 |
+| youtube | 27VKumB17kE (es) | 13/13 → 18/14 | 32% → 28% | 82% → 86% | 2.9 / 5.5 s → 1.8 / 2.7 s | 1 → 1 | 2 → 5 |
+| youtube | 5INsXNUaRdE (ja) | 19/14 → 19/14 | 128% → 242% | 49% → 37% | 4.5 / 6.9 s → 4.4 / 11.4 s | 1 → 0 | 5 → 5 |
+| local | -ci-Ursh0XQ (ko) | 16/63 | 144% | 31% | 4.7 / 9.2 s | 3 | 2 |
+| local | 27VKumB17kE (es) | 15/14 | 30% | 74% | 3.7 / 9.7 s | 2 | 1 |
+| local | 5INsXNUaRdE (ja) | 14/14 | 41% | 29% | 4.3 / 11.7 s | 1 | 1 |
+
+What the baseline shows:
+
+- **Captions keep coming while the video is paused:** 1–5 per run. The
+  pipeline transcribes what it already heard and shows it over a still frame.
+- **Captions trail the speech:** about 2–4.5 s typically, up to 11.7 s.
+- **Some leave before they can be read** (up to 4 per run). They were on a
+  fixed 6 s timer, pushed out by newer lines.
+- **Whisper loops on music or crowd noise** (e.g. one Japanese phrase repeated
+  nine times in a single caption), which drives CER past 100%.
+- **Spanish narration transcribes well** (28–32% CER against manual captions).
+  Korean casters talking over each other are the hardest case.

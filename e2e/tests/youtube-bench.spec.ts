@@ -189,7 +189,7 @@ async function playWindow(page: Page, video: BenchVideo, toLocal: (t: number) =>
   const begin = toLocal(video.start);
   let paused = false;
   let last = begin;
-  await page.evaluate(() => document.querySelector('video')!.play());
+  await play(page);
   for (;;) {
     await page.waitForTimeout(1000);
     const s = await page.evaluate(() => {
@@ -203,7 +203,7 @@ async function playWindow(page: Page, video: BenchVideo, toLocal: (t: number) =>
       paused = true;
       await page.evaluate(() => document.querySelector('video')!.pause());
       await page.waitForTimeout(PAUSE_WALL_MS);
-      await page.evaluate(() => document.querySelector('video')!.play());
+      await play(page);
     }
     if (s.t >= end) return { played: video.duration, blocked: null };
   }
@@ -328,6 +328,20 @@ async function slotPage(context: BrowserContext, slot: number, row: number): Pro
   return page;
 }
 
+/** play(), retried when YouTube swaps the video's source under it ("interrupted by a new load request"). */
+async function play(page: Page): Promise<void> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await page.evaluate(() => document.querySelector('video')!.play());
+      return;
+    } catch (e) {
+      if (attempt >= 3 || !/interrupted|AbortError/i.test(String(e))) throw e;
+      await page.waitForTimeout(1000);
+      await page.waitForSelector('video.html5-main-video', { timeout: 30_000 });
+    }
+  }
+}
+
 async function parkAt(page: Page, t: number): Promise<void> {
   await page.waitForSelector('video.html5-main-video', { timeout: 30_000 });
   await waitOutAds(page);
@@ -372,7 +386,7 @@ async function playSegment(page: Page, from: number, to: number, pauseAt: number
     return true;
   }, from);
   if (moved) reparks++;
-  await page.evaluate(() => document.querySelector('video')!.play());
+  await play(page);
   for (;;) {
     await page.waitForTimeout(500);
     const st = await page.evaluate(() => {
@@ -389,7 +403,7 @@ async function playSegment(page: Page, from: number, to: number, pauseAt: number
       paused = true;
       await page.evaluate(() => document.querySelector('video')!.pause());
       await page.waitForTimeout(PAUSE_WALL_MS);
-      await page.evaluate(() => document.querySelector('video')!.play());
+      await play(page);
     }
     if (st.t >= to) {
       await page.evaluate(() => document.querySelector('video')!.pause());
