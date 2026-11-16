@@ -39,7 +39,9 @@ def download(full_path: str, video_id: str = VIDEO_ID, max_height: int = 1080) -
     subprocess.run([
         sys.executable, '-m', 'yt_dlp',
         '--ffmpeg-location', ffmpeg_exe(),
-        '-f', f'bestvideo[height<={max_height}][vcodec^=vp9]+bestaudio[acodec=opus]',
+        # The original-language audio, never an auto-dubbed track (YouTube marks the original 'original').
+        '-f', f'bestvideo[height<={max_height}][vcodec^=vp9]+bestaudio[acodec=opus][format_note*=original]'
+              f'/bestvideo[height<={max_height}][vcodec^=vp9]+bestaudio[acodec=opus]',
         '--merge-output-format', 'webm',
         '-o', full_path,
         f'https://youtu.be/{video_id}',

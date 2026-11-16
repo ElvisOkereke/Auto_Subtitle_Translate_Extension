@@ -25,4 +25,7 @@ for vid in ids:
     auto = f'{lang}-orig' in (info.get('automatic_captions') or {})
     if not 120 < (info.get('duration') or 0) < 3600:
         continue
+    # Skip videos YouTube auto-dubs: a viewer may hear a synthetic voice instead of the original.
+    if any('dubbed' in f"{f.get('format_note') or ''} {f.get('format_id') or ''}".lower() for f in info.get('formats') or []):
+        continue
     print(f"{vid} | {info.get('duration')}s | manual={manual or '-'} | auto={auto} | {info.get('channel')} | {info.get('title')[:70]}")
