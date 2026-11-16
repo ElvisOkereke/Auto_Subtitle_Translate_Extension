@@ -276,7 +276,11 @@ export class SubtitleOverlay {
       { id, text, speechEndVideo },
       { ...now, paused: now.paused || (this.clock?.pausedSince(ended) ?? false), seekedSinceSpeech: this.clock?.seekedSince(ended) ?? false }
     );
-    if (decision === 'drop') return;
+    if (decision === 'drop') {
+      // Lets the benchmark see why captions didn't appear.
+      if (this.overlay) this.overlay.dataset.dropped = JSON.stringify(this.policy.drops);
+      return;
+    }
 
     const line = document.createElement('div');
     line.className = `subtitle-text ${this.fontSize}`;

@@ -19,6 +19,7 @@ const captionRecorder = () => {
   const w = window as any;
   if (w.__captions) return;
   w.__captions = [];
+  w.__notices = [] as string[];
   const video = () => {
     const all = [...document.querySelectorAll('video, audio')] as HTMLMediaElement[];
     return all.find(v => !v.paused) ?? all[0] ?? null;
@@ -26,7 +27,9 @@ const captionRecorder = () => {
   const byId = new Map<string, any>();
   const scan = () => {
     // The "Speech model ready" notice only shows for a moment: remember it was seen.
-    if (/Speech model ready/i.test(document.querySelector('.subtitle-notices')?.textContent ?? '')) w.__modelReady = true;
+    const notice = document.querySelector('.subtitle-notices')?.textContent?.trim() ?? '';
+    if (notice && w.__notices.at(-1) !== notice) w.__notices.push(notice.slice(0, 120));
+    if (/Speech model ready/i.test(notice)) w.__modelReady = true;
     const v = video();
     const now = v?.currentTime ?? 0;
     const present = new Set<string>();
@@ -80,7 +83,11 @@ export async function recordCaptionsOnEveryLoad(context: BrowserContext): Promis
 
 /** Waits until this page has shown "Speech model ready" (the recorder must be installed). */
 export async function waitForSpeechModel(page: Page, timeout = 540_000): Promise<void> {
-  await page.waitForFunction(() => (window as any).__modelReady === true, null, { timeout, polling: 250 });
+  const ready = await page.waitForFunction(() => (window as any).__modelReady === true, null, { timeout, polling: 250 }).catch(() => null);
+  if (!ready) {
+    const notices = (await page.evaluate(() => (window as any).__notices ?? []).catch(() => [])) as string[];
+    throw new Error(`speech model not ready after ${timeout / 1000} s; notices: ${JSON.stringify(notices.slice(-15))}`);
+  }
 }
 
 export const shownCaptions = (page: Page) => page.evaluate(() => ((window as any).__captions ?? []) as CaptionRecord[]);

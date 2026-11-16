@@ -601,6 +601,8 @@ async function audioReport(run: string, mode: EngineMode, video: BenchVideo, cap
     upgradesOnScreen: captions.filter(c => c.quality === 'better').length,
     judgeScore: await judge(video, pairs),
     sample: pairs.slice(0, 5),
+    // Seconds from the end of each caption's speech to its appearance (video time).
+    lateness: captions.map(c => Math.round((c.shownAt - c.lineStart) * 10) / 10),
     ...extra,
   };
   fs.mkdirSync(OUT, { recursive: true });
@@ -649,6 +651,7 @@ test.describe('audio real YouTube', () => {
         health.push({
           piece: k,
           diag: await sw.evaluate(() => (self as any).__astAudioDiag?.() ?? null),
+          dropped: await page.evaluate(() => JSON.parse(document.getElementById('subtitle-overlay-extension')?.dataset.dropped ?? '{}')),
           audioTrack: await page.evaluate(() => {
             const t = (document.getElementById('movie_player') as any)?.getAudioTrack?.();
             const info: any = Object.values(t ?? {}).find((x: any) => x && typeof x === 'object' && 'isAutoDubbed' in x);
@@ -695,7 +698,8 @@ test.describe('audio local copies', () => {
       const { played } = await playWindow(page, video, toLocal);
       await page.waitForTimeout(4000);
       const captions = (await shownCaptions(page)).map(c => ({ ...c, shownAt: c.shownAt + offset, lineStart: c.lineStart + offset, hiddenAt: c.hiddenAt === null ? null : c.hiddenAt + offset }));
-      const out = await audioReport('local', mode, video, captions, played);
+      const dropped = await page.evaluate(() => JSON.parse(document.getElementById('subtitle-overlay-extension')?.dataset.dropped ?? '{}'));
+      const out = await audioReport('local', mode, video, captions, played, { dropped });
       expect(out.captions, 'no captions appeared').toBeGreaterThan(0);
     });
   }

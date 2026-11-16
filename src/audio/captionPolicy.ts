@@ -29,16 +29,27 @@ interface Line {
   speechEnd: number;
 }
 
+export type DropReason = 'paused' | 'ad' | 'seek' | 'stale' | 'order';
+
 export class CaptionPolicy {
   private lines: Line[] = [];
   private newestSpeechEnd = -Infinity;
+  /** Captions dropped so far, by reason (read by the benchmark). */
+  readonly drops: Partial<Record<DropReason, number>> = {};
+
+  private drop(reason: DropReason): 'drop' {
+    this.drops[reason] = (this.drops[reason] ?? 0) + 1;
+    return 'drop';
+  }
 
   /** Whether a caption may appear now; when shown it joins the roll (a third line pushes out the oldest). */
   offer(c: OfferedCaption, now: VideoNow): 'show' | 'drop' {
-    if (now.paused || now.adShowing || now.seekedSinceSpeech) return 'drop';
+    if (now.paused) return this.drop('paused');
+    if (now.adShowing) return this.drop('ad');
+    if (now.seekedSinceSpeech) return this.drop('seek');
     const speechEnd = c.speechEndVideo ?? now.videoTime;
-    if (now.videoTime - speechEnd > STALE_AFTER_S) return 'drop';
-    if (speechEnd < this.newestSpeechEnd) return 'drop';
+    if (now.videoTime - speechEnd > STALE_AFTER_S) return this.drop('stale');
+    if (speechEnd < this.newestSpeechEnd) return this.drop('order');
     this.newestSpeechEnd = speechEnd;
     this.lines.push({ id: c.id, until: now.videoTime + minDisplaySeconds(c.text), speechEnd });
     while (this.lines.length > MAX_LINES) this.lines.shift();

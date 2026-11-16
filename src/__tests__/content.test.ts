@@ -85,6 +85,7 @@ describe('content script subtitle overlay', () => {
       await chromeMock.dispatch({ type: 'TOGGLE_SUBTITLES' });
       await chromeMock.dispatch({ type: 'DISPLAY_SUBTITLE', text: 'late', language: 'en', captionId: 'c1', speechEndedAt: Date.now() - 500 });
       expect(lines()).toEqual([]);
+      expect(JSON.parse(overlay()!.dataset.dropped!)).toEqual({ paused: 1 });
     });
 
     it('captions stay for their reading time (video time) and freeze while paused', async () => {

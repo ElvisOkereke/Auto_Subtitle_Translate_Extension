@@ -84,3 +84,16 @@ describe('CaptionPolicy (live audio captions, video time)', () => {
     expect(p.tick(21.5)).toEqual(['a']);
   });
 });
+
+describe('CaptionPolicy drop counts (benchmark diagnostics)', () => {
+  it('counts each drop by its reason', () => {
+    const p = new CaptionPolicy();
+    p.offer({ id: 'a', text: 'x', speechEndVideo: 10 }, playing(11, { paused: true }));
+    p.offer({ id: 'b', text: 'x', speechEndVideo: 10 }, playing(11, { adShowing: true }));
+    p.offer({ id: 'c', text: 'x', speechEndVideo: 10 }, playing(11, { seekedSinceSpeech: true }));
+    p.offer({ id: 'd', text: 'x', speechEndVideo: 10 }, playing(16));
+    p.offer({ id: 'e', text: 'x', speechEndVideo: 12 }, playing(12.5));
+    p.offer({ id: 'f', text: 'x', speechEndVideo: 11 }, playing(12.6));
+    expect(p.drops).toEqual({ paused: 1, ad: 1, seek: 1, stale: 1, order: 1 });
+  });
+});

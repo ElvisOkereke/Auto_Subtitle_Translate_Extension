@@ -73,14 +73,13 @@ Docker, GCP, Playwright and Jest.
   - Context-aware Claude translation with glossary
   - Hosted subscription service
   - Redesigned light and dark UI
-- **In progress:** a real-world benchmark on 8 YouTube videos in 5 subtitle
-  languages (League, football, TV drama), running in all three engine modes.
-  The fixes it drives:
-  - a minimum reading time;
-  - read-ahead for YouTube's VP9 format;
-  - fewer missed lines.
+  - Real-world YouTube benchmark: 8 subtitle videos in 5 languages and 3
+    audio videos (Korean, Spanish, Japanese). It drove a minimum reading
+    time, read-ahead for YouTube's VP9 format, and audio captions that follow
+    the video.
+- **In progress:** audio read-ahead (transcribing the audio before it
+  plays, so captions land on time).
 - **Next:**
-  - audio read-ahead timed to the video;
   - automatic subtitle detection;
   - deploying the service and publishing on the Chrome Web Store.
 
@@ -125,6 +124,12 @@ both video formats it serves (AV1/MP4 and VP9/WebM) are read ahead.
 
 **Audio mode** — popup → **Audio** → **Start live captions**. The first run
 downloads the speech model (~209 MB on GPUs with WebGPU, 80 MB otherwise).
+Captions follow the video:
+
+- nothing new appears while it's paused or during an ad;
+- a seek clears the screen;
+- a caption whose speech is more than 5 s behind is skipped;
+- each line stays for its reading time.
 
 Only one mode runs at a time. Caption position and size (Settings → Live
 captions) apply to audio captions.
