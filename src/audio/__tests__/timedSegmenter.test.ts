@@ -28,13 +28,13 @@ describe('TimedSegmenter (read-ahead speech segments in video time)', () => {
     expect(s.audio.length / RATE).toBeGreaterThan(1.5); // speech plus the trailing silence kept
   });
 
-  it('long speech is cut at 6 s', () => {
+  it('long speech is cut at 10 s (Whisper splits it into timed sentences)', () => {
     const seg = new TimedSegmenter(RATE);
-    const out = feed(seg, 10, 7, true);
+    const out = feed(seg, 10, 11, true);
     expect(out).toHaveLength(1);
     expect(out[0].start).toBeCloseTo(10, 1);
-    expect(out[0].end - out[0].start).toBeGreaterThan(5.9);
-    expect(out[0].end - out[0].start).toBeLessThan(6.1);
+    expect(out[0].end - out[0].start).toBeGreaterThan(9.9);
+    expect(out[0].end - out[0].start).toBeLessThan(10.1);
   });
 
   it('a blip shorter than the minimum speech is discarded', () => {

@@ -11,8 +11,11 @@ export interface TimedSegment {
   end: number;
 }
 
-/** Read-ahead segments are capped shorter than live ones: a caption spans at most this long. */
-export const READ_AHEAD_MAX_SEGMENT_MS = 6000;
+/**
+ * Read-ahead segments: long enough for Whisper to see whole sentences (it splits
+ * them into timed sentences itself), short enough to come back quickly.
+ */
+export const READ_AHEAD_MAX_SEGMENT_MS = 10000;
 
 export class TimedSegmenter {
   private frames: Float32Array[] = [];

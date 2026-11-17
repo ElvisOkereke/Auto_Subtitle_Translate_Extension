@@ -294,6 +294,7 @@ const AUDIO_CHUNK_SAMPLES = WHISPER_RATE;
     private track: Track | null = null;
     private nextTime = -Infinity; // end of the last fragment fed
     private decodedFrom = Infinity; // start of this run of decoding
+    private lastNow: number | null = null; // playhead at the previous pump (seek detection)
     private resampler: Resampler16k | null = null;
     private inputEnd = -Infinity; // video time where the last decoded audio ended
     private outTime = 0; // video time of the first pending sample
@@ -346,8 +347,11 @@ const AUDIO_CHUNK_SAMPLES = WHISPER_RATE;
           const track = activeAudioTrack();
           if (!track?.init?.audio) return;
           const now = mainVideo()?.currentTime ?? 0;
+          // A jump of the playhead (natural playback moves at most ~2 s between pumps, even at 2x).
+          const jumped = this.lastNow !== null && Math.abs(now - this.lastNow) > 3;
+          this.lastNow = now;
           if (track !== this.track || this.decoder?.state === 'closed') this.configure(track);
-          else if (this.nextTime !== -Infinity && (now < this.decodedFrom - 1 || now > this.nextTime + 1)) {
+          else if (jumped && this.nextTime !== -Infinity && (now < this.decodedFrom - 1 || now > this.nextTime + 1)) {
             // A seek outside what was decoded: start again at the playhead.
             this.configure(track);
             audioStats.resets++;
@@ -361,7 +365,8 @@ const AUDIO_CHUNK_SAMPLES = WHISPER_RATE;
             window.postMessage({ astAudioReset: true, t: next.start }, '*');
             continue;
           }
-          this.decodedFrom = Math.min(this.decodedFrom, next.start);
+          // A fresh start counts from the playhead (its first fragment may begin a little after it).
+          this.decodedFrom = Math.min(this.decodedFrom, next.start, this.nextTime === -Infinity ? now : Infinity);
           for (const sample of next.samples) {
             while (this.decoder!.decodeQueueSize > 32 && !this.stopped) {
               await new Promise(r => this.decoder!.addEventListener('dequeue', r, { once: true }));

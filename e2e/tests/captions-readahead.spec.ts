@@ -57,8 +57,14 @@ test('read-ahead captions appear when the video reaches their words; pause freez
   }
 
   await page.evaluate(() => document.querySelector('video')!.play());
-  await page.waitForFunction(t => document.querySelector('video')!.currentTime >= t, from + 25, { timeout: 60_000, polling: 250 });
+  // Read-ahead stays in charge for the whole stretch (no holes in the audio it accepted).
+  const paths: (string | null)[] = [];
+  while ((await videoTime(page)) < from + 25) {
+    paths.push(await overlay(page).getAttribute('data-path'));
+    await page.waitForTimeout(500);
+  }
   await page.evaluate(() => document.querySelector('video')!.pause());
+  expect(paths.filter(p => p !== 'read-ahead'), 'read-ahead stayed in charge while playing').toEqual([]);
 
   const shown = (await shownCaptions(page)).filter(c => typeof c.videoStart === 'number');
   console.log(JSON.stringify(shown.map(c => ({ start: c.videoStart, shownAt: c.shownAt, text: c.text.slice(0, 40) }))));
@@ -81,4 +87,7 @@ test('read-ahead captions appear when the video reaches their words; pause freez
   }, again.videoStart! + 0.1);
   await expect(overlay(page).locator(`.subtitle-text[data-caption-id="${again.captionId}"]`)).toBeVisible({ timeout: 2000 });
   expect(await videoTime(page)).toBeCloseTo(again.videoStart! + 0.1, 1);
+  // The tap decoded the stretch once: it restarts only for real jumps (the one seek back here).
+  const tap = await page.evaluate(() => (window as any).__astAudioTapStats);
+  expect(tap.resets, JSON.stringify(tap)).toBeLessThanOrEqual(2);
 });

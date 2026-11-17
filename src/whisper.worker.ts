@@ -21,6 +21,8 @@ interface TranscribeJob {
   audio: Float32Array;
   language: string;
   segmentId?: number;
+  /** Read-ahead: sentence-level timestamps, so each sentence becomes a caption timed to its words. */
+  timestamps?: boolean;
 }
 
 let transcriberPromise: Promise<any> | null = null;
@@ -137,8 +139,8 @@ ctx.onmessage = async (event: MessageEvent) => {
   }
 
   if (type === 'transcribe') {
-    const { audio, language, segmentId } = event.data as TranscribeJob;
-    transcribeQueue.push({ audio, language, segmentId });
+    const { audio, language, segmentId, timestamps } = event.data as TranscribeJob;
+    transcribeQueue.push({ audio, language, segmentId, timestamps });
   }
 };
 
@@ -150,7 +152,7 @@ const transcribeQueue = new SerialQueue<TranscribeJob>(
 );
 
 async function transcribe(job: QueuedJob<TranscribeJob>): Promise<void> {
-  const { audio, language, segmentId } = job.payload;
+  const { audio, language, segmentId, timestamps } = job.payload;
   try {
     const transcriber = await getTranscriber();
     // queueMs covers waiting behind earlier segments and for the model to load.
@@ -159,12 +161,18 @@ async function transcribe(job: QueuedJob<TranscribeJob>): Promise<void> {
       // English-only checkpoints (*.en) reject language/task options.
       ...(activeConfig?.multilingual
         ? { language: language && language !== 'auto' ? language : undefined, task: 'transcribe' }
-        : {})
+        : {}),
+      ...(timestamps ? { return_timestamps: true } : {})
     });
-    const text = Array.isArray(result) ? (result[0]?.text ?? '') : (result.text ?? '');
+    const first = Array.isArray(result) ? result[0] : result;
+    const text = first?.text ?? '';
+    const chunks = timestamps && Array.isArray(first?.chunks)
+      ? first.chunks.map((c: any) => ({ text: String(c.text ?? ''), start: Number(c.timestamp?.[0]), end: c.timestamp?.[1] == null ? null : Number(c.timestamp[1]) }))
+      : undefined;
     ctx.postMessage({
       type: 'result',
       text,
+      chunks,
       segmentId,
       queueMs: startedAt - job.enqueuedAt,
       inferenceMs: performance.now() - startedAt,

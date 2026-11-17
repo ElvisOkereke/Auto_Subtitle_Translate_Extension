@@ -36,10 +36,15 @@ describe('AudioReadAhead (untrusted main-world audio)', () => {
     expect(got).toEqual([10, 11]);
   });
 
-  it('rejects audio outside the buffered range or behind the playhead', () => {
-    post({ astAudio: true, t: 70, pcm: pcm(1) }); // beyond what the player buffered
+  it('rejects audio far ahead of the playhead (beyond what the tap decodes) or behind it', () => {
+    post({ astAudio: true, t: 115, pcm: pcm(1) }); // more than 100 s ahead
     post({ astAudio: true, t: 5, pcm: pcm(1) }); // well behind the playhead
     expect(got).toEqual([]);
+  });
+
+  it('accepts audio beyond the buffered end of the video element (on YouTube: the shorter video buffer)', () => {
+    post({ astAudio: true, t: 70, pcm: pcm(1) }); // bufferedEnd is 60: audio is buffered further than video
+    expect(got).toEqual([70]);
   });
 
   it('rejects oversized chunks and anything that is not Float32 PCM', () => {
@@ -58,7 +63,7 @@ describe('AudioReadAhead (untrusted main-world audio)', () => {
   it('caps the total accepted audio to what playback could produce', () => {
     video.currentTime = 0;
     for (let t = 0; t < 130; t++) {
-      (video as any).buffered = { length: 1, start: () => 0, end: () => 200 };
+      video.currentTime = Math.max(0, t - 50); // stays within the 100 s window: only the budget limits
       post({ astAudio: true, t, pcm: pcm(1) });
     }
     expect(got.length).toBe(120); // 120 s at once, then 4 s per wall second

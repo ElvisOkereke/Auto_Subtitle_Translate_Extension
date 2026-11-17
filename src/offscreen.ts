@@ -114,7 +114,28 @@ function pumpReadAhead(): void {
   readAhead.inFlight = segmentId;
   readAhead.meta.set(segmentId, { videoStart: next.start, videoEnd: next.end });
   if (readAhead.meta.size > 64) readAhead.meta.delete(readAhead.meta.keys().next().value!);
-  getWorker().postMessage({ type: 'transcribe', audio: next.audio, language: currentSourceLanguage, segmentId }, [next.audio.buffer]);
+  getWorker().postMessage({ type: 'transcribe', audio: next.audio, language: currentSourceLanguage, segmentId, timestamps: true }, [next.audio.buffer]);
+}
+
+/** Whisper's timed sentences of a read-ahead segment, placed in video time (null when it gave none). */
+function timedSentences(
+  chunks: { text: string; start: number; end: number | null }[] | undefined,
+  segment: { videoStart: number; videoEnd: number }
+): { text: string; start: number; end: number }[] | null {
+  if (!Array.isArray(chunks) || !chunks.length) return null;
+  const out: { text: string; start: number; end: number }[] = [];
+  for (const c of chunks) {
+    const text = c.text.trim();
+    if (!text || !Number.isFinite(c.start)) continue;
+    if (isNonSpeech(text)) {
+      diag.nonSpeech++;
+      continue;
+    }
+    const start = segment.videoStart + c.start;
+    const end = c.end !== null && Number.isFinite(c.end) ? segment.videoStart + c.end : segment.videoEnd;
+    out.push({ text, start, end: Math.max(end, start + 0.3) });
+  }
+  return out.length ? out : null;
 }
 
 function readAheadDone(segmentId: number | undefined): void {
@@ -131,8 +152,19 @@ function handleWorkerMessage(event: MessageEvent): void {
     else diag.emptyResults++;
     const ahead = readAhead.meta.get(event.data.segmentId);
     if (ahead) diag.raResults++;
+    // Read-ahead with Whisper timestamps: each sentence is a caption timed to its words.
+    const sentences = ahead ? timedSentences(event.data.chunks, ahead) : null;
+    if (sentences) {
+      for (const s of sentences) {
+        chrome.runtime.sendMessage({
+          type: 'TRANSCRIPTION_RESULT',
+          text: s.text,
+          timing: { segmentId: event.data.segmentId, audioMs: event.data.audioMs, queueMs: event.data.queueMs, inferenceMs: event.data.inferenceMs, videoStart: s.start, videoEnd: s.end, readAhead: 1 }
+        });
+      }
+    }
     // Sound annotations ("[音楽]", "(拍手)", "♪") are not words: no caption.
-    if (event.data.text && event.data.text.trim() && isNonSpeech(event.data.text)) diag.nonSpeech++;
+    else if (event.data.text && event.data.text.trim() && isNonSpeech(event.data.text)) diag.nonSpeech++;
     else if (event.data.text && event.data.text.trim()) {
       chrome.runtime.sendMessage({
         type: 'TRANSCRIPTION_RESULT',

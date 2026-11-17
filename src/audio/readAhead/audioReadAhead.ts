@@ -3,14 +3,17 @@
 //
 // Chunks arrive over window.postMessage, which the page can also post to.
 // Forged audio can at worst produce wrong captions, so the defence is to bound
-// it to what real playback produces: inside the player's buffered range near
-// the playhead, at most 1.25 s per chunk, never overlapping audio already
-// accepted, and no more in total than playback could have buffered.
+// it to what real playback produces: from just behind the playhead to at most
+// 100 s ahead (the tap decodes up to 90 s ahead; the element's buffered range
+// can't bound it - on YouTube that is the shorter video buffer), at most 1.25 s
+// per chunk, never overlapping audio already accepted, and no more in total
+// than playback could have buffered.
 
 export type AudioChunkHandler = (videoTime: number, pcm: Float32Array) => void;
 
 export const AUDIO_RATE = 16000;
 const MAX_CHUNK_SECONDS = 1.25;
+const MAX_AHEAD_SECONDS = 100;
 const BURST_SECONDS = 120;
 const SECONDS_PER_WALL_SECOND = 4;
 const HEALTHY_LEAD_SECONDS = 2;
@@ -47,16 +50,9 @@ export class AudioReadAhead {
     private readonly now: () => number = () => performance.now()
   ) {}
 
-  private bufferedEnd(): number {
-    const b = this.video.buffered;
-    let end = -Infinity;
-    for (let i = 0; i < b.length; i++) end = Math.max(end, b.end(i));
-    return end;
-  }
-
   private plausible(t: number, seconds: number): boolean {
     if (seconds <= 0 || seconds > MAX_CHUNK_SECONDS) return false;
-    if (t < this.video.currentTime - 2 || t + seconds > this.bufferedEnd() + 1) return false;
+    if (t < this.video.currentTime - 2 || t + seconds > this.video.currentTime + MAX_AHEAD_SECONDS) return false;
     const end = t + seconds;
     if (this.covered.some(([a, b]) => Math.min(b, end) - Math.max(a, t) > 0.05)) return false;
     const budget = BURST_SECONDS + ((this.now() - this.startedAt) / 1000) * SECONDS_PER_WALL_SECOND;
