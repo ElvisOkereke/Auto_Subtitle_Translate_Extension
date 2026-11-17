@@ -41,7 +41,7 @@ const PIECES = Number(process.env.SCREEN_PIECES || 3);
 const PIECE_S = 30; // YouTube stops automated playback after ~40 s of a page's playback
 const LEAD_IN_S = 6; // each piece starts a little earlier: the extension warms up before scoring starts
 const SAMPLE_MS = 500;
-const LABEL = process.env.SCREEN_LABEL || 'screen';
+const LABEL = process.env.SCREEN_LABEL || (process.env.SCREEN_STT_MODEL ? `screen-${process.env.SCREEN_STT_MODEL.split('/').pop()}` : 'screen');
 const OUT = path.join(ROOT, 'e2e', '.perf', 'screen', LABEL);
 
 async function park(page: Page, t: number): Promise<void> {
@@ -70,14 +70,21 @@ async function startMode(page: Page, openPopup: (p: Page) => Promise<Page>, mode
     await popup.click('#modeSubtitles');
     await popup.selectOption('#subtitleLanguage', 'ko');
     await popup.click('#drawSubtitleBox');
+    const said = await popup.locator('#status').innerText().catch(() => '');
     await page.bringToFront();
-    await expect.poll(() => page.evaluate(() => document.body.style.cursor), { timeout: 15_000 }).toBe('crosshair');
+    await expect.poll(() => page.evaluate(() => document.body.style.cursor), { timeout: 15_000, message: `box drawing did not start (popup said: ${said})` }).toBe('crosshair');
     await dragBox(page, BOX);
     await expect.poll(async () => (await astTest<{ state: string }>(page, 'mode.stats')).state, { timeout: 120_000 }).toBe('running');
   } else {
     await popup.click('#modeAudio');
     await popup.click('#toggleButton');
-    await expect(popup.locator('#toggleButton')).toHaveText('Stop live captions', { timeout: 30_000 });
+    // What the popup and the page said, if starting failed (the popup's message only shows for 3 s).
+    let said = '';
+    for (let i = 0; i < 60 && (await popup.locator('#toggleButton').innerText()) !== 'Stop live captions'; i++) {
+      said = [await popup.locator('#status').innerText().catch(() => ''), await page.locator('#subtitle-overlay-extension').innerText().catch(() => '')].filter(Boolean).join(' | ') || said;
+      await page.waitForTimeout(500);
+    }
+    await expect(popup.locator('#toggleButton'), `live captions did not start: ${said}`).toHaveText('Stop live captions', { timeout: 1000 });
     await page.bringToFront();
     if (first) await waitForSpeechModel(page, 1_200_000);
   }
@@ -129,6 +136,11 @@ for (const mode of MODES) for (const video of VIDEOS) {
       targetLanguage: 'en',
     });
     await clearTranslationState(sw);
+    // SCREEN_STT_MODEL="onnx-community/whisper-small" (and SCREEN_STT_DTYPE as JSON) tries another speech model.
+    await sw.evaluate(
+      o => (o ? chrome.storage.local.set({ devSttModel: o }) : chrome.storage.local.remove('devSttModel')),
+      process.env.SCREEN_STT_MODEL ? { model: process.env.SCREEN_STT_MODEL, ...(process.env.SCREEN_STT_DTYPE ? { dtype: JSON.parse(process.env.SCREEN_STT_DTYPE) } : {}) } : null
+    );
     await recordCaptionsOnEveryLoad(context); // YouTube navigates again right after loading
     const dir = path.join(OUT, `${mode}-${video.id}`);
     fs.rmSync(dir, { recursive: true, force: true });
@@ -136,8 +148,10 @@ for (const mode of MODES) for (const video of VIDEOS) {
 
     const captured: (CapturedSample & { dom: string })[] = [];
     const paths: (string | null)[] = [];
+    const health: unknown[] = [];
     for (let k = 0; k < PIECES; k++) {
       const from = video.start + k * PIECE_S;
+      console.log(`piece ${k}: ${mode} from ${from} s`);
       const page = await context.newPage(); // a new tab in the same window
       await page.goto(`https://www.youtube.com/watch?v=${video.id}&t=${Math.floor(from - LEAD_IN_S)}s`);
       await park(page, from - LEAD_IN_S);
@@ -158,6 +172,17 @@ for (const mode of MODES) for (const video of VIDEOS) {
         if (Date.now() - stillSince > 20_000) break; // YouTube stopped playing
         await page.waitForTimeout(Math.max(0, SAMPLE_MS - (Date.now() - started)));
       }
+      // Pipeline health for this piece: what Whisper returned and what the page did with it.
+      health.push({
+        piece: k,
+        diag: await sw.evaluate(() => (self as any).__astAudioDiag?.() ?? null),
+        transcripts: await sw.evaluate(() => ((self as any).__astTranscripts?.() ?? []).slice(-40)),
+        overlay: await page.evaluate(() => {
+          const o = document.getElementById('subtitle-overlay-extension');
+          return o ? { path: o.dataset.path, raDropped: o.dataset.raDropped, raScheduled: o.dataset.raScheduled, dropped: o.dataset.dropped } : null;
+        }),
+        tap: await page.evaluate(() => (window as any).__astAudioTapStats ?? null),
+      });
       await page.close();
     }
     expect(captured.length, 'moments captured').toBeGreaterThan(20);
@@ -187,6 +212,7 @@ for (const mode of MODES) for (const video of VIDEOS) {
       shownButNotVisible: invisible,
       visibleButNotInPage: unexplained,
       readAheadShare: paths.length ? paths.filter(p => p === 'read-ahead').length / paths.length : null,
+      health,
       korean,
       overlay,
       alignment,

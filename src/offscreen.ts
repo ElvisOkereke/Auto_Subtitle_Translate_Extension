@@ -20,7 +20,7 @@ let segmenter: SpeechSegmenter | null = null;
 let currentSourceLanguage = 'auto';
 let segmentCounter = 0;
 // Set after a WebGPU model load fails, so the replacement worker uses the CPU.
-let workerOverrides: { device?: 'wasm' } = {};
+let workerOverrides: { device?: 'wasm'; model?: string; dtype?: unknown } = {};
 
 function getWorker(): Worker {
   if (!worker) {
@@ -39,7 +39,7 @@ function restartWorkerOnCpu(): void {
 }
 
 /** Capture health, reported to the background every 2 s while capturing (tests read it). */
-const diag = { frames: 0, peakRms: 0, segments: 0, results: 0, emptyResults: 0, errors: 0, lastError: '', nonSpeech: 0, suppressed: 0, raChunks: 0, raSegments: 0, raResults: 0, raSkipped: 0 };
+const diag = { frames: 0, peakRms: 0, segments: 0, results: 0, emptyResults: 0, errors: 0, lastError: '', model: '', nonSpeech: 0, suppressed: 0, raChunks: 0, raSegments: 0, raResults: 0, raSkipped: 0 };
 let diagTimer: number | null = null;
 function reportDiag(): void {
   chrome.runtime.sendMessage({ type: 'AUDIO_DIAG', diag: { ...diag, at: Date.now() } }).catch(() => undefined);
@@ -90,6 +90,7 @@ function handleWorkerMessage(event: MessageEvent): void {
   } else if (type === 'dropped') {
     readAhead.dropped(event.data.segmentId);
   } else if (type === 'progress') {
+    if (event.data.status === 'ready') diag.model = `${event.data.model} (${event.data.device})`;
     chrome.runtime.sendMessage({
       type: 'MODEL_LOADING_PROGRESS',
       status: event.data.status,
@@ -213,7 +214,8 @@ chrome.runtime.onMessage.addListener((message: ExtensionMessage, _sender, sendRe
   }
 
   if (message.type === 'START_OFFSCREEN_CAPTURE') {
-    const { streamId, sourceLanguage, tabId } = message as unknown as { streamId: string; sourceLanguage: string; tabId?: number };
+    const { streamId, sourceLanguage, tabId, sttOverrides } = message as unknown as { streamId: string; sourceLanguage: string; tabId?: number; sttOverrides?: { model?: string; dtype?: unknown } };
+    if (sttOverrides?.model) workerOverrides = { ...workerOverrides, model: sttOverrides.model, ...(sttOverrides.dtype ? { dtype: sttOverrides.dtype } : {}) } as typeof workerOverrides;
     startCapture(streamId, sourceLanguage, typeof tabId === 'number' ? tabId : null)
       .then(() => sendResponse({ success: true }))
       .catch(error => sendResponse({ success: false, error: error instanceof Error ? error.message : String(error) }));

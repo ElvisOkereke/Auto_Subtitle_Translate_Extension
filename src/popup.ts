@@ -106,6 +106,19 @@ export async function getTargetTab(): Promise<chrome.tabs.Tab | undefined> {
   return tab;
 }
 
+/** Adds the manifest's content scripts to a tab that has none; false where scripts can't run (browser pages). */
+export async function injectContentScripts(tabId: number): Promise<boolean> {
+  try {
+    for (const entry of chrome.runtime.getManifest().content_scripts ?? []) {
+      if (!entry.js?.length) continue;
+      await chrome.scripting.executeScript({ target: { tabId }, files: entry.js, world: (entry as { world?: string }).world === 'MAIN' ? 'MAIN' : 'ISOLATED' });
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Turns "no content script in this tab" into something a user can act on. */
 export function describeTabError(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
@@ -471,7 +484,14 @@ class PopupController {
   private async sendToTab(message: Record<string, unknown>) {
     const tab = await getTargetTab();
     if (!tab || typeof tab.id !== 'number') throw new Error('No active tab found');
-    return chrome.tabs.sendMessage(tab.id, message);
+    try {
+      return await chrome.tabs.sendMessage(tab.id, message);
+    } catch (error) {
+      // A tab opened before the extension was installed or reloaded has no content
+      // scripts (Chrome doesn't add them to open tabs): add them now and try again.
+      if (!/Receiving end does not exist|Could not establish connection/i.test(String(error)) || !(await injectContentScripts(tab.id))) throw error;
+      return chrome.tabs.sendMessage(tab.id, message);
+    }
   }
 
   async drawSubtitleBox() {
@@ -735,7 +755,7 @@ class PopupController {
       if (typeof tab.id !== 'number') {
         throw new Error('Active tab does not have a valid id');
       }
-      const response = await chrome.tabs.sendMessage(tab.id, {
+      const response = await this.sendToTab({
         type: 'TOGGLE_SUBTITLES'
       });
       if (typeof response?.active === 'boolean' && response.active !== this.isActive) {
@@ -773,7 +793,7 @@ class PopupController {
       }
 
       if (typeof tab.id === 'number') {
-        const response = await chrome.tabs.sendMessage(tab.id, {
+        const response = await this.sendToTab({
           type: 'TOGGLE_SCREEN_TRANSLATION'
         });
         if (response?.state) {
@@ -845,7 +865,7 @@ class PopupController {
         throw new Error('No active tab found');
       }
 
-      await chrome.tabs.sendMessage(tab.id, {
+      await this.sendToTab({
         type: 'DRAW_NEW_BOX'
       });
 
