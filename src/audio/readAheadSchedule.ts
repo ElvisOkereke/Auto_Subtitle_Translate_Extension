@@ -19,6 +19,8 @@ interface Item extends ScheduledCaption {
 }
 
 const END_BEAT_S = 0.3;
+const MAX_EXTRA_S = 3;
+const MIN_CAP_S = 6;
 const MAX_LINES = 2;
 const MAX_STORED = 1500;
 
@@ -29,8 +31,16 @@ export class ReadAheadSchedule {
     return this.items.length;
   }
 
+  /**
+   * Until its speech ends (plus a beat) or its reading time, whichever is later -
+   * but no longer than its reading time + 3 s (at least 6 s): Whisper sometimes
+   * stretches a sentence's end across the silence or music after it.
+   */
   private untilOf(c: ScheduledCaption, rate: number): number {
-    return Math.max(c.end + END_BEAT_S, c.start + minDisplaySeconds(c.text) * rate);
+    const reading = minDisplaySeconds(c.text) * rate;
+    const natural = Math.max(c.end + END_BEAT_S - c.start, reading);
+    const cap = Math.max(reading + MAX_EXTRA_S * rate, MIN_CAP_S * rate);
+    return c.start + Math.min(natural, cap);
   }
 
   /**

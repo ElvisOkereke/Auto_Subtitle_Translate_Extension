@@ -1,4 +1,4 @@
-import { ReadAheadWindows, collapseRepeats, mergeShort } from '../readAheadWindows';
+import { ReadAheadWindows, collapseRepeats, isLoopNoise, mergeShort } from '../readAheadWindows';
 
 const RATE = 16000;
 const pcm = (seconds: number) => new Float32Array(Math.round(seconds * RATE));
@@ -152,4 +152,9 @@ describe('ReadAheadWindows: no lone 1 s windows (final review)', () => {
     expect(b.start).toBe(a.start);
     expect(b.audio.length).toBe(a.audio.length);
   });
+});
+
+describe('isLoopNoise (one short word looped: game sounds, shouting)', () => {
+  it.each(['뒤! 뒤! 뒤!', '-뛰어! -뛰어! -뛰어! -뛰어!', '칠 칠 칠 칠 칠', 'Behind, behind, behind, behind'])('drops %p', t => expect(isLoopNoise(t)).toBe(true));
+  it.each(['뒤! 뒤!', '이거는 그냥 궁 쓰지 말고', '좋아요 좋아요 정말 좋아요'])('keeps %p', t => expect(isLoopNoise(t)).toBe(false));
 });

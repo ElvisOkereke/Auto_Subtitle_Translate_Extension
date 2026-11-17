@@ -84,3 +84,19 @@ describe('ReadAheadSchedule: re-made captions and coverage (final review)', () =
     expect(s.covering(20)).toBe(false);
   });
 });
+
+describe('ReadAheadSchedule: Whisper end times are not trusted blindly', () => {
+  it('a caption whose end time runs on (silence or music after it) stays its reading time + 3 s, at least 6 s', () => {
+    const s = new ReadAheadSchedule();
+    s.add({ id: 'a', text: 'Two more showed up.', start: 603, end: 620 }); // 1.5 s reading -> 6 s cap
+    expect(s.visibleAt(608.9).map(c => c.id)).toEqual(['a']);
+    expect(s.visibleAt(609.1)).toEqual([]);
+  });
+
+  it('a long sentence keeps its real length', () => {
+    const s = new ReadAheadSchedule();
+    s.add({ id: 'a', text: 'x'.repeat(60), start: 10, end: 16.5 }); // 4 s reading -> cap 7 s, speech 6.5 s
+    expect(s.visibleAt(16.7).map(c => c.id)).toEqual(['a']);
+    expect(s.visibleAt(17.1)).toEqual([]);
+  });
+});

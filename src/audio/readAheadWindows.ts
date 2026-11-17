@@ -98,7 +98,10 @@ export class ReadAheadWindows {
     else if (!abs.length) this.cursor = win.final ? win.end : Math.max(this.cursor, win.end - HOLD_S); // silence or music: move on
     // (a short window whose only sentence is unfinished keeps the cursor: the next one hears it whole)
     this.trim();
-    const cleaned = kept.map(s => ({ ...s, text: collapseRepeats(s.text) })).filter(s => s.text && s.end > s.start);
+    const cleaned = kept
+      .filter(s => !isLoopNoise(s.text)) // before collapsing, which would hide the loop
+      .map(s => ({ ...s, text: collapseRepeats(s.text) }))
+      .filter(s => s.text && s.end > s.start);
     return mergeShort(cleaned);
   }
 
@@ -128,6 +131,12 @@ export class ReadAheadWindows {
       run.chunks.shift();
     }
   }
+}
+
+/** One short word looped three or more times ("뒤! 뒤! 뒤!"): game sounds or shouting, not a caption. */
+export function isLoopNoise(text: string): boolean {
+  const words = text.split(/[\s,.!?~…\-]+/u).filter(Boolean).map(w => w.toLowerCase());
+  return words.length >= 3 && words.every(w => w === words[0]) && [...words[0]].length <= 6;
 }
 
 /** Whisper sometimes loops on a phrase; three or more repeats in a row are kept once. */
