@@ -11,8 +11,8 @@ import { dragBox, clearTranslationState } from '../helpers/subtitles';
 import { recordCaptionsOnEveryLoad, waitForSpeechModel } from '../helpers/captions';
 import { astTest } from '../helpers/bridge';
 import { anthropicRelayAvailable } from '../helpers/server';
-import { readFrames, alignLines, type CapturedSample } from '../bench/screenJudge';
-import { lineTimeline, screenMetrics, type FrameSample } from '../bench/screenMetrics';
+import { readFrames, alignLines, locateSubtitles, type CapturedSample, type SubtitleLocation } from '../bench/screenJudge';
+import { lineTimeline, screenMetrics, type FrameSample, type Line } from '../bench/screenMetrics';
 
 // What a viewer actually sees, judged from the screen. Real YouTube in installed
 // Chrome (headed; E2E_WINDOW puts it on a chosen display), the extension started
@@ -32,10 +32,29 @@ test.skip(!DEEPL_KEY, 'DEEPL_API_KEY not set in .env');
 test.skip(!anthropicRelayAvailable(), 'no Anthropic credentials (the judge reads the screen with Claude)');
 
 const BOX = { x: 0.2, y: 0.75, w: 0.6, h: 0.14 }; // IRELKING's subtitle area
-const VIDEOS = [
-  { id: 'hrdfLfuHop4', start: 20 }, // dialogue-dense opening (10-13 lines a minute in YouTube's captions)
-  { id: '_zIrbXw-SVs', start: 540 },
-].filter(v => !process.env.SCREEN_VIDEOS || process.env.SCREEN_VIDEOS.split(',').includes(v.id));
+interface ScreenVideo {
+  id: string;
+  start: number;
+  /** Spoken language guessed when picking (the subtitle check may correct it). */
+  lang?: string;
+  /** YouTube's captions in the spoken language (json3): the Audio mode reference without burned-in subtitles. */
+  captions?: string | null;
+  /** Known subtitle area (IRELKING); fresh videos are located by the judge. */
+  box?: typeof BOX;
+}
+// SCREEN_RANDOM=1: the fresh videos chosen by `npm run screen:pick` (a different set every run).
+const RANDOM = process.env.SCREEN_RANDOM === '1';
+const PICKS = path.join(CACHE, 'screen-videos.json');
+const VIDEOS: ScreenVideo[] = (
+  RANDOM && fs.existsSync(PICKS)
+    ? (JSON.parse(fs.readFileSync(PICKS, 'utf8')) as ScreenVideo[])
+    : [
+        { id: 'hrdfLfuHop4', start: 20, lang: 'ko', box: BOX }, // dialogue-dense opening (10-13 lines a minute in YouTube's captions)
+        { id: '_zIrbXw-SVs', start: 540, lang: 'ko', box: BOX },
+      ]
+).filter(v => !process.env.SCREEN_VIDEOS || process.env.SCREEN_VIDEOS.split(',').includes(v.id));
+const SUBTITLE_LANGS = ['ko', 'ja', 'zh-Hans', 'zh-Hant', 'es', 'fr', 'de', 'pt', 'ru'];
+const LOCATIONS = path.join(CACHE, 'screen-locations.json');
 const MODES = (process.env.SCREEN_MODES || 'subtitles,audio').split(',') as ('subtitles' | 'audio')[];
 const PIECES = Number(process.env.SCREEN_PIECES || 3);
 const PIECE_S = 30; // YouTube stops automated playback after ~40 s of a page's playback
@@ -63,17 +82,63 @@ async function park(page: Page, t: number): Promise<void> {
   await page.waitForTimeout(1500); // the page settles before anything is drawn on it
 }
 
+/** Bare video frames at a few points of the stretch (what a person looks at before drawing the box). */
+async function sampleFrames(page: Page, from: number): Promise<string[]> {
+  const frames: string[] = [];
+  for (const dt of [0, 20, 40, 60, 80]) {
+    await page.evaluate(t => {
+      (document.querySelector('video.html5-main-video') as HTMLVideoElement).currentTime = t;
+    }, from + dt);
+    await page.waitForTimeout(1500); // seek and decode
+    const f = await page.evaluate(() => {
+      const v = document.querySelector('video.html5-main-video') as HTMLVideoElement | null;
+      if (!v || !v.videoWidth) return null;
+      const c = document.createElement('canvas');
+      c.width = 960;
+      c.height = Math.round((v.videoHeight / v.videoWidth) * 960);
+      c.getContext('2d')!.drawImage(v, 0, 0, c.width, c.height);
+      return c.toDataURL('image/jpeg', 0.75).split(',')[1];
+    });
+    if (f) frames.push(f);
+  }
+  return frames;
+}
+
+/** Where this video's burned-in subtitles are (judged once, then cached for both modes). */
+async function locationOf(video: ScreenVideo, openPage: () => Promise<Page>): Promise<SubtitleLocation> {
+  if (video.box) return { present: true, box: video.box, language: video.lang ?? 'ko', note: 'known subtitle area' };
+  const cache: Record<string, SubtitleLocation> = fs.existsSync(LOCATIONS) ? JSON.parse(fs.readFileSync(LOCATIONS, 'utf8')) : {};
+  if (cache[video.id]) return cache[video.id];
+  const page = await openPage();
+  await page.goto(`https://www.youtube.com/watch?v=${video.id}&t=${Math.floor(video.start)}s`);
+  await park(page, video.start);
+  const location = await locateSubtitles(await sampleFrames(page, video.start));
+  await page.close();
+  cache[video.id] = location;
+  fs.writeFileSync(LOCATIONS, JSON.stringify(cache, null, 1));
+  return location;
+}
+
+/** YouTube's captions (json3) as reference lines for the stretch (Audio mode without burned-in subtitles). */
+function captionLines(file: string | null | undefined, from: number, to: number): Line[] {
+  if (!file || !fs.existsSync(path.join(ROOT, file))) return [];
+  const events = (JSON.parse(fs.readFileSync(path.join(ROOT, file), 'utf8')).events ?? []) as { tStartMs?: number; dDurationMs?: number; segs?: { utf8?: string }[] }[];
+  return events
+    .map(e => ({ text: (e.segs ?? []).map(x => x.utf8 ?? '').join('').replace(/\s+/g, ' ').trim(), from: (e.tStartMs ?? 0) / 1000, to: ((e.tStartMs ?? 0) + (e.dDurationMs ?? 0)) / 1000 }))
+    .filter(l => l.text && l.from >= from && l.from < to);
+}
+
 /** The popup, as a person uses it. */
-async function startMode(page: Page, openPopup: (p: Page) => Promise<Page>, mode: 'subtitles' | 'audio', first: boolean): Promise<void> {
+async function startMode(page: Page, openPopup: (p: Page) => Promise<Page>, mode: 'subtitles' | 'audio', first: boolean, box = BOX, lang = 'ko'): Promise<void> {
   const popup = await openPopup(page);
   if (mode === 'subtitles') {
     await popup.click('#modeSubtitles');
-    await popup.selectOption('#subtitleLanguage', 'ko');
+    await popup.selectOption('#subtitleLanguage', lang);
     await popup.click('#drawSubtitleBox');
     const said = await popup.locator('#status').innerText().catch(() => '');
     await page.bringToFront();
     await expect.poll(() => page.evaluate(() => document.body.style.cursor), { timeout: 15_000, message: `box drawing did not start (popup said: ${said})` }).toBe('crosshair');
-    await dragBox(page, BOX);
+    await dragBox(page, box);
     await expect.poll(async () => (await astTest<{ state: string }>(page, 'mode.stats')).state, { timeout: 120_000 }).toBe('running');
   } else {
     await popup.click('#modeAudio');
@@ -123,6 +188,11 @@ function ffmpeg(): string | null {
 for (const mode of MODES) for (const video of VIDEOS) {
   test(`screen: ${mode} on ${video.id}`, async ({ context, openPopup, configure, sw, server }) => {
     test.setTimeout(2_400_000);
+    const location = await locationOf(video, () => context.newPage());
+    test.info().annotations.push({ type: 'subtitles', description: `${location.present ? 'burned-in' : 'none'}: ${location.note}` });
+    if (mode === 'subtitles') test.skip(!location.present, `no burned-in subtitles (${location.note})`);
+    const subtitleLang = location.language && SUBTITLE_LANGS.includes(location.language) ? location.language : 'ko';
+    const spoken = location.language ?? video.lang ?? 'ko';
     await configure({
       translationProvider: 'deepl',
       deeplApiKey: DEEPL_KEY,
@@ -131,8 +201,8 @@ for (const mode of MODES) for (const video of VIDEOS) {
       claudeGatewayUrl: `${server.url}/relay/anthropic`,
       claudeGatewayToken: 'relay',
       claudeGatewayAuth: 'bearer',
-      sourceLanguage: 'ko',
-      subtitleLanguage: 'ko',
+      sourceLanguage: spoken.startsWith('zh') ? 'zh' : spoken,
+      subtitleLanguage: subtitleLang,
       targetLanguage: 'en',
     });
     await clearTranslationState(sw);
@@ -158,7 +228,7 @@ for (const mode of MODES) for (const video of VIDEOS) {
       const page = await context.newPage(); // a new tab in the same window
       await page.goto(`https://www.youtube.com/watch?v=${video.id}&t=${Math.floor(from - LEAD_IN_S)}s`);
       await park(page, from - LEAD_IN_S);
-      await startMode(page, openPopup, mode, k === 0);
+      await startMode(page, openPopup, mode, k === 0, location.box ?? BOX, subtitleLang);
       // Starting in the new tab takes over from the old one (the supported flow); only then close it.
       await previous?.close();
       previous = null;
@@ -205,7 +275,16 @@ for (const mode of MODES) for (const video of VIDEOS) {
     if (ff) spawnSync(ff, ['-y', '-loglevel', 'error', '-framerate', '2', '-i', path.join(dir, 'screen-%04d.jpg'), '-vf', 'scale=trunc(iw/2)*2:trunc(ih/2)*2', '-pix_fmt', 'yuv420p', path.join(dir, 'screen.mp4')]);
 
     const samples: FrameSample[] = await readFrames(captured);
-    const korean = lineTimeline(samples, 'burned');
+    let korean = lineTimeline(samples, 'burned');
+    // Without burned-in subtitles, YouTube's own captions in the spoken language are the reference.
+    let reference = 'burned-in subtitles';
+    if (korean.length < 3) {
+      const fromCaptions = captionLines(video.captions, video.start, video.start + PIECES * PIECE_S);
+      if (fromCaptions.length >= 3) {
+        korean = fromCaptions;
+        reference = "YouTube's captions";
+      }
+    }
     const overlay = lineTimeline(samples, 'overlay');
     const alignment = await alignLines(korean, overlay);
     const metrics = screenMetrics(samples, korean, overlay, alignment);
@@ -217,6 +296,8 @@ for (const mode of MODES) for (const video of VIDEOS) {
       video: video.id,
       window: [video.start, video.start + PIECES * PIECE_S],
       moments: samples.length,
+      reference,
+      location,
       ...metrics,
       shownButNotVisible: invisible,
       visibleButNotInPage: unexplained,

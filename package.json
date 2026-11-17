@@ -33,6 +33,8 @@
     "bench:youtube": "npm run build:prod && cross-env-shell E2E_BROWSER=chrome playwright test --project=youtube youtube-bench --grep \"real YouTube\"",
     "bench:local": "npm run build:prod && cross-env-shell BENCH_WORKERS=3 playwright test --project=youtube youtube-bench --grep \"local copies\"",
     "bench:all": "npm run bench:youtube && npm run bench:local",
+    "screen:pick": "e2e/.cache/venv/Scripts/python -I e2e/scripts/pick_screen_videos.py 3",
+    "screen:fresh": "npm run screen:pick && cross-env-shell E2E_BROWSER=chrome SCREEN_RANDOM=1 SCREEN_DEBUG=1 E2E_WINDOW=2560,172,1920,1080 playwright test --project=screen",
     "bench:rescore": "esbuild e2e/scripts/rescore-audio.ts --bundle --platform=node --format=cjs --outfile=e2e/bench/.rescore.cjs --log-level=warning && node e2e/bench/.rescore.cjs",
     "e2e:judge": "cross-env-shell E2E_JUDGE=1 playwright test --project=judge",
     "server:test": "npm run server:build && jest --selectProjects server",
