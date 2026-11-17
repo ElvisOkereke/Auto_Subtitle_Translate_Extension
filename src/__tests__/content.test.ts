@@ -228,6 +228,29 @@ describe('content script subtitle overlay', () => {
         await chromeMock.dispatch({ type: 'DISPLAY_SUBTITLE', text: 'live duplicate', language: 'en', captionId: 'l1', speechEndedAt: Date.now() - 200 });
         expect(lines()).toEqual([]);
       });
+
+      it('a seek outside the audio read ahead forgets it and tells the pipeline to start over', async () => {
+        const v = media(false, 10);
+        bufferedTo(v, 60);
+        await chromeMock.dispatch({ type: 'TOGGLE_SUBTITLES' });
+        for (const t of [10, 11, 12]) {
+          window.dispatchEvent(new MessageEvent('message', { data: { astAudio: true, t, pcm: new Float32Array(16000) }, source: window }));
+        }
+        await wait(50);
+        v.currentTime = 80;
+        v.dispatchEvent(new Event('seeking'));
+        await wait(50);
+        expect(chromeMock.runtime.sendMessage).toHaveBeenCalledWith(expect.objectContaining({ type: 'READ_AHEAD_RESET' }));
+      });
+
+      it('a live caption for speech a read-ahead caption already covers is not shown twice', async () => {
+        media(false, 20);
+        await chromeMock.dispatch({ type: 'TOGGLE_SUBTITLES' });
+        await chromeMock.dispatch({ type: 'DISPLAY_SUBTITLE', text: 'read ahead', language: 'en', captionId: 'r1', videoStart: 19, videoEnd: 21.5 });
+        await wait(300);
+        await chromeMock.dispatch({ type: 'DISPLAY_SUBTITLE', text: 'live copy', language: 'en', captionId: 'l1', speechEndedAt: Date.now() - 100 });
+        expect(lines()).toEqual(['read ahead']);
+      });
     });
 
     it('a new source on the followed video (next item, no seek) clears the screen', async () => {

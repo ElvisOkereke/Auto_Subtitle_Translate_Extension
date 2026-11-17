@@ -105,7 +105,9 @@ test('read-ahead captions appear when the video reaches their words; pause freez
   const after = (await shownCaptions(page)).filter(c => typeof c.videoStart === 'number' && c.shownAt >= far);
   console.log(JSON.stringify(after.map(c => ({ start: c.videoStart, shownAt: c.shownAt, text: c.text.slice(0, 30) }))));
   expect(after.length, 'captions after the far seek').toBeGreaterThan(0);
-  expect(after.every(c => c.videoStart! >= far - 1), 'nothing from the old position').toBe(true);
+  // Nothing from the old position: no caption whose speech ended before the seek point. (Its start
+  // can read earlier: Whisper may date a window's first sentence to the window's start.)
+  expect(after.every(c => c.lineStart >= far - 0.5), 'nothing from the old position').toBe(true);
   for (const c of after.filter(c => c.videoStart! > far + 1)) expect(Math.abs(c.shownAt - c.videoStart!)).toBeLessThan(0.3);
 
   // And back to the start: the captions made there show again, once each.
