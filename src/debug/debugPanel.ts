@@ -10,7 +10,8 @@ const REFRESH_MS = 1000;
 
 const STYLE = `
 :host { all: initial; }
-.panel { position: fixed; top: 12px; left: 12px; z-index: 2147483647; width: min(400px, calc(100vw - 24px)); max-height: 70vh;
+/* Right edge: on YouTube's page that is the recommendations column, not the video (the panel must not hide subtitles). */
+.panel { position: fixed; top: 64px; right: 12px; z-index: 2147483647; width: min(360px, calc(100vw - 24px)); max-height: 60vh;
   display: flex; flex-direction: column; background: rgba(16, 18, 24, 0.94); color: #e8eaef; border: 1px solid #3a4150;
   border-radius: 8px; font: 12px/1.45 'Segoe UI', system-ui, sans-serif; box-shadow: 0 6px 24px rgba(0,0,0,0.45); }
 .bar { display: flex; align-items: center; gap: 6px; padding: 7px 10px; border-bottom: 1px solid #2c323d; }

@@ -28,7 +28,7 @@ const launcher = new ModeLauncher<SubtitleMode>();
   if (!mode) return null;
   return {
     state: mode.state,
-    ocrCalls: mode.ocrCalls,
+    ocrCalls: mode.ocrCalls + mode.raOcrCalls, // live reads and read-ahead reads
     translateCalls: mode.translateCalls,
     readAheadLead: mode.readAheadLead,
     box: mode.currentBox,
