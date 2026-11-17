@@ -1,7 +1,7 @@
 // offscreen.ts - Captures tab audio, segments speech via VAD, and relays segments to the Whisper worker.
 import { ExtensionMessage } from './types';
 import { SpeechSegmenter, DEFAULT_VAD_CONFIG } from './utils/vad';
-import { TimedSegmenter, TimedSegment } from './audio/timedSegmenter';
+import { ReadAheadWindows } from './audio/readAheadWindows';
 import { fromInt16Base64 } from './audio/readAhead/pcm';
 import { isNonSpeech } from './audio/nonSpeech';
 
@@ -52,90 +52,51 @@ const SPEECH_END_HANGOVER_MS = 400; // the segmenter's silence hangover (vad.ts)
 
 // ---- audio read-ahead (spec: Audio mode read-ahead) ----
 // The page's buffered audio arrives ahead of playback as 16 kHz PCM in video
-// time. It is segmented here and transcribed nearest-first, one segment at a
-// time; each caption carries its video-time start and end. While read-ahead is
-// healthy the live path's segments are not transcribed (capture keeps the tab
-// audible); when it isn't, the live path carries on as before.
-const RA_FRAME = 1024;
-const RA_RATE = 16000;
+// time. It is transcribed with a sliding window (readAheadWindows.ts) and
+// Whisper's sentence timestamps, one window at a time; each caption carries its
+// video-time start and end. While read-ahead is healthy the live path's
+// segments are not transcribed (capture keeps the tab audible); when it isn't,
+// the live path carries on as before.
 const readAhead = {
   tabId: null as number | null,
-  segmenter: new TimedSegmenter(RA_RATE),
-  leftover: new Float32Array(0),
-  frameTime: 0,
-  nextT: null as number | null,
-  queue: [] as TimedSegment[],
+  windows: new ReadAheadWindows(),
   inFlight: null as number | null,
   healthy: false,
   playhead: 0,
-  meta: new Map<number, { videoStart: number; videoEnd: number }>(),
+  meta: new Map<number, { videoStart: number }>(),
 };
 
 function resetReadAhead(): void {
-  readAhead.segmenter.reset();
-  readAhead.leftover = new Float32Array(0);
-  readAhead.nextT = null;
+  readAhead.windows.reset();
+  readAhead.inFlight = null;
 }
 
 function onReadAheadAudio(t: number, pcm: Float32Array): void {
   diag.raChunks++;
-  if (readAhead.nextT === null || Math.abs(t - readAhead.nextT) > 0.05) {
-    resetReadAhead(); // not continuous with the last chunk: a seek or a gap
-    readAhead.frameTime = t;
-  }
-  readAhead.nextT = t + pcm.length / RA_RATE;
-  const joined = new Float32Array(readAhead.leftover.length + pcm.length);
-  joined.set(readAhead.leftover, 0);
-  joined.set(pcm, readAhead.leftover.length);
-  let o = 0;
-  for (; o + RA_FRAME <= joined.length; o += RA_FRAME) {
-    const segment = readAhead.segmenter.push(joined.subarray(o, o + RA_FRAME), readAhead.frameTime);
-    readAhead.frameTime += RA_FRAME / RA_RATE;
-    if (segment) {
-      diag.raSegments++;
-      readAhead.queue.push({ ...segment, audio: segment.audio.slice() });
-    }
-  }
-  readAhead.leftover = joined.slice(o);
+  readAhead.windows.push(t, pcm);
   pumpReadAhead();
 }
 
-/** Sends the next segment to Whisper: the earliest one not yet over at the playhead. */
+/** Sends the next window to Whisper (one at a time). */
 function pumpReadAhead(): void {
   if (readAhead.inFlight !== null) return;
-  const before = readAhead.queue.length;
-  readAhead.queue = readAhead.queue.filter(s => s.end > readAhead.playhead - 0.25);
-  diag.raSkipped += before - readAhead.queue.length;
-  if (readAhead.queue.length > 400) readAhead.queue = readAhead.queue.slice(-400);
-  if (!readAhead.queue.length) return;
-  readAhead.queue.sort((a, b) => a.start - b.start);
-  const next = readAhead.queue.shift()!;
+  const win = readAhead.windows.next(readAhead.playhead);
+  if (!win) return;
+  diag.raSegments++;
   const segmentId = ++segmentCounter;
   readAhead.inFlight = segmentId;
-  readAhead.meta.set(segmentId, { videoStart: next.start, videoEnd: next.end });
+  readAhead.meta.set(segmentId, { videoStart: win.start });
   if (readAhead.meta.size > 64) readAhead.meta.delete(readAhead.meta.keys().next().value!);
-  getWorker().postMessage({ type: 'transcribe', audio: next.audio, language: currentSourceLanguage, segmentId, timestamps: true }, [next.audio.buffer]);
+  getWorker().postMessage({ type: 'transcribe', audio: win.audio, language: currentSourceLanguage, segmentId, timestamps: true }, [win.audio.buffer]);
 }
 
-/** Whisper's timed sentences of a read-ahead segment, placed in video time (null when it gave none). */
-function timedSentences(
-  chunks: { text: string; start: number; end: number | null }[] | undefined,
-  segment: { videoStart: number; videoEnd: number }
-): { text: string; start: number; end: number }[] | null {
-  if (!Array.isArray(chunks) || !chunks.length) return null;
-  const out: { text: string; start: number; end: number }[] = [];
-  for (const c of chunks) {
-    const text = c.text.trim();
-    if (!text || !Number.isFinite(c.start)) continue;
-    if (isNonSpeech(text)) {
-      diag.nonSpeech++;
-      continue;
-    }
-    const start = segment.videoStart + c.start;
-    const end = c.end !== null && Number.isFinite(c.end) ? segment.videoStart + c.end : segment.videoEnd;
-    out.push({ text, start, end: Math.max(end, start + 0.3) });
-  }
-  return out.length ? out : null;
+/** Whisper's sentences for the window in flight -> captions in video time (sound annotations dropped). */
+function windowCaptions(chunks: { text: string; start: number; end: number | null }[] | undefined): { text: string; start: number; end: number }[] {
+  const sentences = (Array.isArray(chunks) ? chunks : []).map(c => ({ text: c.text, start: c.start, end: c.end === null ? NaN : c.end }));
+  const captions = readAhead.windows.complete(sentences);
+  const speech = captions.filter(c => !isNonSpeech(c.text));
+  diag.nonSpeech += captions.length - speech.length;
+  return speech;
 }
 
 function readAheadDone(segmentId: number | undefined): void {
@@ -152,10 +113,9 @@ function handleWorkerMessage(event: MessageEvent): void {
     else diag.emptyResults++;
     const ahead = readAhead.meta.get(event.data.segmentId);
     if (ahead) diag.raResults++;
-    // Read-ahead with Whisper timestamps: each sentence is a caption timed to its words.
-    const sentences = ahead ? timedSentences(event.data.chunks, ahead) : null;
-    if (sentences) {
-      for (const s of sentences) {
+    // Read-ahead: each of Whisper's sentences is a caption timed to its words.
+    if (ahead) {
+      for (const s of windowCaptions(event.data.chunks)) {
         chrome.runtime.sendMessage({
           type: 'TRANSCRIPTION_RESULT',
           text: s.text,
@@ -174,14 +134,13 @@ function handleWorkerMessage(event: MessageEvent): void {
           audioMs: event.data.audioMs,
           queueMs: event.data.queueMs,
           inferenceMs: event.data.inferenceMs,
-          ...(ahead
-            ? { videoStart: ahead.videoStart, videoEnd: ahead.videoEnd, readAhead: 1 }
-            : { speechEndedAt: speechEndedAt.get(event.data.segmentId) ?? Date.now() })
+          speechEndedAt: speechEndedAt.get(event.data.segmentId) ?? Date.now()
         }
       });
     }
     readAheadDone(event.data.segmentId);
   } else if (type === 'dropped') {
+    if (event.data.segmentId === readAhead.inFlight) readAhead.windows.complete([]);
     readAheadDone(event.data.segmentId);
   } else if (type === 'progress') {
     chrome.runtime.sendMessage({
@@ -190,6 +149,7 @@ function handleWorkerMessage(event: MessageEvent): void {
       percent: event.data.percent
     });
   } else if (type === 'error') {
+    if (readAhead.inFlight !== null) readAhead.windows.complete([]);
     readAhead.inFlight = null;
     diag.errors++;
     diag.lastError = String(event.data.message ?? event.data.error ?? '').slice(0, 200);
@@ -286,8 +246,6 @@ function stopCapture(): void {
   }
   segmenter = null;
   readAhead.tabId = null;
-  readAhead.queue = [];
-  readAhead.inFlight = null;
   readAhead.healthy = false;
   resetReadAhead();
 }
