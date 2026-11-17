@@ -37,6 +37,39 @@ const CONFIG_BOXES = ['av1C', 'avcC', 'hvcC', 'vpcC'];
 /** Partial data kept between appends is capped; beyond it the stream is treated as desynced. */
 const MAX_PENDING_BYTES = 8 * 1024 * 1024;
 const VISUAL_SAMPLE_ENTRY_FIELDS = 78;
+/** AudioSampleEntry: 8 bytes of SampleEntry + 20 of audio fields before its child boxes (esds). */
+const AUDIO_SAMPLE_ENTRY_FIELDS = 28;
+
+/** An MPEG-4 descriptor's variable-length size (1-4 bytes, high bit = more). */
+function descriptorSize(b: Uint8Array, o: number): { size: number; next: number } {
+  let size = 0;
+  let i = 0;
+  for (; i < 4; i++) {
+    const v = b[o + i];
+    size = (size << 7) | (v & 0x7f);
+    if (!(v & 0x80)) break;
+  }
+  return { size, next: o + i + 1 };
+}
+
+/** The AudioSpecificConfig inside an esds box (ES_Descriptor > DecoderConfigDescriptor > DecoderSpecificInfo). */
+function audioSpecificConfig(b: Uint8Array, esds: Box): Uint8Array | null {
+  let o = esds.body + 4; // version + flags
+  if (b[o] !== 0x03) return null;
+  let d = descriptorSize(b, o + 1);
+  o = d.next;
+  const esFlags = b[o + 2];
+  o += 3; // ES_ID, flags
+  if (esFlags & 0x80) o += 2; // dependsOn_ES_ID
+  if (esFlags & 0x40) o += 1 + b[o]; // URL
+  if (esFlags & 0x20) o += 2; // OCR_ES_Id
+  if (b[o] !== 0x04) return null;
+  d = descriptorSize(b, o + 1);
+  o = d.next + 13; // objectTypeIndication, streamType, bufferSize, maxBitrate, avgBitrate
+  if (b[o] !== 0x05) return null;
+  d = descriptorSize(b, o + 1);
+  return d.next + d.size <= esds.end ? b.slice(d.next, d.next + d.size) : null;
+}
 
 function u32(b: Uint8Array, o: number): number {
   return ((b[o] << 24) | (b[o + 1] << 16) | (b[o + 2] << 8) | b[o + 3]) >>> 0;
@@ -82,6 +115,9 @@ function child(b: Uint8Array, parent: { body: number; end: number }, path: strin
 }
 
 export class Fmp4Parser {
+  /** 'audio': the stream's AAC track (YouTube's audio/mp4); every audio frame decodes on its own. */
+  constructor(private readonly kind: 'video' | 'audio' = 'video') {}
+
   private pending = new Uint8Array(0);
   private init: Fmp4Init | null = null;
 
@@ -141,6 +177,21 @@ export class Fmp4Parser {
     let description: Uint8Array | null = null;
     let width = 0;
     let height = 0;
+    if (stsd && this.kind === 'audio') {
+      const entry = boxes(b, stsd.body + 8, stsd.end).next().value as Box | undefined;
+      if (entry?.type === 'mp4a') {
+        const channels = (b[entry.body + 16] << 8) | b[entry.body + 17];
+        const sampleRate = u32(b, entry.body + 24) >>> 16;
+        const esds = child(b, { body: entry.body + AUDIO_SAMPLE_ENTRY_FIELDS, end: entry.end }, ['esds']);
+        const asc = esds ? audioSpecificConfig(b, esds) : null;
+        if (asc) {
+          let objectType = asc[0] >> 3;
+          if (objectType === 31) objectType = 32 + (((asc[0] & 0x07) << 3) | (asc[1] >> 5));
+          return { timescale, configBox: 'esds', description: asc, width: 0, height: 0, audio: { codec: `mp4a.40.${objectType}`, sampleRate, channels } };
+        }
+      }
+      return { timescale, configBox: null, description: null, width: 0, height: 0 };
+    }
     if (stsd) {
       const entry = boxes(b, stsd.body + 8, stsd.end).next().value as Box | undefined;
       if (entry) {
@@ -223,7 +274,7 @@ export class Fmp4Parser {
       samples.push({
         time: decodeTime / timescale + timestampOffset,
         duration: duration / timescale,
-        key: (flags & 0x10000) === 0, // sample_is_non_sync_sample clear
+        key: this.kind === 'audio' || (flags & 0x10000) === 0, // sample_is_non_sync_sample clear
         data: b.slice(offset, offset + size),
       });
       offset += size;

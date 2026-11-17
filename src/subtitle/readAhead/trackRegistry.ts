@@ -23,10 +23,15 @@ export function tappedContainer(mime: string): 'mp4' | 'webm' | null {
 /** WebCodecs codec string from a SourceBuffer MIME type. */
 export const codecOf = (mime: string) => webCodecsVideoCodec(mime.match(/codecs="?([^",]+)/i)?.[1] ?? '');
 
-/** Which tapped track a SourceBuffer MIME type is: video (fMP4/WebM), audio (WebM: YouTube's Opus), or none. */
+/** Which tapped track a SourceBuffer MIME type is: video (fMP4/WebM), audio (YouTube's Opus in WebM or AAC in MP4), or none. */
 export function tappedKind(mime: string): 'video' | 'audio' | null {
   if (tappedContainer(mime)) return 'video';
-  return /^audio\/webm/i.test(mime) ? 'audio' : null;
+  return audioContainer(mime) ? 'audio' : null;
+}
+
+/** Container of an audio SourceBuffer MIME type the tap reads, or null. */
+export function audioContainer(mime: string): 'mp4' | 'webm' | null {
+  return (mime.match(/^audio\/(mp4|webm)/i)?.[1].toLowerCase() as 'mp4' | 'webm' | undefined) ?? null;
 }
 
 /** WebCodecs audio codec string from a SourceBuffer MIME type. */
@@ -39,7 +44,7 @@ export const audioCodecOf = (mime: string) => (mime.match(/codecs="?([^",]+)/i)?
  */
 export function retypeTrack<M extends object>(track: TapTrack<M>, mime: string): void {
   if (track.kind === 'audio') {
-    track.parser = new WebmParser('audio');
+    track.parser = audioContainer(mime) === 'mp4' ? new Fmp4Parser('audio') : new WebmParser('audio');
     track.codec = audioCodecOf(mime);
   } else {
     const container = tappedContainer(mime) ?? 'mp4';
@@ -77,7 +82,8 @@ export class TrackRegistry<M extends object> {
   }
 
   addTrack(mediaSource: M, codec: string, container: 'mp4' | 'webm' = 'mp4', kind: 'video' | 'audio' = 'video'): TapTrack<M> {
-    const parser = kind === 'audio' ? new WebmParser('audio') : container === 'webm' ? new WebmParser() : new Fmp4Parser();
+    const parser =
+      kind === 'audio' ? (container === 'mp4' ? new Fmp4Parser('audio') : new WebmParser('audio')) : container === 'webm' ? new WebmParser() : new Fmp4Parser();
     const track: TapTrack<M> = { mediaSource, kind, codec, parser, init: null, fragments: [], bytes: 0 };
     this.tracks.push(track);
     return track;

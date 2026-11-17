@@ -1,5 +1,5 @@
 import fs from 'node:fs';
-import { audioCodecOf, retypeTrack, tappedKind } from '../trackRegistry';
+import { audioCodecOf, audioContainer, retypeTrack, tappedKind } from '../trackRegistry';
 import { WebmParser } from '../webm';
 import { Fmp4Parser } from '../fmp4';
 import path from 'node:path';
@@ -110,8 +110,11 @@ describe('TrackRegistry: audio tracks (audio read-ahead)', () => {
   it('audio/webm SourceBuffers are tapped as audio; video stays video', () => {
     expect(tappedKind('audio/webm; codecs="opus"')).toBe('audio');
     expect(tappedKind('video/webm; codecs="vp9"')).toBe('video');
-    expect(tappedKind('audio/mp4; codecs="mp4a.40.2"')).toBeNull(); // AAC: live fallback
+    expect(tappedKind('audio/mp4; codecs="mp4a.40.2"')).toBe('audio'); // AAC (videos without an Opus track)
+    expect(audioContainer('audio/mp4; codecs="mp4a.40.2"')).toBe('mp4');
+    expect(audioContainer('audio/webm; codecs="opus"')).toBe('webm');
     expect(audioCodecOf('audio/webm; codecs="opus"')).toBe('opus');
+    expect(audioCodecOf('audio/mp4; codecs="mp4a.40.2"')).toBe('mp4a.40.2');
   });
 
   it('keeps the playing stream\'s video and audio apart', () => {
@@ -125,6 +128,7 @@ describe('TrackRegistry: audio tracks (audio read-ahead)', () => {
     expect(r.active('blob:a')).toBe(video);
     expect(r.activeAudio('blob:a')).toBe(audio);
     expect(audio.parser).toBeInstanceOf(WebmParser);
+    expect(r.addTrack(a, 'mp4a.40.2', 'mp4', 'audio').parser).toBeInstanceOf(Fmp4Parser);
   });
 
   it('releasing inactive streams keeps the playing stream\'s audio', () => {

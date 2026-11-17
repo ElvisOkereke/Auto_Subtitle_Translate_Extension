@@ -5,7 +5,7 @@
 // isolated-world content script. Decision record: docs/superpowers/decisions/2026-11-12-read-ahead.md
 // Audio mode: the audio SourceBuffer (WebM/Opus) is decoded ahead the same way
 // and posted as 16 kHz mono PCM chunks in video time (audio read-ahead).
-import { TapTrack, TrackRegistry, audioCodecOf, codecOf, retypeTrack, tappedContainer, tappedKind } from './trackRegistry';
+import { TapTrack, TrackRegistry, audioCodecOf, audioContainer, codecOf, retypeTrack, tappedContainer, tappedKind } from './trackRegistry';
 import { nextFragment } from './fragmentPicker';
 import { Resampler16k, WHISPER_RATE, downmix } from '../../audio/readAhead/pcm';
 
@@ -92,7 +92,7 @@ const AUDIO_CHUNK_SAMPLES = WHISPER_RATE;
     const sb = origAdd.call(this, mime);
     const kind = tappedKind(mime);
     if (kind) {
-      const container = tappedContainer(mime) ?? 'webm';
+      const container = (kind === 'audio' ? audioContainer(mime) : tappedContainer(mime)) ?? 'webm';
       const codec = kind === 'audio' ? audioCodecOf(mime) : codecOf(mime);
       const track = registry.addTrack(this, codec, container, kind);
       sbTracks.set(sb, track);

@@ -97,3 +97,22 @@ describe('Fmp4Parser', () => {
     expect(parser.push(fragment(3000, 40, [{ size: 2, key: true }])).fragments.map(f => f.start)).toEqual([3]);
   });
 });
+
+// 2 s, 440 Hz sine, AAC-LC 44.1 kHz mono, fragmented MP4 (ffmpeg, like YouTube's audio/mp4 streams).
+const AAC = new Uint8Array(require('fs').readFileSync(require('path').join(__dirname, 'fixtures/tiny-aac.mp4')));
+
+describe('Fmp4Parser (audio track: AAC)', () => {
+  it('reads the AAC track: codec, sample rate, channels and the AudioSpecificConfig description', () => {
+    const p = new Fmp4Parser('audio');
+    const { init, fragments } = p.push(AAC);
+    expect(init?.audio).toEqual({ codec: 'mp4a.40.2', sampleRate: 44100, channels: 1 });
+    expect(init!.description!.length).toBeGreaterThanOrEqual(2);
+    expect(init!.description![0] >> 3).toBe(2); // audio object type 2: AAC-LC
+    const samples = fragments.flatMap(f => f.samples);
+    expect(samples.length).toBeGreaterThan(50);
+    expect(samples.every(s => s.key)).toBe(true);
+    for (let i = 1; i < samples.length; i++) expect(samples[i].time).toBeGreaterThan(samples[i - 1].time);
+    const last = samples[samples.length - 1];
+    expect(last.time + last.duration).toBeGreaterThan(1.9);
+  });
+});
