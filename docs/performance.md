@@ -359,32 +359,59 @@ How it's measured:
   - captions shown against reference lines;
   - transcript CER: alignment-free character error of the transcribed text
     against the reference. It exceeds 100% when Whisper loops on a phrase;
-  - words covered: reference words that appear in a caption shown within 8 s;
-  - delay: from the end of the speech to the caption on screen (P50 / P90);
+  - words covered: reference words that appear in a caption on screen from 1 s
+    before the line to 8 s after it;
+  - on screen while talking: share of the reference's speech time with a
+    caption on screen; longest gap: the longest talking stretch with none;
+  - delay: from the end of the speech to the caption on screen (live captions);
+  - start offset: for read-ahead captions, |caption appears − its words start|
+    (P50) and the share within 0.5 s, the spec's target;
   - too short: captions that left before their reading time;
   - shown while paused: captions that appeared while the video was paused.
 
-### Audio baseline (2026-11-16, before syncing to the video)
+### Audio before (2026-11-16): live captions trail the speech
 
-Live: two samples (A → B). Local: one sample.
+The first baseline (before any sync work) showed captions arriving 2–4.5 s
+after the speech (up to 11.7 s), 1–5 per run appearing over a paused frame,
+some leaving before they could be read, and Whisper looping on music or crowd
+noise. Live captions now follow the video (no caption over a paused frame, a
+seek clears the screen, the newest line holds until the next), but they still
+trail the speech by the transcription time.
 
-| run | video | captions / ref lines | transcript CER | words covered | delay P50 / P90 | too short | shown while paused |
+### Audio read-ahead (2026-11-16): live captions → read-ahead
+
+On YouTube the extension now reads the audio the player has already buffered,
+transcribes it ahead of playback (Whisper with sentence timestamps over a
+28 s sliding window) and shows each caption when its words are spoken. Same
+day, same harness, one live sample each (`ra-live-final` → `ra-live-readahead`,
+`ra-local-final` → `ra-local-readahead`):
+
+| run | video | captions / ref lines | transcript CER | words covered | on screen while talking | longest gap | start offset P50 / within 0.5 s |
 |---|---|---|---|---|---|---|---|
-| youtube | -ci-Ursh0XQ (ko) | 18/60 → 17/60 | 193% → 220% | 52% → 39% | 4.2 / 8.2 s → 3.5 / 4.5 s | 1 → 4 | 4 → 3 |
-| youtube | 27VKumB17kE (es) | 13/13 → 18/14 | 32% → 28% | 82% → 86% | 2.9 / 5.5 s → 1.8 / 2.7 s | 1 → 1 | 2 → 5 |
-| youtube | 5INsXNUaRdE (ja) | 19/14 → 19/14 | 128% → 242% | 49% → 37% | 4.5 / 6.9 s → 4.4 / 11.4 s | 1 → 0 | 5 → 5 |
-| local | -ci-Ursh0XQ (ko) | 16/63 | 144% | 31% | 4.7 / 9.2 s | 3 | 2 |
-| local | 27VKumB17kE (es) | 15/14 | 30% | 74% | 3.7 / 9.7 s | 2 | 1 |
-| local | 5INsXNUaRdE (ja) | 14/14 | 41% | 29% | 4.3 / 11.7 s | 1 | 1 |
+| youtube | -ci-Ursh0XQ (ko) | 10/60 → 28/60 | 77% → 54% | 35% → 53% | 52% → 61% | 6.4 s → 6.4 s | 1.8 s / 0% → 0.7 s / 41% |
+| youtube | 27VKumB17kE (es) | 12/13 → 19/14 | 45% → 34% | 72% → 83% | 58% → 77% | 21.9 s → 10.6 s | – → 2.4 s / 0% |
+| youtube | 5INsXNUaRdE (ja) | 11/14 → 17/14 | 56% → 45% | 33% → 54% | 80% → 65% | 3.0 s → 3.8 s | – → 0.3 s / 50% |
+| local | -ci-Ursh0XQ (ko) | 12/63 → 27/63 | 62% → 48% | 47% → 65% | 70% → 96% | 6.3 s → 3.8 s | 1.3 s / 33% → 0.4 s / 52% |
+| local | 27VKumB17kE (es) | 14/14 → 19/14 | 28% → 30% | 88% → 94% | 89% → 100% | 5.7 s → 0.0 s | – → 0.9 s / 10% |
+| local | 5INsXNUaRdE (ja) | 13/14 → 14/14 | 39% → 41% | 31% → 64% | 45% → 93% | 4.1 s → 1.3 s | 2.5 s / 0% → 0.5 s / 33% |
 
-What the baseline shows:
+E2E (`captions-readahead.spec`, local MSE fixture): captions appear 0.02–0.1 s
+after their speech starts, on the GPU (Chrome) and the CPU (Chromium).
 
-- **Captions keep coming while the video is paused:** 1–5 per run. The
-  pipeline transcribes what it already heard and shows it over a still frame.
-- **Captions trail the speech:** about 2–4.5 s typically, up to 11.7 s.
-- **Some leave before they can be read** (up to 4 per run). They were on a
-  fixed 6 s timer, pushed out by newer lines.
-- **Whisper loops on music or crowd noise** (e.g. one Japanese phrase repeated
-  nine times in a single caption), which drives CER past 100%.
-- **Spanish narration transcribes well** (28–32% CER against manual captions).
-  Korean casters talking over each other are the hardest case.
+What it shows:
+
+- **More of what is said reaches the screen**: words covered is up in all six
+  runs (Japanese 31–33% → 54–64%), and transcription is as good or better
+  (Whisper hears whole sentences instead of 8 s cuts).
+- **The screen is rarely empty while someone talks** on the local copies
+  (93–100%). Live runs restart capture every 30 s (one tab captures at a time),
+  so each window starts cold; live Japanese dropped (80% → 65%).
+- **Timing**: half the Korean and Japanese lines start within 0.5 s of the
+  reference (auto captions, themselves word-timed). Spanish manual cues are
+  6–9 s long and start mid-sentence, so its start offset says little.
+- Bugs found on real YouTube and fixed on the way: audio beyond the video
+  buffer was rejected (read-ahead fell back mid-piece), the tap re-decoded the
+  same audio up to 159 times, 10 s VAD cuts lost words mid-sentence.
+- **Left**: Korean casters still lose about half their words (fast, overlapping
+  speech); the 2 s lead needed before read-ahead takes over; Whisper still
+  mishears names.

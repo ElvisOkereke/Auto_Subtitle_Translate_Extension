@@ -7,7 +7,9 @@ A Chrome (MV3) extension that translates what you watch, live:
   appears on top of them, in place, as the video plays. Works on YouTube and
   other `<video>` pages; on YouTube most lines are translated before they
   appear (read-ahead).
-- **Audio mode** — live captions from the tab's speech, translated.
+- **Audio mode** — translated captions from the tab's speech. On YouTube it
+  transcribes the audio the player has already buffered, so each caption
+  appears when its words are spoken.
 - **Screen Translate** — drag a box over text on any page for a one-shot
   translation.
 
@@ -77,8 +79,8 @@ Docker, GCP, Playwright and Jest.
     audio videos (Korean, Spanish, Japanese). It drove a minimum reading
     time, read-ahead for YouTube's VP9 format, and audio captions that follow
     the video.
-- **In progress:** audio read-ahead (transcribing the audio before it
-  plays, so captions land on time).
+  - Audio read-ahead on YouTube: captions timed to the words (0.02–0.1 s in
+    tests), more of what is said on screen.
 - **Next:**
   - automatic subtitle detection;
   - deploying the service and publishing on the Chrome Web Store.
@@ -124,12 +126,16 @@ both video formats it serves (AV1/MP4 and VP9/WebM) are read ahead.
 
 **Audio mode** — popup → **Audio** → **Start live captions**. The first run
 downloads the speech model (~209 MB on GPUs with WebGPU, 80 MB otherwise).
-Captions follow the video:
+On YouTube, captions are made ahead from the buffered audio and appear when
+their words are spoken; pausing freezes them and seeking back shows them
+again. Elsewhere (or if read-ahead can't run) live captions take over and
+follow the video:
 
 - nothing new appears while it's paused or during an ad;
 - a seek clears the screen;
 - a caption whose speech is more than 5 s behind is skipped;
-- each line stays for its reading time.
+- each line stays at least its reading time, and the newest holds until the
+  next one (up to 7 s).
 
 Only one mode runs at a time. Caption position and size (Settings → Live
 captions) apply to audio captions.
