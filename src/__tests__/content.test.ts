@@ -200,6 +200,23 @@ describe('content script subtitle overlay', () => {
         expect(raLines()).toEqual([]);
       });
 
+      it('a caption on screen is inserted once and then left alone (re-inserting restarts its fade: flicker)', async () => {
+        const v = media(false, 7.1);
+        await chromeMock.dispatch({ type: 'TOGGLE_SUBTITLES' });
+        await chromeMock.dispatch({ type: 'DISPLAY_SUBTITLE', text: 'steady', language: 'en', captionId: 'r1', videoStart: 6, videoEnd: 9 });
+        await chromeMock.dispatch({ type: 'DISPLAY_SUBTITLE', text: 'steady too', language: 'en', captionId: 'r2', videoStart: 7, videoEnd: 9 });
+        await wait(150);
+        expect(raLines()).toEqual(['steady', 'steady too']);
+        const container = overlay()!.querySelector('.subtitle-captions')!;
+        const mutations: MutationRecord[] = [];
+        const observer = new MutationObserver(m => mutations.push(...m));
+        observer.observe(container, { childList: true });
+        v.currentTime = 7.6;
+        await wait(450); // several ticks
+        observer.disconnect();
+        expect(mutations).toEqual([]);
+      });
+
       it('after a seek back, a caption made earlier shows again', async () => {
         const v = media(false, 6.2);
         await chromeMock.dispatch({ type: 'TOGGLE_SUBTITLES' });

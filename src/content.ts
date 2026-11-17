@@ -400,8 +400,13 @@ export class SubtitleOverlay {
       }
       if (el.textContent !== c.text) el.textContent = c.text;
       if (this.raBetter.has(c.id)) el.dataset.quality = 'better';
-      this.captions.appendChild(el); // keeps the newer line below
+      existing.set(c.id, el);
     }
+    // Insert only what is new or out of order: re-inserting a line restarts its fade-in,
+    // and doing that every tick made the lines flicker unreadably.
+    const onScreen = [...this.captions.querySelectorAll<HTMLElement>('.subtitle-text[data-video-start]')];
+    const inOrder = onScreen.length === visible.length && onScreen.every((el, i) => el.dataset.captionId === visible[i].id);
+    if (!inOrder) for (const c of visible) this.captions.appendChild(existing.get(c.id)!); // the newer line below
   }
 
   private removeCaptions(ids: string[]): void {
