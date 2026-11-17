@@ -44,6 +44,8 @@ export class AudioReadAhead {
   private onChunk: AudioChunkHandler | null = null;
   private onReset: ((videoTime: number) => void) | null = null;
   chunksAccepted = 0;
+  /** Why chunks were turned away, and how often accepted audio was forgotten (diagnostics). */
+  readonly stats = { accepted: 0, outsideWindow: 0, overlap: 0, budget: 0, size: 0, forgets: 0, resets: 0 };
 
   private readonly onMessage = (event: MessageEvent) => {
     if (event.source !== window || !this.onChunk) return;
@@ -52,6 +54,7 @@ export class AudioReadAhead {
       const now = this.now();
       if (now - this.lastResetAt < RESET_EVERY_MS || typeof msg.t !== 'number') return;
       this.lastResetAt = now;
+      this.stats.resets++;
       this.forget(); // the tap starts again at the playhead
       this.onReset?.(msg.t);
     } else if (msg?.astAudio) {
@@ -68,18 +71,24 @@ export class AudioReadAhead {
   ) {}
 
   private plausible(t: number, seconds: number): boolean {
-    if (seconds < MIN_CHUNK_SECONDS || seconds > MAX_CHUNK_SECONDS) return false;
-    if (t < this.video.currentTime - 2 || t + seconds > this.video.currentTime + MAX_AHEAD_SECONDS) return false;
+    if (seconds < MIN_CHUNK_SECONDS || seconds > MAX_CHUNK_SECONDS) return this.reject('size');
+    if (t < this.video.currentTime - 2 || t + seconds > this.video.currentTime + MAX_AHEAD_SECONDS) return this.reject('outsideWindow');
     const end = t + seconds;
-    if (this.covered.some(([a, b]) => Math.min(b, end) - Math.max(a, t) > 0.05)) return false;
+    if (this.covered.some(([a, b]) => Math.min(b, end) - Math.max(a, t) > 0.05)) return this.reject('overlap');
     const now = this.now();
     this.tokens = Math.min(BUCKET_SECONDS, this.tokens + ((now - this.tokensAt) / 1000) * REFILL_PER_SECOND);
     this.tokensAt = now;
     const cost = Math.max(seconds, MIN_CHARGE_SECONDS);
-    if (cost > this.tokens + 1e-6) return false;
+    if (cost > this.tokens + 1e-6) return this.reject('budget');
     this.tokens -= cost;
+    this.stats.accepted++;
     this.cover(t, end);
     return true;
+  }
+
+  private reject(reason: 'size' | 'outsideWindow' | 'overlap' | 'budget'): false {
+    this.stats[reason]++;
+    return false;
   }
 
   private cover(a: number, b: number): void {
@@ -100,6 +109,7 @@ export class AudioReadAhead {
 
   /** A seek outside what was accepted, or a new source: start over (the same audio may come again). */
   forget(): void {
+    this.stats.forgets++;
     this.covered = [];
     this.isHealthy = false;
   }

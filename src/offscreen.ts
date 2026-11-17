@@ -42,7 +42,8 @@ function restartWorkerOnCpu(): void {
 const diag = { frames: 0, peakRms: 0, segments: 0, results: 0, emptyResults: 0, errors: 0, lastError: '', model: '', nonSpeech: 0, suppressed: 0, raChunks: 0, raSegments: 0, raResults: 0, raSkipped: 0 };
 let diagTimer: number | null = null;
 function reportDiag(): void {
-  chrome.runtime.sendMessage({ type: 'AUDIO_DIAG', diag: { ...diag, at: Date.now() } }).catch(() => undefined);
+  const ra = { windows: readAhead.windowsSent, resets: readAhead.resets, stale: readAhead.stale, healthy: readAhead.healthy };
+  chrome.runtime.sendMessage({ type: 'AUDIO_DIAG', diag: { ...diag, ra, at: Date.now() } }).catch(() => undefined);
   diag.peakRms = 0;
 }
 

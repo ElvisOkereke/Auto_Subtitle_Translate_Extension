@@ -365,6 +365,7 @@ export class SubtitleOverlay {
       this.overlay.dataset.path = healthy ? 'read-ahead' : 'live';
       this.overlay.dataset.raDropped = JSON.stringify(this.raDropped);
       this.overlay.dataset.raScheduled = String(this.schedule.size);
+      if (this.readAhead) this.overlay.dataset.raStats = JSON.stringify({ ...this.readAhead.stats, lead: Math.round(this.readAhead.lead * 10) / 10 });
     }
     const now = Date.now();
     if (!force && healthy === this.raHealthy && now - this.raStateSentAt < RA_STATE_EVERY_MS) return;

@@ -27,6 +27,8 @@ export class ReadAheadPipeline {
   private stateAt = -Infinity;
   nonSpeech = 0;
   windowsSent = 0;
+  resets = 0;
+  stale = 0;
 
   constructor(private readonly deps: ReadAheadDeps) {}
 
@@ -52,6 +54,7 @@ export class ReadAheadPipeline {
 
   /** A seek or a new source: what was buffered is dropped; a job in flight becomes stale. */
   reset(): void {
+    this.resets++;
     this.windows.reset();
     this.inFlight = null;
   }
@@ -72,7 +75,10 @@ export class ReadAheadPipeline {
   result(segmentId: number, chunks: { text: string; start: number; end: number | null }[] | undefined): boolean {
     if (!this.known.has(segmentId)) return false;
     this.known.delete(segmentId);
-    if (segmentId !== this.inFlight) return true; // from before a seek: belongs to the old position
+    if (segmentId !== this.inFlight) {
+      this.stale++;
+      return true; // from before a seek: belongs to the old position
+    }
     this.inFlight = null;
     const sentences = (Array.isArray(chunks) ? chunks : []).map(c => ({ text: c.text, start: c.start, end: c.end === null ? NaN : c.end }));
     for (const c of this.windows.complete(sentences)) {

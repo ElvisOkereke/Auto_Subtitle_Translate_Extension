@@ -149,6 +149,7 @@ for (const mode of MODES) for (const video of VIDEOS) {
     const captured: (CapturedSample & { dom: string })[] = [];
     const paths: (string | null)[] = [];
     const health: unknown[] = [];
+    let previous: Page | null = null;
     for (let k = 0; k < PIECES; k++) {
       const from = video.start + k * PIECE_S;
       console.log(`piece ${k}: ${mode} from ${from} s`);
@@ -156,6 +157,9 @@ for (const mode of MODES) for (const video of VIDEOS) {
       await page.goto(`https://www.youtube.com/watch?v=${video.id}&t=${Math.floor(from - LEAD_IN_S)}s`);
       await park(page, from - LEAD_IN_S);
       await startMode(page, openPopup, mode, k === 0);
+      // Starting in the new tab takes over from the old one (the supported flow); only then close it.
+      await previous?.close();
+      previous = null;
       await page.evaluate(() => void (document.querySelector('video.html5-main-video') as HTMLVideoElement).play());
       let last = -1;
       let stillSince = Date.now();
@@ -172,6 +176,7 @@ for (const mode of MODES) for (const video of VIDEOS) {
         if (Date.now() - stillSince > 20_000) break; // YouTube stopped playing
         await page.waitForTimeout(Math.max(0, SAMPLE_MS - (Date.now() - started)));
       }
+      await page.evaluate(() => (document.querySelector('video.html5-main-video') as HTMLVideoElement | null)?.pause()).catch(() => undefined);
       // Pipeline health for this piece: what Whisper returned and what the page did with it.
       health.push({
         piece: k,
@@ -179,12 +184,13 @@ for (const mode of MODES) for (const video of VIDEOS) {
         transcripts: await sw.evaluate(() => ((self as any).__astTranscripts?.() ?? []).slice(-40)),
         overlay: await page.evaluate(() => {
           const o = document.getElementById('subtitle-overlay-extension');
-          return o ? { path: o.dataset.path, raDropped: o.dataset.raDropped, raScheduled: o.dataset.raScheduled, dropped: o.dataset.dropped } : null;
+          return o ? { path: o.dataset.path, raDropped: o.dataset.raDropped, raScheduled: o.dataset.raScheduled, raStats: o.dataset.raStats, dropped: o.dataset.dropped } : null;
         }),
         tap: await page.evaluate(() => (window as any).__astAudioTapStats ?? null),
       });
-      await page.close();
+      previous = page;
     }
+    await previous?.close();
     expect(captured.length, 'moments captured').toBeGreaterThan(20);
 
     // Keep the screenshots (and a video of them) for a person to look at.
