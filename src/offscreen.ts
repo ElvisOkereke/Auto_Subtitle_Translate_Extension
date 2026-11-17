@@ -3,7 +3,7 @@ import { ExtensionMessage } from './types';
 import { SpeechSegmenter, DEFAULT_VAD_CONFIG } from './utils/vad';
 import { ReadAheadPipeline } from './audio/readAheadPipeline';
 import { fromInt16Base64 } from './audio/readAhead/pcm';
-import { isNonSpeech } from './audio/nonSpeech';
+import { isLikelyHallucination, isNonSpeech } from './audio/nonSpeech';
 import { ModelWatchdog } from './audio/modelWatchdog';
 
 // 1024 samples = 64 ms per frame: fine-grained enough that end-of-speech is
@@ -108,7 +108,7 @@ function handleWorkerMessage(event: MessageEvent): void {
     // Read-ahead's jobs (including stale ones from before a seek) never reach the live path.
     if (readAhead.result(event.data.segmentId, event.data.chunks)) diag.raResults++;
     // Sound annotations ("[音楽]", "(拍手)", "♪") are not words: no caption.
-    else if (event.data.text && event.data.text.trim() && isNonSpeech(event.data.text)) diag.nonSpeech++;
+    else if (event.data.text && event.data.text.trim() && (isNonSpeech(event.data.text) || isLikelyHallucination(event.data.text))) diag.nonSpeech++;
     else if (event.data.text && event.data.text.trim()) {
       chrome.runtime.sendMessage({
         type: 'TRANSCRIPTION_RESULT',

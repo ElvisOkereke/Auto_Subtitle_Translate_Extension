@@ -33,7 +33,7 @@ const AUDIO_CHUNK_SAMPLES = WHISPER_RATE;
   const registry = new TrackRegistry<MediaSource>();
   // Diagnostics, readable from the page (and E2E tests).
   const stats = ((window as any).__astTapStats = { fragments: 0, decoded: 0, posted: 0, maxDecoded: 0, resets: 0, nextTime: 0, queue: 0, unsupported: 0, fed: 0, sessions: 0, configures: 0 });
-  const audioStats = ((window as any).__astAudioTapStats = { fragments: 0, decoded: 0, chunks: 0, resets: 0, nextTime: 0, sessions: 0, errors: 0 });
+  const audioStats = ((window as any).__astAudioTapStats = { fragments: 0, decoded: 0, chunks: 0, resets: 0, nextTime: 0, sessions: 0, errors: 0, peak: 0, sampleRate: 0, channels: 0, codec: '', format: '' });
   (window as any).__astTapRegistry = registry; // diagnostics (E2E)
 
   const origCreateObjectURL = URL.createObjectURL;
@@ -322,6 +322,7 @@ const AUDIO_CHUNK_SAMPLES = WHISPER_RATE;
       this.pending = [];
       this.pendingLength = 0;
       const audio = track.init!.audio!;
+      audioStats.codec = `${audio.codec} ${audio.sampleRate} Hz x${audio.channels}${track.init!.description ? ` (config ${[...track.init!.description].map(x => x.toString(16).padStart(2, '0')).join('')})` : ''}`;
       this.decoder = new AudioDecoder({
         output: d => this.onData(d),
         error: e => {
@@ -389,6 +390,9 @@ const AUDIO_CHUNK_SAMPLES = WHISPER_RATE;
       try {
         if (this.stopped || !this.resampler) return;
         audioStats.decoded++;
+        audioStats.sampleRate = data.sampleRate;
+        audioStats.channels = data.numberOfChannels;
+        audioStats.format = String(data.format);
         const t = data.timestamp / 1e6;
         const planes: Float32Array[] = [];
         for (let c = 0; c < data.numberOfChannels; c++) {
@@ -427,6 +431,9 @@ const AUDIO_CHUNK_SAMPLES = WHISPER_RATE;
       const video = mainVideo();
       if (video?.closest('.html5-video-player')?.classList.contains('ad-showing')) return;
       audioStats.chunks++;
+      let peak = 0;
+      for (let i = 0; i < pcm.length; i++) peak = Math.max(peak, Math.abs(pcm[i]));
+      audioStats.peak = Math.max(audioStats.peak, peak);
       window.postMessage({ astAudio: true, t, pcm }, '*', [pcm.buffer]);
     }
 

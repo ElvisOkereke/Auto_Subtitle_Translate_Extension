@@ -4,7 +4,7 @@
 // used; one that comes back after a seek (reset) belongs to the old position
 // and is ignored, never shifted onto the new one.
 import { ReadAheadWindows, TimedText } from './readAheadWindows';
-import { isNonSpeech } from './nonSpeech';
+import { isLikelyHallucination, isNonSpeech } from './nonSpeech';
 
 export interface ReadAheadDeps {
   nextId(): number;
@@ -82,7 +82,7 @@ export class ReadAheadPipeline {
     this.inFlight = null;
     const sentences = (Array.isArray(chunks) ? chunks : []).map(c => ({ text: c.text, start: c.start, end: c.end === null ? NaN : c.end }));
     for (const c of this.windows.complete(sentences)) {
-      if (isNonSpeech(c.text)) this.nonSpeech++;
+      if (isNonSpeech(c.text) || isLikelyHallucination(c.text)) this.nonSpeech++;
       else this.deps.emit(c);
     }
     this.pump();
