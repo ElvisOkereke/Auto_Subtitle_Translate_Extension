@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import type { BrowserContext, Page } from '@playwright/test';
+import type { BrowserContext, Page, Worker } from '@playwright/test';
 import { test, expect, keepPage } from '../helpers/extension';
 import { CACHE, ROOT } from '../helpers/paths';
 import Anthropic from '@anthropic-ai/sdk';
@@ -11,11 +11,17 @@ import { anthropicRelayAvailable, type FixtureServer } from '../helpers/server';
 import { astTest } from '../helpers/bridge';
 import { clearTranslationState, dragBox, modeStats, recordOverlay, recordOverlayOnEveryLoad, shownRecords, type ModeStats } from '../helpers/subtitles';
 import { recordSourceBufferTypes, sourceBufferTypes, waitOutAds } from '../helpers/youtube';
-import { benchVideos, referenceLines, referenceStretch, type BenchVideo } from '../bench/videos';
+import { benchVideos, cutOffset, referenceLines, referenceStretch, type BenchVideo } from '../bench/videos';
+import { recordCaptions, recordCaptionsOnEveryLoad, shownCaptions, waitForSpeechModel, type CaptionRecord } from '../helpers/captions';
 import {
   coverageByDuration,
   matchLines,
   classifyMisses,
+  captionDelays,
+  transcriptCer,
+  wordsCovered,
+  speechCovered,
+  captionStartOffsets,
   missBuckets,
   missesBySize,
   readyBeforeShown,
@@ -185,7 +191,7 @@ async function playWindow(page: Page, video: BenchVideo, toLocal: (t: number) =>
   const begin = toLocal(video.start);
   let paused = false;
   let last = begin;
-  await page.evaluate(() => document.querySelector('video')!.play());
+  await play(page);
   for (;;) {
     await page.waitForTimeout(1000);
     const s = await page.evaluate(() => {
@@ -199,7 +205,7 @@ async function playWindow(page: Page, video: BenchVideo, toLocal: (t: number) =>
       paused = true;
       await page.evaluate(() => document.querySelector('video')!.pause());
       await page.waitForTimeout(PAUSE_WALL_MS);
-      await page.evaluate(() => document.querySelector('video')!.play());
+      await play(page);
     }
     if (s.t >= end) return { played: video.duration, blocked: null };
   }
@@ -324,11 +330,38 @@ async function slotPage(context: BrowserContext, slot: number, row: number): Pro
   return page;
 }
 
+/**
+ * Starts playback without waiting for play()'s promise: it never settles when
+ * playback can't start (YouTube buffering for good, or swapping the source),
+ * which hung whole runs. The polling loops watch progress instead.
+ */
+async function play(page: Page): Promise<void> {
+  await page.waitForSelector('video', { timeout: 30_000 });
+  await page.evaluate(() => {
+    document.querySelector('video')!.play().catch(() => undefined);
+  });
+}
+
+/** Seconds without progress before play is re-issued, and before a piece counts as stalled. */
+const NUDGE_AFTER_S = 15;
+const STALLED_AFTER_S = 60;
+
 async function parkAt(page: Page, t: number): Promise<void> {
   await page.waitForSelector('video.html5-main-video', { timeout: 30_000 });
   await waitOutAds(page);
   await page.evaluate(at => {
-    (document.getElementById('movie_player') as any)?.setPlaybackQualityRange?.('hd1080', 'hd1080');
+    const player = document.getElementById('movie_player') as any;
+    player?.setPlaybackQualityRange?.('hd1080', 'hd1080');
+    // YouTube remembers 'muted' per profile and re-applies it over the video element;
+    // a muted tab captures silence (Audio mode), so unmute through the player.
+    player?.unMute?.();
+    player?.setVolume?.(100);
+    // YouTube may play an auto-dubbed track (e.g. English TTS over Japanese commentary):
+    // always the original language's own audio.
+    const tracks: any[] = player?.getAvailableAudioTracks?.() ?? [];
+    const isOriginal = (t: any) => Object.values(t ?? {}).some((x: any) => x && typeof x === 'object' && x.isAutoDubbed === false && /original/i.test(String(x.name ?? '')));
+    const original = tracks.find(isOriginal);
+    if (original && !isOriginal(player.getAudioTrack?.())) player.setAudioTrack(original);
     const v = document.querySelector('video.html5-main-video') as HTMLVideoElement;
     v.pause();
     v.currentTime = at;
@@ -339,15 +372,26 @@ async function parkAt(page: Page, t: number): Promise<void> {
 /** Polls of a playing window that found it hidden (covered or in the background): frames stop there. */
 let hiddenPolls = 0;
 let playPolls = 0;
+/** Pieces whose prepared window had moved off the piece's start (re-seeked before playing). */
+let reparks = 0;
 /** Video heights seen while playing (YouTube may lower the quality). */
 let heights: number[] = [];
 
 async function playSegment(page: Page, from: number, to: number, pauseAt: number): Promise<{ played: number; blocked: string | null }> {
   let paused = !(pauseAt >= from && pauseAt < to);
   let last = from;
+  let progressAt = Date.now();
   await page.bringToFront();
   await page.waitForSelector('video.html5-main-video', { timeout: 30_000 });
-  await page.evaluate(() => document.querySelector('video')!.play());
+  // A window prepared ahead may have been resumed by YouTube while it waited: back to the piece's start.
+  const moved = await page.evaluate(at => {
+    const v = document.querySelector('video')!;
+    if (Math.abs(v.currentTime - at) <= 1) return false;
+    v.currentTime = at;
+    return true;
+  }, from);
+  if (moved) reparks++;
+  await play(page);
   for (;;) {
     await page.waitForTimeout(500);
     const st = await page.evaluate(() => {
@@ -359,12 +403,17 @@ async function playSegment(page: Page, from: number, to: number, pauseAt: number
     if (st.hidden) hiddenPolls++;
     if (st.error) return { played: last - from, blocked: st.error };
     if (st.ad) await waitOutAds(page);
+    if (st.t > last + 0.1) progressAt = Date.now();
+    const still = (Date.now() - progressAt) / 1000;
+    if (still > STALLED_AFTER_S) return { played: Math.max(0, last - from), blocked: `stalled at ${last.toFixed(1)} s` };
+    if (still > NUDGE_AFTER_S && Math.floor(still) % NUDGE_AFTER_S === 0) await play(page);
     last = st.t;
     if (!paused && st.t >= pauseAt) {
       paused = true;
       await page.evaluate(() => document.querySelector('video')!.pause());
       await page.waitForTimeout(PAUSE_WALL_MS);
-      await page.evaluate(() => document.querySelector('video')!.play());
+      await play(page);
+      progressAt = Date.now();
     }
     if (st.t >= to) {
       await page.evaluate(() => document.querySelector('video')!.pause());
@@ -429,6 +478,7 @@ test.describe('real YouTube', () => {
 
       hiddenPolls = 0;
       playPolls = 0;
+      reparks = 0;
       heights = [];
       translationErrors = [];
       const records: ShownRecord[] = [];
@@ -471,6 +521,7 @@ test.describe('real YouTube', () => {
         format,
         joins,
         windowHidden: playPolls ? hiddenPolls / playPolls : 0,
+        reparks,
         videoHeights: [...new Set(heights)].sort((a, b) => a - b),
         translationErrors: { count: translationErrors.length, samples: [...new Set(translationErrors)].slice(0, 5) },
       });
@@ -513,5 +564,177 @@ test.describe('local copies', () => {
         expect(out.staleWhilePaused, 'a line that was not on screen appeared while the video was paused').toBe(0);
       });
     }
+  }
+});
+
+// ---- Audio mode (live captions from the tab's sound) ----
+
+const audioVideos = benchVideos.filter(v => v.mode === 'audio' && v.reference);
+
+/** Seconds an audio piece plays past its end so the last phrase's caption can arrive. */
+const CAPTION_TAIL_S = 4;
+
+/** Turns Audio mode on in a tab (what the popup's Start live captions does). */
+async function startAudioMode(sw: Worker, page: Page, tabIdOf: (p: Page) => Promise<number>): Promise<void> {
+  const tabId = await tabIdOf(page);
+  await expect
+    .poll(
+      async () => {
+        const state = (await sw.evaluate(id => chrome.tabs.sendMessage(id, { type: 'GET_SUBTITLE_STATE' }).catch(() => null), tabId)) as any;
+        if (state?.active) return true;
+        await sw.evaluate(id => chrome.tabs.sendMessage(id, { type: 'TOGGLE_SUBTITLES' }).catch(() => null), tabId);
+        return false;
+      },
+      { timeout: 60_000, intervals: [1000, 2000, 3000] }
+    )
+    .toBe(true);
+}
+
+async function audioReport(run: string, mode: EngineMode, video: BenchVideo, captions: CaptionRecord[], played: number, extra: Record<string, unknown> = {}) {
+  const window: [number, number] = [video.start, video.start + Math.min(video.duration, played)];
+  const ref = referenceLines(video).filter(l => l.start >= window[0] && l.end <= window[1]);
+  const delays = captionDelays(ref, captions);
+  const pairs = captions.filter(c => c.source && c.text && c.text !== c.source).slice(0, 40).map(c => ({ ko: c.source, en: c.text }));
+  const out = {
+    id: video.id,
+    run,
+    mode,
+    label: LABEL,
+    kind: 'audio',
+    played,
+    captions: captions.length,
+    referenceLines: ref.length,
+    transcriptCer: transcriptCer(ref, captions, window),
+    wordsCovered: wordsCovered(ref, captions),
+    // What a viewer sees: share of talking time with a caption on screen, longest talking stretch without one.
+    onScreenWhileTalking: speechCovered(ref, captions, window).share,
+    longestGapWhileTalking: speechCovered(ref, captions, window).longestGap,
+    // Read-ahead: how far each caption's appearance is from its words' start (target within 0.5 s).
+    startOffset: captionStartOffsets(ref, captions),
+    readAheadCaptions: captions.filter(c => typeof c.videoStart === 'number').length,
+    delayFromSpeechEndP50: delays.fromSpeechEndP50,
+    delayFromSpeechEndP90: delays.fromSpeechEndP90,
+    delaysMatched: delays.matched,
+    timeOnScreen: timeOnScreen(captions),
+    shownWhilePaused: shownWhilePaused(captions),
+    upgradesOnScreen: captions.filter(c => c.quality === 'better').length,
+    judgeScore: await judge(video, pairs),
+    sample: pairs.slice(0, 5),
+    // Seconds from the end of each caption's speech to its appearance (video time).
+    lateness: captions.map(c => Math.round((c.shownAt - c.lineStart) * 10) / 10),
+    // Every caption as shown (video seconds), so later metrics can be computed without a re-run.
+    records: captions.map(c => ({ shownAt: c.shownAt, hiddenAt: c.hiddenAt, lineStart: c.lineStart, quality: c.quality, source: c.source, text: c.text })),
+    ...extra,
+  };
+  fs.mkdirSync(OUT, { recursive: true });
+  fs.writeFileSync(path.join(OUT, `audio-${run}-${mode}-${video.id}.json`), JSON.stringify(out, null, 2));
+  console.log(JSON.stringify({ ...out, sample: undefined }));
+  return out;
+}
+
+test.describe('audio real YouTube', () => {
+  // Not the signed-in profile: there the speech model never finished loading (see docs/performance.md);
+  // the sliding window is what gets past YouTube's playback limit, not the sign-in.
+  test.use({ profileDir: path.join(CACHE, 'profile-captions-chrome'), headed: true });
+  test.skip(browserKind() !== 'chrome', 'real YouTube runs use installed Chrome (E2E_BROWSER=chrome)');
+
+  for (const mode of MODES) for (const video of audioVideos) {
+    test(`audio benchmark ${video.id} [${mode}]`, async ({ context, configure, sw, server, tabIdOf }, testInfo) => {
+      test.setTimeout(1_800_000); // includes a first-time speech model download (up to 20 min)
+      await configure({ ...engineSettings(mode, server), sourceLanguage: video.lang });
+      await clearTranslationState(sw);
+      await recordCaptionsOnEveryLoad(context);
+      const row = testInfo.parallelIndex % 2;
+      const pieces = Math.ceil(video.duration / SEGMENT_S);
+      const from = (k: number) => video.start + k * SEGMENT_S;
+      const to = (k: number) => Math.min(video.start + video.duration, from(k + 1));
+      const prepare = async (k: number) => {
+        const page = await slotPage(context, k % 2, row);
+        await page.goto(`https://www.youtube.com/watch?v=${video.id}&t=${Math.floor(from(k))}s`);
+        await parkAt(page, from(k));
+        return page;
+      };
+      const captions: CaptionRecord[] = [];
+      const health: any[] = [];
+      reparks = 0;
+      let played = 0;
+      let page = await prepare(0);
+      let pending: Promise<Page> | null = pieces > 1 ? prepare(1) : null;
+      for (let k = 0; k < pieces; k++) {
+        // One tab captures at a time: captions start in this window at the hand-over.
+        await startAudioMode(sw, page, tabIdOf);
+        // A build in a new folder is a new extension id with an empty model cache: the first
+        // window waits (paused) for the speech model, so no run measures a model download.
+        if (k === 0) await waitForSpeechModel(page, 1_200_000);
+        // Play on past the piece's end while the last phrase's caption arrives (a viewer's
+        // video keeps playing; pausing here would make the extension rightly drop it).
+        const r = await playSegment(page, from(k), to(k) + CAPTION_TAIL_S, video.start + PAUSE_AFTER_S);
+        played += Math.min(r.played, to(k) - from(k));
+        health.push({
+          piece: k,
+          blocked: r.blocked,
+          diag: await sw.evaluate(() => (self as any).__astAudioDiag?.() ?? null),
+          dropped: await page.evaluate(() => JSON.parse(document.getElementById('subtitle-overlay-extension')?.dataset.dropped ?? '{}')),
+          path: await page.evaluate(() => document.getElementById('subtitle-overlay-extension')?.dataset.path ?? null),
+          readAhead: await page.evaluate(() => {
+            const o = document.getElementById('subtitle-overlay-extension');
+            return { scheduled: Number(o?.dataset.raScheduled ?? 0), dropped: JSON.parse(o?.dataset.raDropped ?? '{}'), tap: (window as any).__astAudioTapStats ?? null };
+          }),
+          audioTrack: await page.evaluate(() => {
+            const t = (document.getElementById('movie_player') as any)?.getAudioTrack?.();
+            const info: any = Object.values(t ?? {}).find((x: any) => x && typeof x === 'object' && 'isAutoDubbed' in x);
+            return info ? { name: info.name, dubbed: info.isAutoDubbed } : null;
+          }),
+        });
+        // Each piece keeps the captions whose speech ended inside it (the next window replays the tail).
+        captions.push(
+          ...(await shownCaptions(page))
+            .filter(c => c.lineStart >= from(k) && c.lineStart < to(k))
+            // Still up when this window is left: it was on screen until then.
+            .map(c => ({ ...c, hiddenAt: c.hiddenAt ?? to(k) + CAPTION_TAIL_S }))
+        );
+        if (k + 1 < pieces) {
+          const next = await pending!;
+          await page.goto('about:blank');
+          page = next;
+          pending = k + 2 < pieces ? prepare(k + 2) : null;
+        }
+      }
+      await page.goto('about:blank');
+      const out = await audioReport('youtube', mode, video, captions, played, { health, reparks });
+      expect(health.filter((h: any) => h.audioTrack?.dubbed), 'an auto-dubbed audio track played').toEqual([]);
+      expect(out.captions, 'no captions appeared').toBeGreaterThan(0);
+    });
+  }
+});
+
+test.describe('audio local copies', () => {
+  for (const mode of MODES) for (const video of audioVideos) {
+    test(`audio benchmark ${video.id} (local) [${mode}]`, async ({ context, fixtureURL, configure, sw, server, tabIdOf }) => {
+      test.setTimeout(600_000);
+      const offset = cutOffset(video);
+      await configure({ ...engineSettings(mode, server), sourceLanguage: video.lang });
+      await clearTranslationState(sw);
+      const page = await context.newPage();
+      await page.goto(`${fixtureURL}/video-subs.html?v=${video.id}&file=${encodeURIComponent(video.id)}&stretch=b`);
+      await page.waitForFunction(() => (window as any).__fixture.video.readyState >= 1);
+      await recordCaptions(page);
+      const toLocal = (t: number) => t - offset;
+      await page.evaluate(t => {
+        const v = document.querySelector('video')!;
+        v.muted = false; // the fixture page mutes its video; a muted tab captures silence
+        v.volume = 1;
+        v.pause();
+        v.currentTime = t;
+      }, toLocal(video.start));
+      await startAudioMode(sw, page, tabIdOf);
+      await waitForSpeechModel(page);
+      const { played } = await playWindow(page, video, toLocal);
+      await page.waitForTimeout(4000);
+      const captions = (await shownCaptions(page)).map(c => ({ ...c, shownAt: c.shownAt + offset, lineStart: c.lineStart + offset, hiddenAt: c.hiddenAt === null ? null : c.hiddenAt + offset }));
+      const dropped = await page.evaluate(() => JSON.parse(document.getElementById('subtitle-overlay-extension')?.dataset.dropped ?? '{}'));
+      const out = await audioReport('local', mode, video, captions, played, { dropped });
+      expect(out.captions, 'no captions appeared').toBeGreaterThan(0);
+    });
   }
 });

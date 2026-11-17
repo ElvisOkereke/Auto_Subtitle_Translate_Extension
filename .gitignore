@@ -92,3 +92,5 @@ e2e/.recon/
 *.db
 *.db-wal
 *.db-shm
+
+e2e/bench/.rescore.cjs

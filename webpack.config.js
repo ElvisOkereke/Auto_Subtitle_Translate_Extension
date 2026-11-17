@@ -8,7 +8,8 @@ module.exports = (env, argv) => {
 
   const shared = {
     output: {
-      path: path.resolve(__dirname, 'dist'),
+      // BUILD_OUT: build somewhere else (e.g. a test copy) without touching the dist/ a browser may have loaded.
+      path: path.resolve(__dirname, process.env.BUILD_OUT || 'dist'),
       filename: '[name].js'
       // No `clean` here: two compilers write into dist/ in parallel.
       // `npm run build` wipes dist/ first via the prebuild scripts.

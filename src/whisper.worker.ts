@@ -1,6 +1,6 @@
 // whisper.worker.ts - Loads the Whisper model off the main thread and transcribes PCM segments.
 import { env, pipeline } from '@huggingface/transformers';
-import { resolveModelConfig, ModelConfig, ModelOverrides } from './utils/modelConfig';
+import { resolveModelConfig, ModelConfig, ModelOverrides, SpeechModel } from './utils/modelConfig';
 import { SerialQueue, QueuedJob } from './utils/serialQueue';
 
 const ctx = self as unknown as Worker;
@@ -21,27 +21,32 @@ interface TranscribeJob {
   audio: Float32Array;
   language: string;
   segmentId?: number;
+  /** Read-ahead: sentence-level timestamps, so each sentence becomes a caption timed to its words. */
+  timestamps?: boolean;
 }
 
 let transcriberPromise: Promise<any> | null = null;
 let activeConfig: ModelConfig | null = null;
 
-async function hasWebGpu(): Promise<boolean> {
+/** A usable WebGPU device, and whether it does half precision (turbo's fp16 encoder needs it). */
+async function webGpu(): Promise<{ ok: boolean; f16: boolean }> {
   const gpu = (self.navigator as any)?.gpu;
-  if (!gpu) return false;
+  if (!gpu) return { ok: false, f16: false };
   try {
     // navigator.gpu can exist with no usable adapter, and an adapter can still
     // fail to create a device (driver/blocklist issues, missing D3D12 shader
     // compiler). Only a real device counts.
     const adapter = await gpu.requestAdapter();
-    if (!adapter) return false;
+    if (!adapter) return { ok: false, f16: false };
     const device = await adapter.requestDevice();
     device.destroy();
-    return true;
+    return { ok: true, f16: !!adapter.features?.has?.('shader-f16') };
   } catch {
-    return false;
+    return { ok: false, f16: false };
   }
 }
+
+let chosenModel: SpeechModel | undefined;
 
 function loadPipeline(config: ModelConfig): Promise<any> {
   // Aggregate per-file download progress into one percentage.
@@ -92,7 +97,8 @@ class ModelLoadError extends Error {
 }
 
 async function loadModel(overrides: ModelOverrides): Promise<any> {
-  const config = resolveModelConfig(await hasWebGpu(), overrides);
+  const gpu = await webGpu();
+  const config = resolveModelConfig(gpu.ok, overrides, chosenModel ? { speechModel: chosenModel, f16: gpu.f16 } : undefined);
   activeConfig = config;
   if (overrides.numThreads) {
     env.backends.onnx.wasm!.numThreads = overrides.numThreads;
@@ -129,6 +135,7 @@ ctx.onmessage = async (event: MessageEvent) => {
 
   if (type === 'load') {
     try {
+      if (event.data.speechModel === 'turbo' || event.data.speechModel === 'small') chosenModel = event.data.speechModel;
       await getTranscriber(event.data.overrides);
     } catch (error) {
       postError(error);
@@ -137,8 +144,8 @@ ctx.onmessage = async (event: MessageEvent) => {
   }
 
   if (type === 'transcribe') {
-    const { audio, language, segmentId } = event.data as TranscribeJob;
-    transcribeQueue.push({ audio, language, segmentId });
+    const { audio, language, segmentId, timestamps } = event.data as TranscribeJob;
+    transcribeQueue.push({ audio, language, segmentId, timestamps });
   }
 };
 
@@ -150,7 +157,7 @@ const transcribeQueue = new SerialQueue<TranscribeJob>(
 );
 
 async function transcribe(job: QueuedJob<TranscribeJob>): Promise<void> {
-  const { audio, language, segmentId } = job.payload;
+  const { audio, language, segmentId, timestamps } = job.payload;
   try {
     const transcriber = await getTranscriber();
     // queueMs covers waiting behind earlier segments and for the model to load.
@@ -159,25 +166,32 @@ async function transcribe(job: QueuedJob<TranscribeJob>): Promise<void> {
       // English-only checkpoints (*.en) reject language/task options.
       ...(activeConfig?.multilingual
         ? { language: language && language !== 'auto' ? language : undefined, task: 'transcribe' }
-        : {})
+        : {}),
+      ...(timestamps ? { return_timestamps: true } : {})
     });
-    const text = Array.isArray(result) ? (result[0]?.text ?? '') : (result.text ?? '');
+    const first = Array.isArray(result) ? result[0] : result;
+    const text = first?.text ?? '';
+    const chunks = timestamps && Array.isArray(first?.chunks)
+      ? first.chunks.map((c: any) => ({ text: String(c.text ?? ''), start: Number(c.timestamp?.[0]), end: c.timestamp?.[1] == null ? null : Number(c.timestamp[1]) }))
+      : undefined;
     ctx.postMessage({
       type: 'result',
       text,
+      chunks,
       segmentId,
       queueMs: startedAt - job.enqueuedAt,
       inferenceMs: performance.now() - startedAt,
       audioMs: (audio.length / SAMPLE_RATE) * 1000
     });
   } catch (error) {
-    postError(error);
+    postError(error, segmentId);
   }
 }
 
-function postError(error: unknown): void {
+function postError(error: unknown, segmentId?: number): void {
   ctx.postMessage({
     type: 'error',
+    segmentId, // which job failed (read-ahead frees only its own window)
     message: error instanceof Error ? error.message : String(error),
     loadFailedOn: error instanceof ModelLoadError ? error.device : undefined
   });

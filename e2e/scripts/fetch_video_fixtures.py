@@ -33,13 +33,15 @@ def ffmpeg_exe() -> str:
     return imageio_ffmpeg.get_ffmpeg_exe()
 
 
-def download(full_path: str, video_id: str = VIDEO_ID) -> None:
+def download(full_path: str, video_id: str = VIDEO_ID, max_height: int = 1080) -> None:
     if os.path.exists(full_path):
         return
     subprocess.run([
         sys.executable, '-m', 'yt_dlp',
         '--ffmpeg-location', ffmpeg_exe(),
-        '-f', 'bestvideo[height<=1080][vcodec^=vp9]+bestaudio[acodec=opus]',
+        # The original-language audio, never an auto-dubbed track (YouTube marks the original 'original').
+        '-f', f'bestvideo[height<={max_height}][vcodec^=vp9]+bestaudio[acodec=opus][format_note*=original]'
+              f'/bestvideo[height<={max_height}][vcodec^=vp9]+bestaudio[acodec=opus]',
         '--merge-output-format', 'webm',
         '-o', full_path,
         f'https://youtu.be/{video_id}',
@@ -96,11 +98,12 @@ def main() -> None:
     with open(os.path.join(ROOT, 'e2e', 'bench', 'videos.json'), encoding='utf-8') as f:
         bench = json.load(f)['videos']
     for v in bench:
-        if v['mode'] != 'subtitles' or v['id'] == VIDEO_ID:
+        if v['id'] == VIDEO_ID:
             continue
         vid = v['id']
         full = os.path.join(VIDEOS, f'{vid}.webm')
-        download(full, vid)
+        # Audio benchmark videos: the picture doesn't matter, keep the download small.
+        download(full, vid, 1080 if v['mode'] == 'subtitles' else 480)
         start = max(0, v['start'] - 5)
         meta = os.path.join(VIDEOS, f'{vid}.b.json')
         if not os.path.exists(meta):

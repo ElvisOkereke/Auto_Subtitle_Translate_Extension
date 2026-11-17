@@ -33,6 +33,7 @@
     "bench:youtube": "npm run build:prod && cross-env-shell E2E_BROWSER=chrome playwright test --project=youtube youtube-bench --grep \"real YouTube\"",
     "bench:local": "npm run build:prod && cross-env-shell BENCH_WORKERS=3 playwright test --project=youtube youtube-bench --grep \"local copies\"",
     "bench:all": "npm run bench:youtube && npm run bench:local",
+    "bench:rescore": "esbuild e2e/scripts/rescore-audio.ts --bundle --platform=node --format=cjs --outfile=e2e/bench/.rescore.cjs --log-level=warning && node e2e/bench/.rescore.cjs",
     "e2e:judge": "cross-env-shell E2E_JUDGE=1 playwright test --project=judge",
     "server:test": "npm run server:build && jest --selectProjects server",
     "server:build": "esbuild server/src/main.ts server/src/admin.ts --bundle --platform=node --target=node22 --format=cjs --outdir=server/dist --external:node:sqlite",

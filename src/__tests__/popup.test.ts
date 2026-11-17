@@ -81,6 +81,47 @@ describe('popup modes', () => {
     expect(saved.settings.subtitleLanguage).toBe('ja');
   });
 
+  it('Speech model: best accuracy by default; choosing the smaller download is saved', async () => {
+    const chromeMock = await loadPopup();
+    const select = document.getElementById('speechModel') as HTMLSelectElement;
+    expect(select.value).toBe('turbo');
+    expect([...select.options].map(o => o.textContent)).toEqual(['Best accuracy (1.6 GB download)', 'Smaller download (590 MB)']);
+    select.value = 'small';
+    select.dispatchEvent(new Event('change'));
+    await new Promise(r => setTimeout(r, 10));
+    const saved = chromeMock.runtime.sendMessage.mock.calls.map((c: any[]) => c[0]).filter((m: any) => m.type === 'UPDATE_SETTINGS').pop();
+    expect(saved.settings.speechModel).toBe('small');
+  });
+
+  it('a tab opened before the extension was (re)loaded gets its scripts injected, then the click works', async () => {
+    const chromeMock = await loadPopup({ subtitleLanguage: 'ko' });
+    const executeScript = jest.fn(async () => []);
+    (globalThis as any).chrome.scripting = { executeScript };
+    (globalThis as any).chrome.runtime.getManifest = () => ({
+      content_scripts: [
+        { js: ['mseTap.js'], world: 'MAIN', matches: ['*://*.youtube.com/*'] },
+        { js: ['content.js', 'realTimeTranslate.js', 'subtitle.js'], matches: ['<all_urls>'] },
+      ],
+    });
+    let injected = false;
+    executeScript.mockImplementation(async () => {
+      injected = true;
+      return [];
+    });
+    chromeMock.tabs.sendMessage.mockImplementation(async (_id: number, msg: any) => {
+      if (!injected) throw new Error('Could not establish connection. Receiving end does not exist.');
+      if (msg.type === 'DRAW_SUBTITLE_BOX') return { state: 'armed' };
+      return { success: true };
+    });
+    document.getElementById('modeSubtitles')!.click();
+    document.getElementById('drawSubtitleBox')!.click();
+    await new Promise(r => setTimeout(r, 30));
+    expect(executeScript).toHaveBeenCalledWith({ target: { tabId: 1 }, files: ['content.js', 'realTimeTranslate.js', 'subtitle.js'], world: 'ISOLATED' });
+    expect(executeScript).toHaveBeenCalledWith({ target: { tabId: 1 }, files: ['mseTap.js'], world: 'MAIN' });
+    expect(chromeMock.tabs.sendMessage).toHaveBeenLastCalledWith(1, { type: 'DRAW_SUBTITLE_BOX', lang: 'ko' });
+    expect(document.getElementById('status')!.textContent).not.toMatch(/Failed/);
+  });
+
   it('sends DRAW_SUBTITLE_BOX to the tab with the chosen language', async () => {
     const chromeMock = await loadPopup({ subtitleLanguage: 'ko' });
     document.getElementById('modeSubtitles')!.click();

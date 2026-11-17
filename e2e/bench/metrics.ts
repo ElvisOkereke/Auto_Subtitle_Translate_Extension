@@ -213,3 +213,143 @@ export function readyBeforeShown(
   }
   return ready / ref.length;
 }
+
+// ---- audio captions ----
+
+const chars = (s: string) => [...stripTag(s).replace(/[\s.,!?¡¿…。、！？「」"'·-]+/g, '')];
+
+/** Longest common subsequence length of two strings' characters (punctuation and spaces ignored). */
+function lcs(a: string, b: string): number {
+  const x = chars(a);
+  const y = chars(b);
+  if (!x.length || !y.length) return 0;
+  let prev = new Array(y.length + 1).fill(0);
+  for (let i = 1; i <= x.length; i++) {
+    const cur = [0];
+    for (let j = 1; j <= y.length; j++) cur.push(x[i - 1] === y[j - 1] ? prev[j - 1] + 1 : Math.max(prev[j], cur[j - 1]));
+    prev = cur;
+  }
+  return prev[y.length];
+}
+
+type Caption = ShownRecord & { source?: string };
+const sourceOf = (c: Caption) => c.source ?? stripTag(c.text);
+
+/**
+ * Character error rate of everything transcribed against the reference inside a
+ * window, independent of how the speech was split into captions. Captions
+ * shown up to 8 s after the window count (live captions lag the speech).
+ */
+export function transcriptCer(ref: RefLine[], shown: Caption[], window: [number, number]): number {
+  const r = ref.filter(l => l.start >= window[0] && l.start < window[1]).map(l => l.ko).join('');
+  const h = [...shown]
+    .filter(c => c.shownAt >= window[0] && c.shownAt < window[1] + 8)
+    .sort((a, b) => a.shownAt - b.shownAt)
+    .map(sourceOf)
+    .join('');
+  const { errors, length } = charErrorRate(chars(r).join(''), chars(h).join(''));
+  return length ? errors / length : 0;
+}
+
+/**
+ * How long after its speech ended each caption appeared: every caption is
+ * matched to the reference line it shares the most characters with (at least
+ * half of that line, ending within 15 s before it appeared).
+ */
+export function captionDelays(ref: RefLine[], shown: Caption[]): { fromSpeechEndP50: number | null; fromSpeechEndP90: number | null; matched: number } {
+  const delays: number[] = [];
+  for (const c of shown) {
+    let best: { line: RefLine; overlap: number } | null = null;
+    for (const line of ref) {
+      if (line.end > c.shownAt + 1 || line.end < c.shownAt - 15) continue;
+      const overlap = lcs(line.ko, sourceOf(c));
+      if (overlap >= chars(line.ko).length / 2 && (!best || overlap > best.overlap)) best = { line, overlap };
+    }
+    if (best) delays.push(c.shownAt - best.line.end);
+  }
+  delays.sort((a, b) => a - b);
+  // Nearest-rank percentile.
+  const at = (q: number) => (delays.length ? delays[Math.max(0, Math.ceil(delays.length * q) - 1)] : null);
+  return { fromSpeechEndP50: at(0.5), fromSpeechEndP90: at(0.9), matched: delays.length };
+}
+
+/**
+ * Share of the reference's characters that appeared on screen near their time:
+ * for each reference line, the characters it shares with captions on screen at
+ * some point from 1 s before it to 8 s after it ended (a caption that appeared
+ * earlier and is still up counts: read-ahead lines start with their sentence,
+ * which may begin inside an earlier, longer reference cue).
+ */
+export function wordsCovered(ref: RefLine[], shown: Caption[]): number {
+  let total = 0;
+  let covered = 0;
+  for (const line of ref) {
+    const near = shown
+      .filter(c => c.shownAt <= line.end + 8 && (c.hiddenAt ?? c.shownAt + 4) >= line.start - 1)
+      .sort((a, b) => a.shownAt - b.shownAt)
+      .map(sourceOf)
+      .join('');
+    total += chars(line.ko).length;
+    covered += lcs(line.ko, near);
+  }
+  return total ? covered / total : 0;
+}
+
+/** Merges intervals [a, b] into a sorted, disjoint list. */
+function union(intervals: [number, number][]): [number, number][] {
+  const sorted = intervals.filter(([a, b]) => b > a).sort((x, y) => x[0] - y[0]);
+  const out: [number, number][] = [];
+  for (const [a, b] of sorted) {
+    const last = out[out.length - 1];
+    if (last && a <= last[1]) last[1] = Math.max(last[1], b);
+    else out.push([a, b]);
+  }
+  return out;
+}
+
+/**
+ * What a viewer sees: the share of talking time (reference caption spans inside
+ * the window) with a caption on screen, and the longest stretch of talking with
+ * none. A caption still up when the run ended counts until the window end.
+ */
+export function speechCovered(ref: RefLine[], shown: ShownRecord[], window: [number, number]): { share: number; longestGap: number } {
+  const clip = ([a, b]: [number, number]): [number, number] => [Math.max(a, window[0]), Math.min(b, window[1])];
+  const speech = union(ref.map(l => clip([l.start, l.end])));
+  const onScreen = union(shown.map(s => clip([s.shownAt, s.hiddenAt ?? window[1]])));
+  let total = 0;
+  let covered = 0;
+  let longestGap = 0;
+  for (const [a, b] of speech) {
+    total += b - a;
+    let cursor = a;
+    for (const [c, d] of onScreen) {
+      if (d <= a || c >= b) continue;
+      const from = Math.max(a, c);
+      const to = Math.min(b, d);
+      longestGap = Math.max(longestGap, from - cursor);
+      covered += to - from;
+      cursor = Math.max(cursor, to);
+    }
+    longestGap = Math.max(longestGap, b - cursor);
+  }
+  return { share: total ? covered / total : 0, longestGap };
+}
+
+/**
+ * Read-ahead timing: for each caption, the earliest reference line it covers
+ * (half or more of that line's characters in the caption), and how far the
+ * caption's appearance is from that line's start. Absolute P50/P90 and the
+ * share within 0.5 s (the spec's target).
+ */
+export function captionStartOffsets(ref: RefLine[], shown: Caption[]): { absP50: number | null; absP90: number | null; within05: number | null; matched: number } {
+  const offsets: number[] = [];
+  for (const c of shown) {
+    const covered = ref.filter(l => l.start >= c.shownAt - 3 && l.start <= c.shownAt + 10 && lcs(l.ko, sourceOf(c)) >= chars(l.ko).length / 2);
+    if (!covered.length) continue;
+    const first = covered.reduce((a, b) => (b.start < a.start ? b : a));
+    offsets.push(Math.abs(c.shownAt - first.start));
+  }
+  offsets.sort((a, b) => a - b);
+  const at = (q: number) => (offsets.length ? offsets[Math.max(0, Math.ceil(offsets.length * q) - 1)] : null);
+  return { absP50: at(0.5), absP90: at(0.9), within05: offsets.length ? offsets.filter(o => o <= 0.5).length / offsets.length : null, matched: offsets.length };
+}

@@ -121,6 +121,33 @@
       },
       "reference": "N5BAtJ2qMXo.timeline.json",
       "notes": "Japanese TV drama (samurai): French subtitles inside a pillarboxed picture."
+    },
+    {
+      "id": "-ci-Ursh0XQ",
+      "mode": "audio",
+      "lang": "ko",
+      "start": 120,
+      "duration": 120,
+      "reference": "-ci-Ursh0XQ.captions.json",
+      "notes": "LCK official highlight (BLG vs T1, Worlds 2026): live Korean casting over game noise. Reference: YouTube auto captions."
+    },
+    {
+      "id": "27VKumB17kE",
+      "mode": "audio",
+      "lang": "es",
+      "start": 120,
+      "duration": 120,
+      "reference": "27VKumB17kE.captions.json",
+      "notes": "Documentary of Spain's 2026 World Cup with Spanish narration and interviews. Reference: manual Spanish captions."
+    },
+    {
+      "id": "5INsXNUaRdE",
+      "mode": "audio",
+      "lang": "ja",
+      "start": 30,
+      "duration": 120,
+      "reference": "5INsXNUaRdE.captions.json",
+      "notes": "WE League highlight with live Japanese commentary. Reference: YouTube auto captions."
     }
   ],
   "detectionCandidates": [

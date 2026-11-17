@@ -4,6 +4,24 @@ Wins worth sharing, newest first. Each has the headline, the proof (a number
 or what was shown working), and where the evidence lives. Numbers come from
 automated runs in a real browser (details: [performance.md](performance.md)).
 
+## 2026-11-16 — Audio captions that land on the words
+
+- **Read-ahead for speech**: on YouTube, Audio mode now decodes the audio the
+  player has already buffered, transcribes it ahead of playback and shows each
+  caption the moment its words are spoken: 0.02–0.1 s after the speech starts
+  in the browser tests (GPU and CPU), instead of 2–4.5 s after it ends.
+- **More of what is said reaches the screen**, measured on real YouTube and
+  local copies of Korean casting, a Spanish documentary and Japanese football
+  commentary: words covered up in all six runs (Japanese from about a third to
+  more than half), and the screen has a caption 93–100% of the talking time on
+  the local copies.
+- **Captions follow the video**: nothing over a paused frame, seeking back
+  shows the captions again, YouTube ads and muted previews are ignored, and at
+  1.5× or 2× the reading time stays in real seconds.
+- The real-YouTube runs found the bugs a demo wouldn't: audio dropped beyond
+  YouTube's video buffer, the same audio decoded 159 times, and words lost at
+  10 s cuts. Fixed by a sliding window like Whisper's own long-form mode.
+
 ## 2026-11-13 — Tested on real YouTube in 5 languages; subtitles you can actually read
 
 - **A real-world benchmark**: 8 YouTube videos with burned-in subtitles in

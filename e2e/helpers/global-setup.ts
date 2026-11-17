@@ -2,7 +2,7 @@ import { chromium } from '@playwright/test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { CACHE, DIST } from './paths';
+import { CACHE, DIST, DIST_SOURCE } from './paths';
 
 /**
  * Persistent test profiles keep running the cached service-worker script of an
@@ -27,6 +27,11 @@ function bumpDistVersion(): void {
 // learn the ID. Tests need it up front for --allowlisted-extension-id, which
 // lets chrome.tabCapture work without a real toolbar click.
 export default async function globalSetup() {
+  if (DIST_SOURCE) {
+    if (!fs.existsSync(path.join(DIST_SOURCE, 'manifest.json'))) throw new Error(`E2E_DIST has no manifest.json: ${DIST_SOURCE}`);
+    fs.rmSync(DIST, { recursive: true, force: true });
+    fs.cpSync(DIST_SOURCE, DIST, { recursive: true });
+  }
   if (!fs.existsSync(path.join(DIST, 'manifest.json'))) {
     throw new Error('dist/ is missing - run `npm run build` first (npm run test:e2e does this).');
   }

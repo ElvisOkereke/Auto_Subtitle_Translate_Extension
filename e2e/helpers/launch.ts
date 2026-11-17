@@ -4,6 +4,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { DIST } from './paths';
 
+/** Window placement: E2E_WINDOW="x,y,w,h" (a second display), else 1280x800 where Chrome puts it. */
+function windowArgs(): string[] {
+  const m = (process.env.E2E_WINDOW ?? '').match(/^(-?\d+),(-?\d+),(\d+),(\d+)$/);
+  if (!m) return ['--window-size=1280,800'];
+  return [`--window-position=${m[1]},${m[2]}`, `--window-size=${m[3]},${m[4]}`];
+}
+
 export interface LaunchOptions {
   profileDir: string;
   extensionId: string;
@@ -101,7 +108,8 @@ export async function launchExtensionBrowser(o: LaunchOptions): Promise<Launched
       '--enable-unsafe-extension-debugging',
       '--no-first-run',
       '--no-default-browser-check',
-      '--window-size=1280,800',
+      // E2E_WINDOW="x,y,w,h": where the window opens (e.g. a second display); default 1280x800.
+      ...windowArgs(),
       ...baseArgs(o),
       'about:blank',
     ],

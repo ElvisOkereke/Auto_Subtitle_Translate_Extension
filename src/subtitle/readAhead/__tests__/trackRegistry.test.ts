@@ -1,5 +1,5 @@
 import fs from 'node:fs';
-import { retypeTrack } from '../trackRegistry';
+import { audioCodecOf, retypeTrack, tappedKind } from '../trackRegistry';
 import { WebmParser } from '../webm';
 import { Fmp4Parser } from '../fmp4';
 import path from 'node:path';
@@ -103,5 +103,43 @@ describe('retypeTrack (SourceBuffer.changeType)', () => {
     r.restoreTrack(m, t);
     r.restoreTrack(m, t);
     expect(r.trackCount).toBe(1);
+  });
+});
+
+describe('TrackRegistry: audio tracks (audio read-ahead)', () => {
+  it('audio/webm SourceBuffers are tapped as audio; video stays video', () => {
+    expect(tappedKind('audio/webm; codecs="opus"')).toBe('audio');
+    expect(tappedKind('video/webm; codecs="vp9"')).toBe('video');
+    expect(tappedKind('audio/mp4; codecs="mp4a.40.2"')).toBeNull(); // AAC: live fallback
+    expect(audioCodecOf('audio/webm; codecs="opus"')).toBe('opus');
+  });
+
+  it('keeps the playing stream\'s video and audio apart', () => {
+    const r = new TrackRegistry<object>();
+    const a = ms();
+    r.registerUrl('blob:a', a);
+    const video = r.addTrack(a, 'vp9', 'webm');
+    const audio = r.addTrack(a, 'opus', 'webm', 'audio');
+    video.init = { timescale: 1 } as any;
+    audio.init = { timescale: 1, audio: { codec: 'opus', sampleRate: 48000, channels: 2 } } as any;
+    expect(r.active('blob:a')).toBe(video);
+    expect(r.activeAudio('blob:a')).toBe(audio);
+    expect(audio.parser).toBeInstanceOf(WebmParser);
+  });
+
+  it('releasing inactive streams keeps the playing stream\'s audio', () => {
+    const r = new TrackRegistry<object>();
+    const a = ms();
+    const video = r.addTrack(a, 'vp9', 'webm');
+    const audio = r.addTrack(a, 'opus', 'webm', 'audio');
+    const other = r.addTrack(ms(), 'opus', 'webm', 'audio');
+    for (const t of [video, audio, other]) {
+      t.fragments.push(frag(0) as any);
+      t.bytes = 100;
+    }
+    r.releaseInactive(video, audio);
+    expect(audio.fragments).toHaveLength(1);
+    expect(video.fragments).toHaveLength(1);
+    expect(other.fragments).toHaveLength(0);
   });
 });

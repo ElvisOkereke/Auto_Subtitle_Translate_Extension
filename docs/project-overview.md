@@ -137,7 +137,13 @@ YouTube / any <video> page
 - Translated lines stay up long enough to read: at least 1.5 s, longer for
   long lines, counted in video time so pausing freezes them, and a line never
   lingers over the next subtitle
-- Audio mode
+- Audio mode, with read-ahead on YouTube: the audio the player has already
+  buffered is decoded in the page (WebCodecs), transcribed ahead of playback
+  with Whisper's sentence timestamps over a sliding window, and each caption
+  is shown when its words are spoken (0.02–0.1 s in tests). Words reaching the
+  screen went up on all three benchmark videos (Japanese commentary from about
+  a third to more than half); live captions remain the fallback and follow
+  pause, seek and ads
 - Screen Translate
 - Context-aware Claude translation with glossary
 - Hosted subscription service (built and tested locally)
@@ -161,8 +167,8 @@ YouTube / any <video> page
   box, two-line subtitles at 720p, stylised captions), and an open
   investigation into occasional undisplayed lines in Fast then Best mode on
   real YouTube.
-- **Audio mode read-ahead:** transcribe YouTube's buffered audio ahead of
-  playback, so captions are timed to the video and follow pause and seek.
+- **Audio accuracy:** fast, overlapping casters (Korean League casting) still
+  lose about half their words; names are often misheard.
 - **Automatic subtitle detection,** so no box has to be drawn.
 - **Screen Translate as a separate tool:** its own card in the popup, a
   right-click item and a keyboard shortcut.

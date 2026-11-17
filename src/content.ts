@@ -10,11 +10,19 @@ import {
   SubtitlePosition,
   FontSize
 } from './types';
+import { VideoClock } from './audio/videoClock';
+import { CaptionPolicy } from './audio/captionPolicy';
+import { ReadAheadSchedule } from './audio/readAheadSchedule';
+import { AudioReadAhead, readAheadHost } from './audio/readAhead/audioReadAhead';
+import { toInt16Base64 } from './audio/readAhead/pcm';
 
-const SUBTITLE_LINGER_MS = 6000;
+/** Playing media is heard only when not muted and with volume up. */
+const isAudible = (m: HTMLMediaElement): boolean => !m.muted && m.volume > 0;
+
 const STATUS_LINGER_MS = 2500;
 const ERROR_LINGER_MS = 6000;
-const MAX_VISIBLE_LINES = 2;
+const TICK_MS = 100; // read-ahead captions land on their start within a tenth of a second
+const RA_STATE_EVERY_MS = 1000;
 
 const POSITION_STYLES: Record<SubtitlePosition, Partial<CSSStyleDeclaration>> = {
   top: { top: '8%', bottom: '', transform: 'translateX(-50%)' },
@@ -31,6 +39,22 @@ export class SubtitleOverlay {
   private notices: HTMLDivElement | null = null;
   private position: SubtitlePosition = 'bottom';
   private fontSize: FontSize = 'medium';
+  // Captions follow the playing media element's time: pause freezes them, seek
+  // clears them, stale or out-of-order captions are dropped (CaptionPolicy).
+  private policy = new CaptionPolicy();
+  private clock: VideoClock | null = null;
+  private media: HTMLMediaElement | null = null;
+  private unobserve: (() => void) | null = null;
+  private ticker: number | null = null;
+  private captionSeq = 0;
+  // Audio read-ahead: captions made before their words are spoken, shown by video time.
+  private schedule = new ReadAheadSchedule();
+  private readAhead: AudioReadAhead | null = null;
+  private raHealthy = false;
+  private raStateSentAt = 0;
+  private raSources = new Map<string, string>();
+  private raBetter = new Set<string>();
+  private raDropped = { late: 0, liveWhileAhead: 0, liveCovered: 0, remade: 0 };
 
   constructor() {
     this.setupMessageListener();
@@ -63,7 +87,7 @@ export class SubtitleOverlay {
 
           case 'DISPLAY_SUBTITLE': {
             const displayMsg = message as DisplaySubtitleMessage;
-            this.displaySubtitle(displayMsg.text, displayMsg.timing, displayMsg.captionId);
+            this.displaySubtitle(displayMsg.text, displayMsg.timing, displayMsg.captionId, displayMsg.source, displayMsg.speechEndedAt, displayMsg.videoStart, displayMsg.videoEnd);
             break;
           }
 
@@ -114,6 +138,7 @@ export class SubtitleOverlay {
     if (!this.overlay) return;
     Object.assign(this.overlay.style, POSITION_STYLES[this.position]);
     this.overlay.dataset.position = this.position;
+    this.placeOverlay();
     this.overlay.querySelectorAll('.subtitle-text').forEach(el => {
       FONT_SIZES.forEach(size => el.classList.toggle(size, size === this.fontSize));
     });
@@ -122,6 +147,7 @@ export class SubtitleOverlay {
   async toggleSubtitles(): Promise<void> {
     if (this.isActive) {
       this.isActive = false;
+      this.stopFollowing();
       this.removeOverlay();
       await this.sendSafely({ type: 'STOP_CAPTURE' });
       return;
@@ -129,6 +155,7 @@ export class SubtitleOverlay {
 
     this.isActive = true;
     this.createOverlay();
+    this.startFollowing();
     const response = await this.sendSafely({ type: 'START_CAPTURE' });
     if (!response?.success) {
       this.isActive = false;
@@ -148,6 +175,7 @@ export class SubtitleOverlay {
     if (!this.isActive) return;
     // Capture was stopped from elsewhere (e.g. captions started on another tab).
     this.isActive = false;
+    this.stopFollowing();
     this.showStatus('Captions stopped');
   }
 
@@ -183,32 +211,306 @@ export class SubtitleOverlay {
     this.notices = null;
   }
 
-  displaySubtitle(text: string, timing?: Record<string, number>, captionId?: string): void {
+  // ---- following the media element ----
+
+  /**
+   * The media element captions follow: the largest one playing with sound, else
+   * the largest with sound. Muted media (hover previews, background loops) is
+   * never followed: it isn't what is being heard.
+   */
+  private pickMedia(): HTMLMediaElement | null {
+    const audible = [...document.querySelectorAll<HTMLMediaElement>('video, audio')].filter(isAudible);
+    const area = (m: HTMLMediaElement) => {
+      const r = m.getBoundingClientRect();
+      return r.width * r.height;
+    };
+    const largest = (ms: HTMLMediaElement[]) => ms.sort((a, b) => area(b) - area(a))[0] ?? null;
+    return largest(audible.filter(m => !m.paused)) ?? largest(audible);
+  }
+
+  private follow(media: HTMLMediaElement | null): void {
+    if (media === this.media) return;
+    this.unobserve?.();
+    this.unobserve = null;
+    this.media = media;
+    this.clock = null;
+    // Another video's times mean nothing for this one: start from a clean slate.
+    this.removeCaptions(this.policy.clear());
+    this.stopReadAhead();
+    if (!media) return;
+    this.startReadAhead(media);
+    const clock = new VideoClock();
+    this.clock = clock;
+    const unobserveClock = clock.observe(media as HTMLVideoElement, () => !!media.closest('.html5-video-player')?.classList.contains('ad-showing'));
+    const onJump = () => {
+      this.removeCaptions(this.policy.clear());
+      // Outside the audio read ahead: the tap starts again there, and so does the pipeline.
+      if (this.readAhead && !this.readAhead.covers(media.currentTime)) this.restartReadAhead(media.currentTime);
+      this.renderReadAhead(); // read-ahead captions for the new position, if made already
+    };
+    const onNewSource = () => {
+      this.removeCaptions(this.policy.clear());
+      this.schedule.clear(); // another item: its captions are not this one's
+      if (this.readAhead) this.restartReadAhead(media.currentTime);
+      this.renderReadAhead();
+    };
+    media.addEventListener('seeking', onJump);
+    media.addEventListener('seeked', onJump);
+    media.addEventListener('emptied', onNewSource);
+    this.unobserve = () => {
+      unobserveClock();
+      media.removeEventListener('seeking', onJump);
+      media.removeEventListener('seeked', onJump);
+      media.removeEventListener('emptied', onNewSource);
+    };
+  }
+
+  private readonly onAnyPlay = (event: Event) => {
+    if (event.target instanceof HTMLMediaElement && isAudible(event.target)) this.follow(event.target);
+  };
+
+  private startFollowing(): void {
+    this.follow(this.pickMedia());
+    document.addEventListener('play', this.onAnyPlay, true);
+    this.ticker = window.setInterval(() => this.tick(), TICK_MS);
+  }
+
+  private stopFollowing(): void {
+    document.removeEventListener('play', this.onAnyPlay, true);
+    if (this.ticker !== null) window.clearInterval(this.ticker);
+    this.ticker = null;
+    this.follow(null);
+    this.removeCaptions(this.policy.clear()); // also on pages without media (wall clock)
+  }
+
+  /** Current position: the media element's time, or the wall clock on pages without one. */
+  private now(): { videoTime: number; paused: boolean; adShowing: boolean; rate: number } {
+    const m = this.media;
+    if (!m) return { videoTime: Date.now() / 1000, paused: false, adShowing: false, rate: 1 };
+    return { videoTime: m.currentTime, paused: m.paused, adShowing: !!m.closest('.html5-video-player')?.classList.contains('ad-showing'), rate: m.playbackRate || 1 };
+  }
+
+  /**
+   * Captions sit on the video being followed (fixed coordinates from its box), so
+   * they're where the viewer looks in any layout - not at the bottom of the window,
+   * which on YouTube's default page is below the player. Inside the fullscreen
+   * element when the video is in it; without a video, the window-based style.
+   */
+  private placeOverlay(): void {
+    if (!this.overlay) return;
+    const video = this.media instanceof HTMLVideoElement ? this.media : null;
+    const r = video?.getBoundingClientRect();
+    const s = this.overlay.style;
+    if (!video || !r || r.width < 50 || r.height < 50) {
+      Object.assign(s, { left: '50%', maxWidth: '80%' }, POSITION_STYLES[this.position]);
+      return;
+    }
+    const fullscreen = document.fullscreenElement;
+    const parent = fullscreen && fullscreen.contains(video) ? fullscreen : document.body;
+    if (this.overlay.parentElement !== parent) parent.appendChild(this.overlay);
+    s.left = `${r.left + r.width / 2}px`;
+    s.maxWidth = `${r.width * 0.8}px`;
+    if (this.position === 'bottom') {
+      Object.assign(s, { top: '', bottom: `${window.innerHeight - r.bottom + r.height * 0.1}px`, transform: 'translateX(-50%)' });
+    } else if (this.position === 'top') {
+      Object.assign(s, { bottom: '', top: `${r.top + r.height * 0.08}px`, transform: 'translateX(-50%)' });
+    } else {
+      Object.assign(s, { bottom: '', top: `${r.top + r.height / 2}px`, transform: 'translate(-50%, -50%)' });
+    }
+  }
+
+  private tick(): void {
+    this.placeOverlay();
+    this.renderReadAhead(); // a pause freezes video time, so the read-ahead lines too
+    this.reportReadAhead();
+    const now = this.now();
+    if (now.paused) return; // video time stands still: lines stay
+    this.removeCaptions(this.policy.tick(now.videoTime));
+  }
+
+  // ---- audio read-ahead ----
+
+  private startReadAhead(media: HTMLMediaElement): void {
+    // Only where the main-world audio tap runs; elsewhere no page can pose as it.
+    if (!(media instanceof HTMLVideoElement) || !readAheadHost(location.hostname)) return;
+    const ra = new AudioReadAhead(media);
+    this.readAhead = ra;
+    ra.start(
+      (t, pcm) => void this.sendSafely({ type: 'READ_AHEAD_AUDIO', t, pcm: toInt16Base64(pcm), playhead: media.currentTime } as unknown as ExtensionMessage),
+      t => void this.sendSafely({ type: 'READ_AHEAD_RESET', t, playhead: media.currentTime } as unknown as ExtensionMessage)
+    );
+  }
+
+  /** What was read ahead no longer applies (a seek outside it, a new source): forget it, tell the pipeline. */
+  private restartReadAhead(playhead: number): void {
+    this.readAhead?.forget();
+    void this.sendSafely({ type: 'READ_AHEAD_RESET', t: playhead, playhead } as unknown as ExtensionMessage);
+  }
+
+  private stopReadAhead(): void {
+    if (this.readAhead) void this.sendSafely({ type: 'READ_AHEAD_RESET', t: 0, playhead: 0 } as unknown as ExtensionMessage);
+    this.readAhead?.stop();
+    this.readAhead = null;
+    this.schedule.clear();
+    this.raSources.clear();
+    this.raBetter.clear();
+    this.renderReadAhead();
+    this.reportReadAhead(true);
+  }
+
+  /** Tells the pipeline whether read-ahead covers the playhead (it then skips the live path). */
+  private reportReadAhead(force = false): void {
+    const healthy = !!this.readAhead?.healthy;
+    if (this.overlay) {
+      this.overlay.dataset.path = healthy ? 'read-ahead' : 'live';
+      this.overlay.dataset.raDropped = JSON.stringify(this.raDropped);
+      this.overlay.dataset.raScheduled = String(this.schedule.size);
+      if (this.readAhead) this.overlay.dataset.raStats = JSON.stringify({ ...this.readAhead.stats, lead: Math.round(this.readAhead.lead * 10) / 10 });
+    }
+    const now = Date.now();
+    if (!force && healthy === this.raHealthy && now - this.raStateSentAt < RA_STATE_EVERY_MS) return;
+    if (!force && !this.readAhead) return;
+    this.raHealthy = healthy;
+    this.raStateSentAt = now;
+    void this.sendSafely({ type: 'READ_AHEAD_STATE', healthy, playhead: this.media?.currentTime ?? 0 } as unknown as ExtensionMessage);
+  }
+
+  /** Puts on screen the read-ahead captions due at the current video time. */
+  private renderReadAhead(): void {
+    if (!this.captions) return;
+    const visible = this.media ? this.schedule.visibleAt(this.media.currentTime) : [];
+    const keep = new Set(visible.map(c => c.id));
+    const existing = new Map<string, HTMLElement>();
+    for (const el of [...this.captions.querySelectorAll<HTMLElement>('.subtitle-text[data-video-start]')]) {
+      const id = el.dataset.captionId ?? '';
+      if (keep.has(id)) existing.set(id, el);
+      else el.remove();
+    }
+    for (const c of visible) {
+      let el = existing.get(c.id);
+      if (!el) {
+        el = document.createElement('div');
+        el.className = `subtitle-text ${this.fontSize}`;
+        el.dataset.captionId = c.id;
+        el.dataset.videoStart = String(c.start);
+        el.dataset.videoEnd = String(c.end);
+        const source = this.raSources.get(c.id);
+        if (source) el.dataset.source = source;
+        el.dataset.shownAtVideo = String(this.media?.currentTime ?? c.start);
+      }
+      if (el.textContent !== c.text) el.textContent = c.text;
+      if (this.raBetter.has(c.id)) el.dataset.quality = 'better';
+      existing.set(c.id, el);
+    }
+    // Insert only what is new or out of order: re-inserting a line restarts its fade-in,
+    // and doing that every tick made the lines flicker unreadably.
+    const onScreen = [...this.captions.querySelectorAll<HTMLElement>('.subtitle-text[data-video-start]')];
+    const inOrder = onScreen.length === visible.length && onScreen.every((el, i) => el.dataset.captionId === visible[i].id);
+    if (!inOrder) for (const c of visible) this.captions.appendChild(existing.get(c.id)!); // the newer line below
+  }
+
+  private removeCaptions(ids: string[]): void {
+    if (!this.captions || !ids.length) return;
+    for (const el of [...this.captions.querySelectorAll<HTMLElement>('.subtitle-text')]) {
+      if (ids.includes(el.dataset.captionId ?? '')) el.remove();
+    }
+  }
+
+  displaySubtitle(
+    text: string,
+    timing?: Record<string, number>,
+    captionId?: string,
+    source?: string,
+    speechEndedAt?: number,
+    videoStart?: number,
+    videoEnd?: number
+  ): void {
     if (!this.isActive || !text) return;
     if (!this.captions) this.createOverlay();
+    if (typeof videoStart === 'number' && typeof videoEnd === 'number') {
+      // Read-ahead: made before its words are spoken; shown when the video gets there.
+      const id = captionId ?? `ra-${++this.captionSeq}`;
+      const caption = { id, text, start: videoStart, end: videoEnd };
+      const now = this.now();
+      if (this.media && this.schedule.isOver(caption, now.videoTime, now.rate)) {
+        this.raDropped.late++;
+        this.readAhead?.noteLate(); // not keeping up: the live path will help
+        return;
+      }
+      if (!this.schedule.add(caption, now.rate)) {
+        this.raDropped.remade++;
+        return;
+      }
+      if (source) this.raSources.set(id, source);
+      this.renderReadAhead();
+      return;
+    }
+    if (this.readAhead?.healthy) {
+      // Read-ahead already covers this speech (one may still be in flight from before it took over).
+      this.raDropped.liveWhileAhead++;
+      return;
+    }
+    if (typeof speechEndedAt === 'number' && this.clock) {
+      // Around a hand-over: a read-ahead caption may already show this speech.
+      const endVideo = this.clock.videoTimeAt(speechEndedAt);
+      if (endVideo !== null && this.schedule.covering(endVideo)) {
+        this.raDropped.liveCovered++;
+        return;
+      }
+    }
+    if (!this.media || !document.contains(this.media) || this.media.paused) {
+      // Gone, or paused while another audible element plays: follow what is heard now.
+      const pick = this.pickMedia();
+      if (!this.media || !document.contains(this.media) || (pick && !pick.paused)) this.follow(pick);
+    }
+    const id = captionId ?? `local-${++this.captionSeq}`;
+
+    const now = this.now();
+    const ended = typeof speechEndedAt === 'number' ? speechEndedAt : Date.now();
+    const speechEndVideo = this.clock ? this.clock.videoTimeAt(ended) : this.media ? null : ended / 1000;
+    const decision = this.policy.offer(
+      { id, text, speechEndVideo },
+      { ...now, paused: now.paused || (this.clock?.pausedSince(ended) ?? false), seekedSinceSpeech: this.clock?.seekedSince(ended) ?? false }
+    );
+    if (decision === 'drop') {
+      // Lets the benchmark see why captions didn't appear.
+      if (this.overlay) this.overlay.dataset.dropped = JSON.stringify(this.policy.drops);
+      return;
+    }
 
     const line = document.createElement('div');
     line.className = `subtitle-text ${this.fontSize}`;
     line.textContent = text;
-    if (captionId) line.dataset.captionId = captionId;
+    line.dataset.captionId = id;
+    if (source) line.dataset.source = source;
+    if (typeof speechEndedAt === 'number') line.dataset.speechEndedAt = String(speechEndedAt);
     if (timing) {
       // Lets the E2E/perf harness measure pipeline latency.
       line.dataset.timing = JSON.stringify({ ...timing, displayedAt: Date.now() });
     }
     this.captions!.appendChild(line);
-    while (this.captions!.children.length > MAX_VISIBLE_LINES) {
-      this.captions!.firstElementChild!.remove();
+    // The roll: lines the policy no longer keeps (a third pushed the oldest out).
+    const keep = new Set(this.policy.visible());
+    for (const el of [...this.captions!.querySelectorAll<HTMLElement>('.subtitle-text')]) {
+      if (!keep.has(el.dataset.captionId ?? '')) el.remove();
     }
-
-    window.setTimeout(() => line.remove(), SUBTITLE_LINGER_MS);
   }
 
   upgradeSubtitle(captionId: string, text: string): void {
-    if (!this.captions || !text) return;
+    if (!text) return;
+    if (this.schedule.upgrade(captionId, text)) {
+      // Read-ahead: replaced before display where possible, in place if already shown.
+      this.raBetter.add(captionId);
+      this.renderReadAhead();
+      return;
+    }
+    if (!this.captions) return;
     const line = [...this.captions.querySelectorAll<HTMLElement>('.subtitle-text')].find(el => el.dataset.captionId === captionId);
     if (line) {
       line.textContent = text;
       line.dataset.quality = 'better';
+      const now = this.now();
+      this.policy.upgrade(captionId, text, now.videoTime, now.rate);
     }
   }
 

@@ -43,6 +43,10 @@ export type MessageType =
   | 'START_OFFSCREEN_CAPTURE'
   | 'STOP_OFFSCREEN_CAPTURE'
   | 'TRANSCRIPTION_RESULT'
+  | 'AUDIO_DIAG'
+  | 'READ_AHEAD_AUDIO'
+  | 'READ_AHEAD_STATE'
+  | 'READ_AHEAD_RESET'
   | 'TRANSCRIPTION_ERROR'
   | 'MODEL_LOADING_PROGRESS'
   | 'CAPTION_ERROR'
@@ -92,6 +96,13 @@ export interface DisplaySubtitleMessage extends ExtensionMessage {
   timing?: Record<string, number>;
   /** Lets a later UPGRADE_SUBTITLE (Claude's version) replace this caption while it is shown. */
   captionId?: string;
+  /** The transcribed (untranslated) text. */
+  source?: string;
+  /** When the speech of this caption ended (epoch ms, Date.now()): lets the page place it in video time. */
+  speechEndedAt?: number;
+  /** Read-ahead captions: where their speech starts and ends in video time (shown then, not on arrival). */
+  videoStart?: number;
+  videoEnd?: number;
 }
 
 export interface UpgradeSubtitleMessage extends ExtensionMessage {
@@ -207,6 +218,8 @@ export interface ExtensionSettings {
   claudeGatewayAuth: 'x-api-key' | 'bearer';
   /** Popup and on-page panels: follow the OS, or force light/dark. */
   theme: import('../theme').ThemeChoice;
+  /** Audio mode's speech model on computers with a GPU: best accuracy (1.6 GB) or a smaller download (590 MB). */
+  speechModel: import('../utils/modelConfig').SpeechModel;
 }
 
 export type SubtitlePosition = 'top' | 'center' | 'bottom';
