@@ -16,7 +16,7 @@ export default defineConfig({
     screenshot: 'only-on-failure',
   },
   projects: [
-    { name: 'ui', testIgnore: /captions|perf|spike|live|judge|domain-bench|subtitle-(ocr|mode|readahead|claude|real)|youtube/ },
+    { name: 'ui', testIgnore: /captions|perf|spike|live|judge|domain-bench|subtitle-(ocr|mode|readahead|claude|real)|youtube|screen-real/ },
     // Speech tests share one persistent profile so the Whisper model is only
     // downloaded once; Chromium locks a profile dir, so they run serially.
     { name: 'captions', testMatch: /captions/, workers: 1, timeout: 600_000 },
@@ -28,5 +28,7 @@ export default defineConfig({
     { name: 'youtube', testMatch: /youtube-(real|bench)/, workers: Number(process.env.BENCH_WORKERS ?? 2), fullyParallel: true, timeout: 900_000 },
     // Claude-as-judge translation scoring (opt-in, Fuelix/Anthropic credentials): E2E_JUDGE=1
     { name: 'judge', testMatch: /judge|domain-bench/, workers: 1, timeout: 900_000 },
+    // What a viewer sees, judged from the screen (real YouTube, opt-in): E2E_BROWSER=chrome E2E_WINDOW=x,y,w,h.
+    { name: 'screen', testMatch: /screen-real/, workers: 1, timeout: 2_400_000 },
   ],
 });
