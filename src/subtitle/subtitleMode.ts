@@ -61,7 +61,18 @@ const MAX_OPEN_LINE_S = 8; // a saved line with no end is closed after this long
 const IMMINENT_S = 10; // read-ahead lines due sooner than this are translated like live ones (no batching)
 const NO_VIDEO: VideoContext = { videoId: null, url: '', title: '', channel: '', description: '' };
 
+/** Shown in the box when nothing readable was found there for a while (often: no burned-in subtitles). */
+export const NO_TEXT_MESSAGE = 'No subtitles found in this box. This video may not have burned-in subtitles: try Audio mode.';
+const NO_TEXT_AFTER_S = 20;
+const NO_TEXT_MIN_READS = 15;
+const NO_TEXT_SHOW_S = 10;
+
 export class SubtitleMode {
+  /** Reads that found text, and when reading started (video time): the "no subtitles here" notice. */
+  textReads = 0;
+  private firstReadAt: number | null = null;
+  private noTextUntil: number | null = null;
+
   /** The box being read (debug panel). */
   get currentBox(): NormalizedBox {
     return this.box;
@@ -364,7 +375,13 @@ export class SubtitleMode {
       this.ocrCalls++;
       this.lastReadAt = performance.now();
       const result = await this.deps.ocr.recognize(crop, this.lang, 'fast');
-      if (epoch === this.epoch && this.state === 'running') this.handleText(t, result.confidence >= MIN_CONFIDENCE ? result.text : '');
+      if (epoch === this.epoch && this.state === 'running') {
+        const found = result.confidence >= MIN_CONFIDENCE ? result.text : '';
+        if (found.trim()) this.textReads++;
+        this.firstReadAt ??= t;
+        this.handleText(t, found);
+        this.noticeNoText(t);
+      }
     } catch (error) {
       console.warn('Subtitle OCR failed:', error);
     } finally {
@@ -373,6 +390,23 @@ export class SubtitleMode {
       this.pending = null;
       if (next && this.state === 'running') void this.read(next.t, next.crop);
       else void this.pumpReadAhead();
+    }
+  }
+
+  /** Nothing readable in the box for 20 s of playback: say so where the subtitles would be (once, for 10 s). */
+  private noticeNoText(t: number): void {
+    if (this.textReads > 0) {
+      this.noTextUntil = null;
+      return;
+    }
+    if (this.noTextUntil === null) {
+      if (this.ocrCalls < NO_TEXT_MIN_READS || this.firstReadAt === null || t - this.firstReadAt < NO_TEXT_AFTER_S) return;
+      this.noTextUntil = t + NO_TEXT_SHOW_S;
+    }
+    if (t < this.noTextUntil) this.overlay.show(NO_TEXT_MESSAGE);
+    else if (this.noTextUntil !== Infinity) {
+      this.overlay.clear();
+      this.noTextUntil = Infinity; // shown once
     }
   }
 

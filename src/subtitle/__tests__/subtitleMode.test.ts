@@ -441,3 +441,19 @@ describe('SubtitleMode', () => {
     });
   });
 });
+
+describe('SubtitleMode: a box with no subtitles in it says so', () => {
+  it('after 20 s of reading the box without finding any text, it suggests Audio mode where the subtitles would be', async () => {
+    const h = (current = await harness({ readAhead: false }));
+    for (let k = 0; k < 20; k++) await liveLine(h, SIG(k % 2 ? 200 : k * 7), 10 + k * 1.5, '');
+    expect(h.overlayText()).toMatch(/No subtitles found in this box/);
+    expect(h.overlayText()).toMatch(/Audio mode/);
+  });
+
+  it('no such message once text was found', async () => {
+    const h = (current = await harness({ readAhead: false }));
+    await liveLine(h, SIG(10), 10, '안녕하세요');
+    for (let k = 0; k < 20; k++) await liveLine(h, SIG(k % 2 ? 200 : k * 7 + 20), 12 + k * 1.5, '');
+    expect(h.overlayText() ?? '').not.toMatch(/No subtitles found/);
+  });
+});
