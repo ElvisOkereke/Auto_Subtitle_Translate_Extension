@@ -39,7 +39,14 @@ export class DebugPanel {
   private last: { state: DebugState; report: DebugReport } | null = null;
   private collapsed = false;
 
-  constructor(private readonly source: DebugStateSource) {}
+  /**
+   * `inspectable`: an open shadow root, for the test harness (devExposeInternals).
+   * Otherwise closed, so the page's own scripts can't read the panel.
+   */
+  constructor(
+    private readonly source: DebugStateSource,
+    private readonly inspectable = false
+  ) {}
 
   get element(): HTMLDivElement | null {
     return this.host;
@@ -50,7 +57,7 @@ export class DebugPanel {
     this.host = document.createElement('div');
     this.host.id = 'ast-debug-panel';
     this.host.setAttribute('data-ast-owned', '');
-    this.root = this.host.attachShadow({ mode: 'open' });
+    this.root = this.host.attachShadow({ mode: this.inspectable ? 'open' : 'closed' });
     this.root.innerHTML = `<style>${STYLE}</style><div class="panel" role="region" aria-label="Subtitle Translator debug panel">
       <div class="bar"><strong>Subtitle Translator: debug</strong>
       <button type="button" data-act="copy">Copy report</button><button type="button" data-act="collapse">Hide</button></div>

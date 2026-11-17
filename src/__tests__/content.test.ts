@@ -342,7 +342,7 @@ describe('content script subtitle overlay', () => {
   it('debug panel: appears when switched on, shows the audio pipeline and the problems first', async () => {
     document.body.innerHTML = '';
     chromeMock = installChromeMock({});
-    await chromeMock.storage.local.set({ debugPanel: true });
+    await chromeMock.storage.local.set({ debugPanel: true, devExposeInternals: true }); // open root, so the test can read it
     chromeMock.runtime.sendMessage.mockImplementation(async (msg: any) => {
       if (msg.type === 'GET_DEBUG_STATE') {
         return {
@@ -372,6 +372,17 @@ describe('content script subtitle overlay', () => {
     await chromeMock.storage.local.set({ debugPanel: false });
     for (const l of (chromeMock.storage as any).onChanged.listeners) l({ debugPanel: { newValue: false } }, 'local');
     expect(document.getElementById('ast-debug-panel')).toBeNull();
+  });
+
+  it('debug panel: the page cannot read it (closed shadow root) outside the test harness', async () => {
+    document.body.innerHTML = '';
+    chromeMock = installChromeMock({});
+    await chromeMock.storage.local.set({ debugPanel: true });
+    loadContentScript();
+    await new Promise(r => setTimeout(r, 50));
+    const panel = document.getElementById('ast-debug-panel')!;
+    expect(panel).not.toBeNull();
+    expect(panel.shadowRoot).toBeNull();
   });
 
   it('marks itself inactive when capture is stopped elsewhere', async () => {

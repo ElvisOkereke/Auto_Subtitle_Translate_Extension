@@ -69,9 +69,10 @@ export class SubtitleOverlay {
   // ---- debug panel (Settings > Debug panel) ----
 
   private watchDebugSetting(): void {
+    let inspectable = false;
     const apply = (on: unknown) => {
       if (on && !this.debugPanel) {
-        this.debugPanel = new DebugPanel(() => this.debugState());
+        this.debugPanel = new DebugPanel(() => this.debugState(), inspectable);
         this.debugPanel.start();
       } else if (!on && this.debugPanel) {
         this.debugPanel.stop();
@@ -79,8 +80,12 @@ export class SubtitleOverlay {
       }
     };
     try {
-      Promise.resolve(chrome.storage?.local?.get?.('debugPanel'))
-        .then(r => apply((r as { debugPanel?: unknown } | undefined)?.debugPanel))
+      Promise.resolve(chrome.storage?.local?.get?.(['debugPanel', 'devExposeInternals']))
+        .then(r => {
+          const got = r as { debugPanel?: unknown; devExposeInternals?: unknown } | undefined;
+          inspectable = got?.devExposeInternals === true;
+          apply(got?.debugPanel);
+        })
         .catch(() => undefined);
     } catch {
       // storage unavailable (tests, odd pages): no panel

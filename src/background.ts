@@ -471,8 +471,11 @@ class SubtitleService {
     const settings = await getSettings();
     const secrets = await getSecrets();
     const s = secrets as unknown as Record<string, string>;
+    const captureTabId = await getActiveTabId();
+    // What was heard in the captured tab is shown only in that tab's panel (another site must not get it).
+    const capturingSender = captureTabId !== null && sender.tab?.id === captureTabId;
     return {
-      captureTabId: await getActiveTabId(),
+      captureTabId,
       thisTabId: sender.tab?.id ?? null,
       offscreenOpen: await chrome.offscreen.hasDocument().catch(() => false),
       settings: {
@@ -488,7 +491,7 @@ class SubtitleService {
       audioDiag,
       model: lastModelProgress,
       gpu: gpuAvailable,
-      transcripts: recentTranscripts.slice(-12),
+      transcripts: capturingSender ? recentTranscripts.slice(-12) : [],
       events: debugEvents.slice(-60),
     };
   }
