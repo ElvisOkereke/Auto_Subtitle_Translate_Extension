@@ -135,7 +135,7 @@ export class ReadAheadWindows {
 
 /** One short word looped three or more times ("뒤! 뒤! 뒤!"): game sounds or shouting, not a caption. */
 export function isLoopNoise(text: string): boolean {
-  const words = text.split(/[\s,.!?~…\-]+/u).filter(Boolean).map(w => w.toLowerCase());
+  const words = text.split(/[\s,.!?~…-]+/u).filter(Boolean).map(w => w.toLowerCase());
   return words.length >= 3 && words.every(w => w === words[0]) && [...words[0]].length <= 6;
 }
 
