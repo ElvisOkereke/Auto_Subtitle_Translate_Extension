@@ -1,3 +1,5 @@
+import fs from 'fs';
+import path from 'path';
 import { Fmp4Parser } from '../fmp4';
 
 // --- tiny ISO-BMFF builder -------------------------------------------------
@@ -99,7 +101,7 @@ describe('Fmp4Parser', () => {
 });
 
 // 2 s, 440 Hz sine, AAC-LC 44.1 kHz mono, fragmented MP4 (ffmpeg, like YouTube's audio/mp4 streams).
-const AAC = new Uint8Array(require('fs').readFileSync(require('path').join(__dirname, 'fixtures/tiny-aac.mp4')));
+const AAC = new Uint8Array(fs.readFileSync(path.join(__dirname, 'fixtures/tiny-aac.mp4')));
 
 describe('Fmp4Parser (audio track: AAC)', () => {
   it('reads the AAC track: codec, sample rate, channels and the AudioSpecificConfig description', () => {
