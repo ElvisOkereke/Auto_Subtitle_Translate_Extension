@@ -503,7 +503,8 @@ class SubtitleService {
       downloading: 'Loading speech model... (first time only, may take a minute)',
       'download-progress': `Downloading speech model... ${percent ?? 0}%`,
       ready: 'Speech model ready',
-      'cpu-fallback': 'WebGPU unavailable - running in CPU mode, captions may be slower'
+      'cpu-fallback': 'WebGPU unavailable - running in CPU mode, captions may be slower',
+      retrying: 'The speech model is taking too long to load - retrying with a fresh download'
     };
     await this.safeSendMessage(tabId, {
       type: 'CAPTION_STATUS',

@@ -4,6 +4,7 @@ import { SpeechSegmenter, DEFAULT_VAD_CONFIG } from './utils/vad';
 import { ReadAheadPipeline } from './audio/readAheadPipeline';
 import { fromInt16Base64 } from './audio/readAhead/pcm';
 import { isNonSpeech } from './audio/nonSpeech';
+import { ModelWatchdog } from './audio/modelWatchdog';
 
 // 1024 samples = 64 ms per frame: fine-grained enough that end-of-speech is
 // detected promptly (4096 = 256 ms added up to ~200 ms of caption latency).
@@ -24,8 +25,38 @@ let workerOverrides: { device?: 'wasm'; model?: string; dtype?: unknown } = {};
 /** Settings: Audio mode's speech model on a GPU ('turbo' or 'small'). */
 let speechModel: string | undefined;
 
+/** A model load that stalls (no progress, no error) is retried once, then reported. */
+const watchdog = new ModelWatchdog();
+
+function checkModelLoad(): void {
+  const verdict = watchdog.check(Date.now());
+  if (verdict === 'retry') {
+    console.warn('Speech model load stalled; retrying with a fresh download');
+    worker?.terminate();
+    worker = null;
+    // A partly downloaded or corrupted model in the cache can stall every later load.
+    void caches
+      .delete('transformers-cache')
+      .catch(() => false)
+      .then(() => {
+        chrome.runtime.sendMessage({ type: 'MODEL_LOADING_PROGRESS', status: 'retrying' }).catch(() => undefined);
+        getWorker();
+      });
+  } else if (verdict === 'fail') {
+    diag.errors++;
+    diag.lastError = 'The speech model did not finish loading (no progress for 3 minutes, twice).';
+    chrome.runtime
+      .sendMessage({
+        type: 'TRANSCRIPTION_ERROR',
+        message: 'the speech model did not finish loading after two tries. Try "Smaller download" under Settings > Live captions, or reload the extension.'
+      })
+      .catch(() => undefined);
+  }
+}
+
 function getWorker(): Worker {
   if (!worker) {
+    watchdog.started(Date.now());
     worker = new Worker(chrome.runtime.getURL('whisper.worker.js'));
     worker.onmessage = handleWorkerMessage;
     worker.postMessage({ type: 'load', overrides: workerOverrides, speechModel });
@@ -44,6 +75,7 @@ function restartWorkerOnCpu(): void {
 const diag = { frames: 0, peakRms: 0, segments: 0, results: 0, emptyResults: 0, errors: 0, lastError: '', model: '', nonSpeech: 0, suppressed: 0, raChunks: 0, raSegments: 0, raResults: 0, raSkipped: 0 };
 let diagTimer: number | null = null;
 function reportDiag(): void {
+  checkModelLoad();
   const ra = { windows: readAhead.windowsSent, resets: readAhead.resets, stale: readAhead.stale, healthy: readAhead.healthy };
   chrome.runtime.sendMessage({ type: 'AUDIO_DIAG', diag: { ...diag, ra, at: Date.now() } }).catch(() => undefined);
   diag.peakRms = 0;
@@ -93,7 +125,11 @@ function handleWorkerMessage(event: MessageEvent): void {
   } else if (type === 'dropped') {
     readAhead.dropped(event.data.segmentId);
   } else if (type === 'progress') {
-    if (event.data.status === 'ready') diag.model = `${event.data.model} (${event.data.device})`;
+    watchdog.progress(Date.now());
+    if (event.data.status === 'ready') {
+      watchdog.ready();
+      diag.model = `${event.data.model} (${event.data.device})`;
+    }
     chrome.runtime.sendMessage({
       type: 'MODEL_LOADING_PROGRESS',
       status: event.data.status,
