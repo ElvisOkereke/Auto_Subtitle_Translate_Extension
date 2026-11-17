@@ -179,13 +179,14 @@ async function transcribe(job: QueuedJob<TranscribeJob>): Promise<void> {
       audioMs: (audio.length / SAMPLE_RATE) * 1000
     });
   } catch (error) {
-    postError(error);
+    postError(error, segmentId);
   }
 }
 
-function postError(error: unknown): void {
+function postError(error: unknown, segmentId?: number): void {
   ctx.postMessage({
     type: 'error',
+    segmentId, // which job failed (read-ahead frees only its own window)
     message: error instanceof Error ? error.message : String(error),
     loadFailedOn: error instanceof ModelLoadError ? error.device : undefined
   });

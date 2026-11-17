@@ -17,8 +17,13 @@ const RATE = 16000;
 export const WINDOW_S = 28;
 /** Sentences ending this close to a full window's edge are held back for the next window. */
 const HOLD_S = 1.5;
-/** When the playhead is this close to the cursor, don't wait for a full window. */
+/** When the playhead is this close to the cursor, don't wait for a full window... */
 const NEAR_S = 8;
+/** ...but for at least this much audio (a lone second cuts words and invites hallucinations), */
+const SHORT_WINDOW_S = 6;
+/** unless the playhead is about to arrive, or no new audio came for a while (the buffer stalled). */
+const URGENT_S = 2;
+const STALLED_MS = 1500;
 const MIN_WINDOW_S = 1;
 
 interface Run {
@@ -30,14 +35,16 @@ interface Run {
 export class ReadAheadWindows {
   private run: Run | null = null;
   private cursor = 0;
-  private inFlight: { start: number; end: number; partial: boolean } | null = null;
+  private inFlight: { start: number; end: number; partial: boolean; final: boolean } | null = null;
+  private lastPushMs = 0;
 
   private get runEnd(): number {
     return this.run ? this.run.start + this.run.samples / RATE : -Infinity;
   }
 
   /** Audio from the tap, in order; a gap starts a new run there. */
-  push(t: number, pcm: Float32Array): void {
+  push(t: number, pcm: Float32Array, nowMs = 0): void {
+    this.lastPushMs = nowMs;
     if (!this.run || Math.abs(t - this.runEnd) > 0.05) {
       this.run = { start: t, chunks: [], samples: 0 };
       this.cursor = t;
@@ -53,21 +60,28 @@ export class ReadAheadWindows {
   }
 
   /** The next window to transcribe, or null (one in flight, or not worth sending yet). */
-  next(playhead: number, _nowMs = 0): { start: number; audio: Float32Array } | null {
+  next(playhead: number, nowMs = 0): { start: number; audio: Float32Array } | null {
     if (this.inFlight || !this.run) return null;
     if (this.cursor < playhead) this.cursor = Math.min(playhead, this.runEnd); // already heard: skip
     const available = this.runEnd - this.cursor;
+    const lead = this.cursor - playhead;
+    // A short window is final (keeps everything) when the playhead is about to arrive or the audio stalled.
+    const final = available >= MIN_WINDOW_S && (lead < URGENT_S || nowMs - this.lastPushMs >= STALLED_MS);
     let end: number;
-    let partial: boolean;
+    let partial = true;
     if (available >= WINDOW_S) {
       end = this.cursor + WINDOW_S;
       partial = false;
-    } else if (this.cursor - playhead < NEAR_S && available >= MIN_WINDOW_S) {
+    } else if (lead < NEAR_S && (available >= SHORT_WINDOW_S || final)) {
       end = this.runEnd;
-      partial = true;
     } else return null;
-    this.inFlight = { start: this.cursor, end, partial };
+    this.inFlight = { start: this.cursor, end, partial, final: partial && final };
     return { start: this.cursor, audio: this.slice(this.cursor, end) };
+  }
+
+  /** The job for the window in flight was lost (dropped or failed): the same window goes again. */
+  abort(): void {
+    this.inFlight = null;
   }
 
   /** Whisper's sentences for the window in flight (times relative to it) -> captions in video time. */
@@ -78,10 +92,11 @@ export class ReadAheadWindows {
     const abs = sentences
       .filter(s => Number.isFinite(s.start))
       .map(s => ({ text: s.text.trim(), start: win.start + s.start, end: win.start + (Number.isFinite(s.end) ? s.end : win.end - win.start) }));
-    let kept = win.partial ? abs : abs.filter(s => s.end <= win.end - HOLD_S);
-    if (!kept.length && abs.length) kept = abs; // one sentence fills the window: keep it, move past it
+    let kept = win.final ? abs : abs.filter(s => s.end <= win.end - HOLD_S);
+    if (!kept.length && abs.length && !win.partial) kept = abs; // one sentence fills a full window: keep it, move past it
     if (kept.length) this.cursor = Math.max(this.cursor, kept[kept.length - 1].end);
-    else this.cursor = win.partial ? win.end : win.end - HOLD_S; // silence or music: move on
+    else if (!abs.length) this.cursor = win.final ? win.end : Math.max(this.cursor, win.end - HOLD_S); // silence or music: move on
+    // (a short window whose only sentence is unfinished keeps the cursor: the next one hears it whole)
     this.trim();
     const cleaned = kept.map(s => ({ ...s, text: collapseRepeats(s.text) })).filter(s => s.text && s.end > s.start);
     return mergeShort(cleaned);

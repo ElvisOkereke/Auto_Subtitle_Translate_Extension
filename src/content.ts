@@ -13,7 +13,7 @@ import {
 import { VideoClock } from './audio/videoClock';
 import { CaptionPolicy } from './audio/captionPolicy';
 import { ReadAheadSchedule } from './audio/readAheadSchedule';
-import { AudioReadAhead } from './audio/readAhead/audioReadAhead';
+import { AudioReadAhead, readAheadHost } from './audio/readAhead/audioReadAhead';
 import { toInt16Base64 } from './audio/readAhead/pcm';
 
 /** Playing media is heard only when not muted and with volume up. */
@@ -54,7 +54,7 @@ export class SubtitleOverlay {
   private raStateSentAt = 0;
   private raSources = new Map<string, string>();
   private raBetter = new Set<string>();
-  private raDropped = { late: 0, liveWhileAhead: 0 };
+  private raDropped = { late: 0, liveWhileAhead: 0, liveCovered: 0, remade: 0 };
 
   constructor() {
     this.setupMessageListener();
@@ -243,11 +243,14 @@ export class SubtitleOverlay {
     const unobserveClock = clock.observe(media as HTMLVideoElement, () => !!media.closest('.html5-video-player')?.classList.contains('ad-showing'));
     const onJump = () => {
       this.removeCaptions(this.policy.clear());
+      // Outside the audio read ahead: the tap starts again there, and so does the pipeline.
+      if (this.readAhead && !this.readAhead.covers(media.currentTime)) this.restartReadAhead(media.currentTime);
       this.renderReadAhead(); // read-ahead captions for the new position, if made already
     };
     const onNewSource = () => {
-      onJump();
+      this.removeCaptions(this.policy.clear());
       this.schedule.clear(); // another item: its captions are not this one's
+      if (this.readAhead) this.restartReadAhead(media.currentTime);
       this.renderReadAhead();
     };
     media.addEventListener('seeking', onJump);
@@ -297,7 +300,8 @@ export class SubtitleOverlay {
   // ---- audio read-ahead ----
 
   private startReadAhead(media: HTMLMediaElement): void {
-    if (!(media instanceof HTMLVideoElement)) return;
+    // Only where the main-world audio tap runs; elsewhere no page can pose as it.
+    if (!(media instanceof HTMLVideoElement) || !readAheadHost(location.hostname)) return;
     const ra = new AudioReadAhead(media);
     this.readAhead = ra;
     ra.start(
@@ -306,7 +310,14 @@ export class SubtitleOverlay {
     );
   }
 
+  /** What was read ahead no longer applies (a seek outside it, a new source): forget it, tell the pipeline. */
+  private restartReadAhead(playhead: number): void {
+    this.readAhead?.forget();
+    void this.sendSafely({ type: 'READ_AHEAD_RESET', t: playhead, playhead } as unknown as ExtensionMessage);
+  }
+
   private stopReadAhead(): void {
+    if (this.readAhead) void this.sendSafely({ type: 'READ_AHEAD_RESET', t: 0, playhead: 0 } as unknown as ExtensionMessage);
     this.readAhead?.stop();
     this.readAhead = null;
     this.schedule.clear();
@@ -386,9 +397,13 @@ export class SubtitleOverlay {
       const now = this.now();
       if (this.media && this.schedule.isOver(caption, now.videoTime, now.rate)) {
         this.raDropped.late++;
+        this.readAhead?.noteLate(); // not keeping up: the live path will help
         return;
       }
-      this.schedule.add(caption, now.rate);
+      if (!this.schedule.add(caption, now.rate)) {
+        this.raDropped.remade++;
+        return;
+      }
       if (source) this.raSources.set(id, source);
       this.renderReadAhead();
       return;
@@ -397,6 +412,14 @@ export class SubtitleOverlay {
       // Read-ahead already covers this speech (one may still be in flight from before it took over).
       this.raDropped.liveWhileAhead++;
       return;
+    }
+    if (typeof speechEndedAt === 'number' && this.clock) {
+      // Around a hand-over: a read-ahead caption may already show this speech.
+      const endVideo = this.clock.videoTimeAt(speechEndedAt);
+      if (endVideo !== null && this.schedule.covering(endVideo)) {
+        this.raDropped.liveCovered++;
+        return;
+      }
     }
     if (!this.media || !document.contains(this.media) || this.media.paused) {
       // Gone, or paused while another audible element plays: follow what is heard now.

@@ -67,3 +67,20 @@ describe('ReadAheadSchedule (read-ahead captions shown by video time)', () => {
     expect(ids(s, 1599.5)).toEqual(['c1599']);
   });
 });
+
+describe('ReadAheadSchedule: re-made captions and coverage (final review)', () => {
+  it('a caption re-made for the same words (a seek back re-transcribed them) is not added twice', () => {
+    const s = new ReadAheadSchedule();
+    expect(s.add({ id: 'a', text: 'first take', start: 50, end: 53 })).toBe(true);
+    expect(s.add({ id: 'b', text: 'second take', start: 50.3, end: 53.2 })).toBe(false);
+    expect(s.visibleAt(51).map(c => c.id)).toEqual(['a']);
+  });
+
+  it('covering(t): a caption spans video time t (live captions for that speech are duplicates)', () => {
+    const s = new ReadAheadSchedule();
+    s.add({ id: 'a', text: 'x', start: 10, end: 12 });
+    expect(s.covering(11)).toBe(true);
+    expect(s.covering(9.6)).toBe(true); // just before it starts
+    expect(s.covering(20)).toBe(false);
+  });
+});

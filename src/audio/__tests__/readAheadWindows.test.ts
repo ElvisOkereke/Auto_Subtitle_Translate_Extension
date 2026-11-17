@@ -3,8 +3,8 @@ import { ReadAheadWindows, collapseRepeats, mergeShort } from '../readAheadWindo
 const RATE = 16000;
 const pcm = (seconds: number) => new Float32Array(Math.round(seconds * RATE));
 
-function feed(w: ReadAheadWindows, from: number, seconds: number) {
-  for (let t = from; t < from + seconds - 1e-9; t += 1) w.push(t, pcm(Math.min(1, from + seconds - t)));
+function feed(w: ReadAheadWindows, from: number, seconds: number, nowMs = 0) {
+  for (let t = from; t < from + seconds - 1e-9; t += 1) w.push(t, pcm(Math.min(1, from + seconds - t)), nowMs);
 }
 
 describe('ReadAheadWindows (sliding-window read-ahead transcription)', () => {
@@ -48,10 +48,10 @@ describe('ReadAheadWindows (sliding-window read-ahead transcription)', () => {
     expect(w.next(-10, 0)!.start).toBeCloseTo(28);
   });
 
-  it('when the playhead nears the cursor, sends what it has (short window) and keeps everything', () => {
+  it('when the playhead is about to reach the cursor, sends what it has (short window) and keeps everything', () => {
     const w = new ReadAheadWindows();
     feed(w, 100, 6);
-    const win = w.next(97, 0)!; // 3 s to go: do not wait for 28 s
+    const win = w.next(98.5, 0)!; // 1.5 s to go: do not wait for 28 s
     expect(win.audio.length / RATE).toBeCloseTo(6, 1);
     expect(w.complete([{ text: 'all of it', start: 4, end: 5.9 }])).toHaveLength(1);
   });
@@ -106,5 +106,50 @@ describe('mergeShort (readable lines from tiny sentences)', () => {
       { text: 'x'.repeat(40), start: 3.1, end: 5 },
     ]);
     expect(merged.map(m => m.text)).toEqual(['one.', 'after a pause.', 'x'.repeat(40)]);
+  });
+});
+
+describe('ReadAheadWindows: no lone 1 s windows (final review)', () => {
+  it('at a run start it waits for about 6 s of audio unless the playhead is about to arrive', () => {
+    const w = new ReadAheadWindows();
+    feed(w, 100, 2);
+    expect(w.next(97, 0)).toBeNull(); // 3 s away: wait for more
+    feed(w, 102, 4);
+    expect(w.next(97, 0)!.audio.length / RATE).toBeCloseTo(6, 1);
+  });
+
+  it('the playhead within 2 s of the cursor: sends what it has', () => {
+    const w = new ReadAheadWindows();
+    feed(w, 100, 1.5);
+    expect(w.next(99, 0)).not.toBeNull();
+  });
+
+  it('no new audio for 1.5 s (the buffer stalled): sends what it has', () => {
+    const w = new ReadAheadWindows();
+    feed(w, 100, 3, 0);
+    expect(w.next(95, 1000)).toBeNull();
+    expect(w.next(95, 1600)).not.toBeNull();
+  });
+
+  it('a short window that is not final holds back its unfinished last sentence', () => {
+    const w = new ReadAheadWindows();
+    feed(w, 100, 7);
+    w.next(95, 0);
+    const kept = w.complete([
+      { text: 'done.', start: 0.5, end: 3 },
+      { text: 'still going', start: 5, end: 7 },
+    ]);
+    expect(kept.map(c => c.text)).toEqual(['done.']);
+    expect(w.next(101.5, 0)!.start).toBeCloseTo(103); // the held-back sentence is heard again
+  });
+
+  it('abort sends the same window again (a dropped job loses no audio)', () => {
+    const w = new ReadAheadWindows();
+    feed(w, 100, 40);
+    const a = w.next(90, 0)!;
+    w.abort();
+    const b = w.next(90, 0)!;
+    expect(b.start).toBe(a.start);
+    expect(b.audio.length).toBe(a.audio.length);
   });
 });

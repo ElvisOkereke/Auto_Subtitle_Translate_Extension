@@ -1,7 +1,7 @@
 // offscreen.ts - Captures tab audio, segments speech via VAD, and relays segments to the Whisper worker.
 import { ExtensionMessage } from './types';
 import { SpeechSegmenter, DEFAULT_VAD_CONFIG } from './utils/vad';
-import { ReadAheadWindows } from './audio/readAheadWindows';
+import { ReadAheadPipeline } from './audio/readAheadPipeline';
 import { fromInt16Base64 } from './audio/readAhead/pcm';
 import { isNonSpeech } from './audio/nonSpeech';
 
@@ -52,77 +52,26 @@ const SPEECH_END_HANGOVER_MS = 400; // the segmenter's silence hangover (vad.ts)
 
 // ---- audio read-ahead (spec: Audio mode read-ahead) ----
 // The page's buffered audio arrives ahead of playback as 16 kHz PCM in video
-// time. It is transcribed with a sliding window (readAheadWindows.ts) and
-// Whisper's sentence timestamps, one window at a time; each caption carries its
-// video-time start and end. While read-ahead is healthy the live path's
-// segments are not transcribed (capture keeps the tab audible); when it isn't,
-// the live path carries on as before.
-const readAhead = {
-  tabId: null as number | null,
-  windows: new ReadAheadWindows(),
-  inFlight: null as number | null,
-  healthy: false,
-  playhead: 0,
-  meta: new Map<number, { videoStart: number }>(),
-};
-
-function resetReadAhead(): void {
-  readAhead.windows.reset();
-  readAhead.inFlight = null;
-}
-
-function onReadAheadAudio(t: number, pcm: Float32Array): void {
-  diag.raChunks++;
-  readAhead.windows.push(t, pcm);
-  pumpReadAhead();
-}
-
-/** Sends the next window to Whisper (one at a time). */
-function pumpReadAhead(): void {
-  if (readAhead.inFlight !== null) return;
-  const win = readAhead.windows.next(readAhead.playhead);
-  if (!win) return;
-  diag.raSegments++;
-  const segmentId = ++segmentCounter;
-  readAhead.inFlight = segmentId;
-  readAhead.meta.set(segmentId, { videoStart: win.start });
-  if (readAhead.meta.size > 64) readAhead.meta.delete(readAhead.meta.keys().next().value!);
-  getWorker().postMessage({ type: 'transcribe', audio: win.audio, language: currentSourceLanguage, segmentId, timestamps: true }, [win.audio.buffer]);
-}
-
-/** Whisper's sentences for the window in flight -> captions in video time (sound annotations dropped). */
-function windowCaptions(chunks: { text: string; start: number; end: number | null }[] | undefined): { text: string; start: number; end: number }[] {
-  const sentences = (Array.isArray(chunks) ? chunks : []).map(c => ({ text: c.text, start: c.start, end: c.end === null ? NaN : c.end }));
-  const captions = readAhead.windows.complete(sentences);
-  const speech = captions.filter(c => !isNonSpeech(c.text));
-  diag.nonSpeech += captions.length - speech.length;
-  return speech;
-}
-
-function readAheadDone(segmentId: number | undefined): void {
-  if (segmentId !== undefined && segmentId === readAhead.inFlight) {
-    readAhead.inFlight = null;
-    pumpReadAhead();
-  }
-}
+// time; ReadAheadPipeline transcribes it with a sliding window and Whisper's
+// sentence timestamps, one job at a time, and turns the result into captions
+// with their video-time start and end. While read-ahead is healthy the live
+// path's segments are not transcribed (capture keeps the tab audible).
+let readAheadTabId: number | null = null;
+const readAhead = new ReadAheadPipeline({
+  nextId: () => ++segmentCounter,
+  transcribe: (segmentId, audio) =>
+    getWorker().postMessage({ type: 'transcribe', audio, language: currentSourceLanguage, segmentId, timestamps: true }, [audio.buffer]),
+  emit: c =>
+    chrome.runtime.sendMessage({ type: 'TRANSCRIPTION_RESULT', text: c.text, timing: { videoStart: c.start, videoEnd: c.end, readAhead: 1 } }).catch(() => undefined),
+});
 
 function handleWorkerMessage(event: MessageEvent): void {
   const { type } = event.data;
   if (type === 'result') {
     if (event.data.text && event.data.text.trim()) diag.results++;
     else diag.emptyResults++;
-    const ahead = readAhead.meta.get(event.data.segmentId);
-    if (ahead) diag.raResults++;
-    // Read-ahead: each of Whisper's sentences is a caption timed to its words.
-    if (ahead) {
-      for (const s of windowCaptions(event.data.chunks)) {
-        chrome.runtime.sendMessage({
-          type: 'TRANSCRIPTION_RESULT',
-          text: s.text,
-          timing: { segmentId: event.data.segmentId, audioMs: event.data.audioMs, queueMs: event.data.queueMs, inferenceMs: event.data.inferenceMs, videoStart: s.start, videoEnd: s.end, readAhead: 1 }
-        });
-      }
-    }
+    // Read-ahead's jobs (including stale ones from before a seek) never reach the live path.
+    if (readAhead.result(event.data.segmentId, event.data.chunks)) diag.raResults++;
     // Sound annotations ("[音楽]", "(拍手)", "♪") are not words: no caption.
     else if (event.data.text && event.data.text.trim() && isNonSpeech(event.data.text)) diag.nonSpeech++;
     else if (event.data.text && event.data.text.trim()) {
@@ -138,10 +87,8 @@ function handleWorkerMessage(event: MessageEvent): void {
         }
       });
     }
-    readAheadDone(event.data.segmentId);
   } else if (type === 'dropped') {
-    if (event.data.segmentId === readAhead.inFlight) readAhead.windows.complete([]);
-    readAheadDone(event.data.segmentId);
+    readAhead.dropped(event.data.segmentId);
   } else if (type === 'progress') {
     chrome.runtime.sendMessage({
       type: 'MODEL_LOADING_PROGRESS',
@@ -149,8 +96,7 @@ function handleWorkerMessage(event: MessageEvent): void {
       percent: event.data.percent
     });
   } else if (type === 'error') {
-    if (readAhead.inFlight !== null) readAhead.windows.complete([]);
-    readAhead.inFlight = null;
+    readAhead.error(event.data.loadFailedOn ? undefined : event.data.segmentId);
     diag.errors++;
     diag.lastError = String(event.data.message ?? event.data.error ?? '').slice(0, 200);
     if (event.data.loadFailedOn === 'webgpu') {
@@ -164,7 +110,7 @@ function handleWorkerMessage(event: MessageEvent): void {
 
 async function startCapture(streamId: string, sourceLanguage: string, tabId: number | null): Promise<void> {
   stopCapture(); // restarting must never leave a second stream running
-  readAhead.tabId = tabId;
+  readAheadTabId = tabId;
   diagTimer = window.setInterval(reportDiag, 2000);
   currentSourceLanguage = sourceLanguage;
   segmenter = new SpeechSegmenter(FRAME_DURATION_MS, DEFAULT_VAD_CONFIG);
@@ -245,24 +191,23 @@ function stopCapture(): void {
     worker = null;
   }
   segmenter = null;
-  readAhead.tabId = null;
-  readAhead.healthy = false;
-  resetReadAhead();
+  readAheadTabId = null;
+  readAhead.reset();
+  readAhead.state(false, 0);
 }
 
 chrome.runtime.onMessage.addListener((message: ExtensionMessage, _sender, sendResponse) => {
   if (message.type === 'READ_AHEAD_AUDIO' || message.type === 'READ_AHEAD_STATE' || message.type === 'READ_AHEAD_RESET') {
     // From the content script of the captured tab only.
-    if (readAhead.tabId === null || _sender.tab?.id !== readAhead.tabId) return false;
+    if (readAheadTabId === null || _sender.tab?.id !== readAheadTabId) return false;
     const m = message as unknown as { t?: number; pcm?: string; playhead?: number; healthy?: boolean };
-    if (typeof m.playhead === 'number') readAhead.playhead = m.playhead;
     if (message.type === 'READ_AHEAD_AUDIO' && typeof m.t === 'number' && typeof m.pcm === 'string') {
-      onReadAheadAudio(m.t, fromInt16Base64(m.pcm));
-    } else if (message.type === 'READ_AHEAD_STATE') {
-      readAhead.healthy = !!m.healthy;
-      pumpReadAhead();
+      diag.raChunks++;
+      readAhead.audio(m.t, fromInt16Base64(m.pcm));
+    } else if (message.type === 'READ_AHEAD_STATE' && typeof m.playhead === 'number') {
+      readAhead.state(!!m.healthy, m.playhead);
     } else if (message.type === 'READ_AHEAD_RESET') {
-      resetReadAhead();
+      readAhead.reset();
     }
     return false;
   }

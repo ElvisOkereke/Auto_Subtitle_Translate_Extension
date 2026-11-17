@@ -90,4 +90,29 @@ test('read-ahead captions appear when the video reaches their words; pause freez
   // The tap decoded the stretch once: it restarts only for real jumps (the one seek back here).
   const tap = await page.evaluate(() => (window as any).__astAudioTapStats);
   expect(tap.resets, JSON.stringify(tap)).toBeLessThanOrEqual(2);
+
+  // A seek beyond everything read ahead (into dense speech at 96-113 s of the video): read-ahead
+  // starts again there and its captions land on their words, with nothing from the old position.
+  const far = VIDEO.start + 66 - offset; // video time 96 s
+  await page.evaluate(t => {
+    const v = document.querySelector('video')!;
+    v.currentTime = t;
+    void v.play();
+  }, far);
+  await expect(overlay(page)).toHaveAttribute('data-path', 'read-ahead', { timeout: 90_000 });
+  await page.waitForFunction(t => document.querySelector('video')!.currentTime >= t, far + 17, { timeout: 90_000, polling: 250 });
+  await page.evaluate(() => document.querySelector('video')!.pause());
+  const after = (await shownCaptions(page)).filter(c => typeof c.videoStart === 'number' && c.shownAt >= far);
+  console.log(JSON.stringify(after.map(c => ({ start: c.videoStart, shownAt: c.shownAt, text: c.text.slice(0, 30) }))));
+  expect(after.length, 'captions after the far seek').toBeGreaterThan(0);
+  expect(after.every(c => c.videoStart! >= far - 1), 'nothing from the old position').toBe(true);
+  for (const c of after.filter(c => c.videoStart! > far + 1)) expect(Math.abs(c.shownAt - c.videoStart!)).toBeLessThan(0.3);
+
+  // And back to the start: the captions made there show again, once each.
+  await page.evaluate(t => {
+    document.querySelector('video')!.currentTime = t;
+  }, again.videoStart! + 0.1);
+  await expect(overlay(page).locator(`.subtitle-text[data-caption-id="${again.captionId}"]`)).toBeVisible({ timeout: 2000 });
+  const texts = await overlay(page).locator('.subtitle-text').allTextContents();
+  expect(new Set(texts).size, `no caption twice: ${JSON.stringify(texts)}`).toBe(texts.length);
 });

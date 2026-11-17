@@ -33,9 +33,15 @@ export class ReadAheadSchedule {
     return Math.max(c.end + END_BEAT_S, c.start + minDisplaySeconds(c.text) * rate);
   }
 
-  /** `rate`: playback rate when it arrived (reading time is real seconds). */
-  add(c: ScheduledCaption, rate = 1): void {
+  /**
+   * `rate`: playback rate when it arrived (reading time is real seconds). False
+   * when a caption for the same words is already kept (re-transcribed after a seek back).
+   */
+  add(c: ScheduledCaption, rate = 1): boolean {
     const r = rate > 0 ? rate : 1;
+    const span = Math.max(0.1, c.end - c.start);
+    const same = this.items.some(i => i.id !== c.id && Math.abs(i.start - c.start) < 0.75 && Math.min(i.end, c.end) - Math.max(i.start, c.start) >= span / 2);
+    if (same) return false;
     this.items = this.items.filter(i => i.id !== c.id);
     this.items.push({ ...c, rate: r, until: this.untilOf(c, r) });
     this.items.sort((a, b) => a.start - b.start);
@@ -43,6 +49,12 @@ export class ReadAheadSchedule {
       // The one furthest from the newest goes first.
       this.items.shift();
     }
+    return true;
+  }
+
+  /** Whether a caption covers video time t (from just before its start): live captions there are duplicates. */
+  covering(t: number): boolean {
+    return this.items.some(i => i.start - 0.5 <= t && t < i.until);
   }
 
   upgrade(id: string, text: string): boolean {
