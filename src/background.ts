@@ -55,12 +55,23 @@ const HANDLED_MESSAGE_TYPES = new Set<string>([
   'TRANSCRIPTION_RESULT',
   'TRANSCRIPTION_ERROR',
   'MODEL_LOADING_PROGRESS',
-  'AUDIO_DIAG'
+  'AUDIO_DIAG',
+  'GET_DEBUG_STATE'
 ]);
 
 /** Latest capture health from the offscreen document (read by tests through the service worker). */
 let audioDiag: unknown = null;
 (self as unknown as { __astAudioDiag?: () => unknown }).__astAudioDiag = () => audioDiag;
+/** What happened, for the debug panel: capture, model, translations, errors (no secrets). */
+const debugEvents: { at: number; source: string; level: 'info' | 'warn' | 'error'; message: string }[] = [];
+function debugEvent(level: 'info' | 'warn' | 'error', message: string): void {
+  debugEvents.push({ at: Date.now(), source: 'background', level, message: message.slice(0, 300) });
+  if (debugEvents.length > 100) debugEvents.shift();
+}
+let lastModelProgress: { status: string; percent?: number } | null = null;
+/** False once the speech model fell back to the CPU (no WebGPU: often hardware acceleration is off). */
+let gpuAvailable: boolean | null = null;
+
 /** The last transcriptions (text and timing), for tests reading the pipeline through the service worker. */
 const recentTranscripts: { text: string; timing?: Record<string, number>; at: number }[] = [];
 (self as unknown as { __astTranscripts?: () => unknown }).__astTranscripts = () => recentTranscripts;
@@ -193,6 +204,7 @@ class SubtitleService {
           return { success: true };
 
         case 'TRANSCRIPTION_ERROR': {
+          debugEvent('error', `Speech recognition error: ${message.message}`);
           const tabId = await getActiveTabId();
           if (tabId !== null) {
             await this.safeSendMessage(tabId, {
@@ -204,8 +216,15 @@ class SubtitleService {
         }
 
         case 'MODEL_LOADING_PROGRESS':
+          if (message.status !== 'download-progress' || lastModelProgress?.status !== 'download-progress') debugEvent('info', `Speech model: ${message.status}`);
+          lastModelProgress = { status: message.status, percent: message.percent };
+          if (message.status === 'cpu-fallback') gpuAvailable = false;
+          else if (message.status === 'ready' && gpuAvailable === null) gpuAvailable = true;
           await this.handleModelLoadingProgress(message.status, message.percent);
           return { success: true };
+
+        case 'GET_DEBUG_STATE':
+          return await this.debugState(sender);
 
         default:
           return { success: false, error: 'Unknown message type' };
@@ -279,11 +298,13 @@ class SubtitleService {
       }
 
       await setActiveTabId(tabId);
+      debugEvent('info', `Capture started on tab ${tabId}`);
       await this.safeSendMessage(tabId, { type: 'CAPTURE_STARTED', streamId });
 
       return { success: true, streamId };
     } catch (error) {
       console.error('Failed to start audio capture:', error);
+      debugEvent('error', `Capture failed to start: ${describeCaptureError(error)}`);
       return { success: false, error: describeCaptureError(error) };
     }
   }
@@ -445,6 +466,33 @@ class SubtitleService {
     return previous;
   }
 
+  /** Everything the debug panel shows from here; keys only as yes/no. */
+  private async debugState(sender: chrome.runtime.MessageSender) {
+    const settings = await getSettings();
+    const secrets = await getSecrets();
+    const s = secrets as unknown as Record<string, string>;
+    return {
+      captureTabId: await getActiveTabId(),
+      thisTabId: sender.tab?.id ?? null,
+      offscreenOpen: await chrome.offscreen.hasDocument().catch(() => false),
+      settings: {
+        translationEngineMode: settings.translationEngineMode,
+        translationProvider: settings.translationProvider,
+        claudeAccess: settings.claudeAccess,
+        claudeModel: settings.claudeModel,
+        speechModel: settings.speechModel,
+        sourceLanguage: settings.sourceLanguage,
+        targetLanguage: settings.targetLanguage,
+        keys: { deepl: !!s.deeplApiKey, google: !!s.googleTranslateApiKey, anthropic: !!s.anthropicApiKey, gateway: !!s.claudeGatewayToken, account: !!s.accountToken },
+      },
+      audioDiag,
+      model: lastModelProgress,
+      gpu: gpuAvailable,
+      transcripts: recentTranscripts.slice(-12),
+      events: debugEvents.slice(-60),
+    };
+  }
+
   private async handleModelLoadingProgress(status: string, percent?: number): Promise<void> {
     const tabId = await getActiveTabId();
     if (tabId === null) return;
@@ -481,6 +529,7 @@ class SubtitleService {
         });
       }
       console.error('Translation failed, falling back to untranslated text:', error);
+      debugEvent('error', `Translation failed (${providerName}): ${error instanceof Error ? error.message : String(error)}`);
       return { text, language: sourceLanguage };
     }
   }
@@ -531,6 +580,7 @@ class SubtitleService {
     } catch (error) {
       console.error('Translation failed:', error);
       const errorMessage = error instanceof Error ? error.message : String(error);
+      debugEvent('error', `Translation failed: ${errorMessage}`);
       return { success: false, error: errorMessage };
     }
   }

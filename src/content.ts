@@ -15,6 +15,8 @@ import { CaptionPolicy } from './audio/captionPolicy';
 import { ReadAheadSchedule } from './audio/readAheadSchedule';
 import { AudioReadAhead, readAheadHost } from './audio/readAhead/audioReadAhead';
 import { toInt16Base64 } from './audio/readAhead/pcm';
+import { DebugPanel } from './debug/debugPanel';
+import type { DebugEvent, DebugState } from './debug/debugReport';
 
 /** Playing media is heard only when not muted and with volume up. */
 const isAudible = (m: HTMLMediaElement): boolean => !m.muted && m.volume > 0;
@@ -55,10 +57,67 @@ export class SubtitleOverlay {
   private raSources = new Map<string, string>();
   private raBetter = new Set<string>();
   private raDropped = { late: 0, liveWhileAhead: 0, liveCovered: 0, remade: 0 };
+  private debugPanel: DebugPanel | null = null;
+  private debugEvents: DebugEvent[] = [];
 
   constructor() {
     this.setupMessageListener();
     this.watchStyleSettings();
+    this.watchDebugSetting();
+  }
+
+  // ---- debug panel (Settings > Debug panel) ----
+
+  private watchDebugSetting(): void {
+    const apply = (on: unknown) => {
+      if (on && !this.debugPanel) {
+        this.debugPanel = new DebugPanel(() => this.debugState());
+        this.debugPanel.start();
+      } else if (!on && this.debugPanel) {
+        this.debugPanel.stop();
+        this.debugPanel = null;
+      }
+    };
+    try {
+      Promise.resolve(chrome.storage?.local?.get?.('debugPanel'))
+        .then(r => apply((r as { debugPanel?: unknown } | undefined)?.debugPanel))
+        .catch(() => undefined);
+    } catch {
+      // storage unavailable (tests, odd pages): no panel
+    }
+    chrome.storage?.onChanged?.addListener((changes, area) => {
+      if (area === 'local' && changes.debugPanel) apply(changes.debugPanel.newValue);
+    });
+  }
+
+  private async debugState(): Promise<DebugState> {
+    const background = (await chrome.runtime.sendMessage({ type: 'GET_DEBUG_STATE' }).catch(() => null)) as DebugState['background'];
+    const media = this.media ?? this.pickMedia();
+    const subtitles = (globalThis as unknown as { __astSubtitleDebug?: () => DebugState['subtitles'] }).__astSubtitleDebug?.() ?? null;
+    return {
+      at: Date.now(),
+      version: chrome.runtime.getManifest?.().version ?? '?',
+      page: { host: location.hostname, readAheadAllowed: readAheadHost(location.hostname) },
+      background: background && typeof background === 'object' && 'settings' in background ? background : null,
+      audio: this.isActive
+        ? {
+            active: true,
+            path: this.overlay?.dataset.path ?? null,
+            lead: this.readAhead ? this.readAhead.lead : null,
+            raStats: this.readAhead ? { ...this.readAhead.stats } : null,
+            scheduled: this.schedule.size,
+            dropped: { ...this.policy.drops, ...this.raDropped },
+          }
+        : null,
+      subtitles,
+      media: media ? { currentTime: media.currentTime, paused: media.paused, duration: media.duration } : null,
+      events: this.debugEvents.slice(-40),
+    };
+  }
+
+  private noteDebug(level: DebugEvent['level'], message: string): void {
+    this.debugEvents.push({ at: Date.now(), source: 'page', level, message: message.slice(0, 300) });
+    if (this.debugEvents.length > 60) this.debugEvents.shift();
   }
 
   get active(): boolean {
@@ -523,6 +582,7 @@ export class SubtitleOverlay {
   }
 
   private addNotice(className: string, text: string, lingerMs: number, replace: boolean): void {
+    if (!(replace && this.debugEvents[this.debugEvents.length - 1]?.message === text)) this.noteDebug(className.includes('error') ? 'error' : 'info', text);
     if (!this.notices) this.createOverlay();
 
     let notice: HTMLDivElement | null = replace

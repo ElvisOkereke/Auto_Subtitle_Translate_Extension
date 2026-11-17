@@ -17,6 +17,7 @@ interface PopupElements {
   subtitleStyle: HTMLSelectElement;
   fontSize: HTMLSelectElement;
   speechModel: HTMLSelectElement;
+  debugPanel: HTMLInputElement;
   translationProvider: HTMLSelectElement;
   googleTranslateApiKey: HTMLInputElement;
   deeplApiKey: HTMLInputElement;
@@ -84,7 +85,7 @@ const ELEMENT_IDS: (keyof PopupElements)[] = [
   'engineMode', 'claudeModel', 'claudeAccess', 'anthropicApiKey', 'claudeGatewayUrl', 'claudeGatewayToken',
   'claudeGatewayAuth', 'anthropicKeyGroup', 'claudeGatewayGroup', 'claudeStatus', 'glossaryTopic', 'glossaryList',
   'accountEmail', 'accountSendCode', 'accountCodeRow', 'accountCode', 'accountSignIn', 'signedOutView', 'signedInView', 'accountEmailShown', 'accountPlan', 'accountUsage', 'accountUsageBar', 'accountSubscribeStandard', 'accountSubscribePro', 'accountManage', 'accountSignOut', 'accountStatus',
-  'openSettings', 'closeSettings', 'mainView', 'settingsView', 'captionBar', 'translateWithGroup', 'translateWithSubscription', 'translateWithKeys', 'ownKeysGroup', 'themeChoice', 'engineSummary', 'accountSummary', 'engineSummaryValue', 'accountSummaryValue'
+  'debugPanel', 'openSettings', 'closeSettings', 'mainView', 'settingsView', 'captionBar', 'translateWithGroup', 'translateWithSubscription', 'translateWithKeys', 'ownKeysGroup', 'themeChoice', 'engineSummary', 'accountSummary', 'engineSummaryValue', 'accountSummaryValue'
 ];
 
 const MODE_LABELS: Record<string, string> = {
@@ -131,6 +132,7 @@ export function describeTabError(error: unknown): string {
 
 const NON_SETTING_ELEMENT_KEYS = [
   'toggleButton',
+  'debugPanel',
   'screenTranslateButton',
   'drawNewBoxButton',
   'screenTranslateStatus',
@@ -566,6 +568,9 @@ class PopupController {
     this.elements.modeAudio.addEventListener('click', () => this.setMode('audio'));
     this.elements.modeSubtitles.addEventListener('click', () => this.setMode('subtitles'));
     this.elements.drawSubtitleBox.addEventListener('click', () => this.drawSubtitleBox());
+    // Debug panel: a device-local switch the content script watches.
+    void Promise.resolve(chrome.storage.local.get('debugPanel')).then(r => (this.elements.debugPanel.checked = !!r?.debugPanel));
+    this.elements.debugPanel.addEventListener('change', () => void chrome.storage.local.set({ debugPanel: this.elements.debugPanel.checked }));
     this.elements.startSubtitleMode.addEventListener('click', () => this.startSubtitleModeWithSavedBox());
     this.elements.stopSubtitleMode.addEventListener('click', () => this.stopSubtitleMode());
 

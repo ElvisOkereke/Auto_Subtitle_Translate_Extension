@@ -62,6 +62,11 @@ const IMMINENT_S = 10; // read-ahead lines due sooner than this are translated l
 const NO_VIDEO: VideoContext = { videoId: null, url: '', title: '', channel: '', description: '' };
 
 export class SubtitleMode {
+  /** The box being read (debug panel). */
+  get currentBox(): NormalizedBox {
+    return this.box;
+  }
+
   state: SubtitleModeState = 'loading';
   /** Live-path OCR calls (read-ahead OCR is counted in raOcrCalls). */
   ocrCalls = 0;

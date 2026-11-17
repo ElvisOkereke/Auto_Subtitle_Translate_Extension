@@ -6,9 +6,11 @@ import { DIST } from './paths';
 
 /** Window placement: E2E_WINDOW="x,y,w,h" (a second display), else 1280x800 where Chrome puts it. */
 function windowArgs(): string[] {
+  // E2E_DISABLE_GPU=1: like a browser with hardware acceleration turned off (no GPU, no WebGPU).
+  const gpu = process.env.E2E_DISABLE_GPU === '1' ? ['--disable-gpu'] : [];
   const m = (process.env.E2E_WINDOW ?? '').match(/^(-?\d+),(-?\d+),(\d+),(\d+)$/);
-  if (!m) return ['--window-size=1280,800'];
-  return [`--window-position=${m[1]},${m[2]}`, `--window-size=${m[3]},${m[4]}`];
+  if (!m) return ['--window-size=1280,800', ...gpu];
+  return [`--window-position=${m[1]},${m[2]}`, `--window-size=${m[3]},${m[4]}`, ...gpu];
 }
 
 export interface LaunchOptions {

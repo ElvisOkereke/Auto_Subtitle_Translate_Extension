@@ -21,6 +21,23 @@ export function getOcr(): Promise<OcrClient> {
 
 
 const launcher = new ModeLauncher<SubtitleMode>();
+
+// Debug panel (content.ts, same isolated world): what subtitle mode is doing.
+(globalThis as unknown as { __astSubtitleDebug?: () => unknown }).__astSubtitleDebug = () => {
+  const mode = launcher.current;
+  if (!mode) return null;
+  return {
+    state: mode.state,
+    ocrCalls: mode.ocrCalls,
+    translateCalls: mode.translateCalls,
+    readAheadLead: mode.readAheadLead,
+    box: mode.currentBox,
+    lines: mode.timeline
+      .toJSON()
+      .slice(-8)
+      .map(l => ({ start: l.start, source: l.source, translation: l.translation })),
+  };
+};
 let starting: Promise<unknown> | null = null;
 /** Subtitle mode stays on across in-page navigation until the user stops it. */
 let enabled = false;

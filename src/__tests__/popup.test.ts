@@ -81,6 +81,16 @@ describe('popup modes', () => {
     expect(saved.settings.subtitleLanguage).toBe('ja');
   });
 
+  it('Debug panel: off by default; switching it on stores it for the page to show', async () => {
+    const chromeMock = await loadPopup();
+    const box = document.getElementById('debugPanel') as HTMLInputElement;
+    expect(box.checked).toBe(false);
+    box.checked = true;
+    box.dispatchEvent(new Event('change'));
+    await new Promise(r => setTimeout(r, 10));
+    expect((await chromeMock.storage.local.get('debugPanel')).debugPanel).toBe(true);
+  });
+
   it('Speech model: best accuracy by default; choosing the smaller download is saved', async () => {
     const chromeMock = await loadPopup();
     const select = document.getElementById('speechModel') as HTMLSelectElement;

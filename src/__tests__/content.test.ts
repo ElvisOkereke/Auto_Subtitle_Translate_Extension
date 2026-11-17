@@ -339,6 +339,41 @@ describe('content script subtitle overlay', () => {
     expect(overlay()).toBeNull();
   });
 
+  it('debug panel: appears when switched on, shows the audio pipeline and the problems first', async () => {
+    document.body.innerHTML = '';
+    chromeMock = installChromeMock({});
+    await chromeMock.storage.local.set({ debugPanel: true });
+    chromeMock.runtime.sendMessage.mockImplementation(async (msg: any) => {
+      if (msg.type === 'GET_DEBUG_STATE') {
+        return {
+          captureTabId: 1,
+          thisTabId: 1,
+          offscreenOpen: true,
+          settings: { translationEngineMode: 'fast', translationProvider: 'deepl', claudeAccess: 'key', claudeModel: 'claude-opus-5-5', speechModel: 'turbo', sourceLanguage: 'ko', targetLanguage: 'en', keys: { deepl: false, google: false, anthropic: false, gateway: false, account: false } },
+          audioDiag: { frames: 10, peakRms: 0.05, results: 2, model: 'onnx-community/whisper-base (wasm)' },
+          model: { status: 'ready' },
+          gpu: false,
+          transcripts: [],
+          events: [],
+        };
+      }
+      return { success: true };
+    });
+    loadContentScript();
+    await chromeMock.dispatch({ type: 'TOGGLE_SUBTITLES' });
+    await new Promise(r => setTimeout(r, 1200));
+    const panel = document.getElementById('ast-debug-panel')!;
+    expect(panel).not.toBeNull();
+    const text = panel.shadowRoot!.textContent!;
+    expect(text).toContain('No WebGPU');
+    expect(text).toContain('No deepl key');
+    expect(text).toContain('Audio mode');
+    expect(text).toContain('onnx-community/whisper-base (wasm)');
+    await chromeMock.storage.local.set({ debugPanel: false });
+    for (const l of (chromeMock.storage as any).onChanged.listeners) l({ debugPanel: { newValue: false } }, 'local');
+    expect(document.getElementById('ast-debug-panel')).toBeNull();
+  });
+
   it('marks itself inactive when capture is stopped elsewhere', async () => {
     await chromeMock.dispatch({ type: 'TOGGLE_SUBTITLES' });
     await chromeMock.dispatch({ type: 'CAPTURE_STOPPED' });

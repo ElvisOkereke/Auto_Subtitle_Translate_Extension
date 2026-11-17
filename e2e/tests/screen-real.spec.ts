@@ -141,6 +141,8 @@ for (const mode of MODES) for (const video of VIDEOS) {
       o => (o ? chrome.storage.local.set({ devSttModel: o }) : chrome.storage.local.remove('devSttModel')),
       process.env.SCREEN_STT_MODEL ? { model: process.env.SCREEN_STT_MODEL, ...(process.env.SCREEN_STT_DTYPE ? { dtype: JSON.parse(process.env.SCREEN_STT_DTYPE) } : {}) } : null
     );
+    // SCREEN_DEBUG=1: the debug panel on screen (and its report per piece in the results).
+    await sw.evaluate(on => chrome.storage.local.set({ debugPanel: on }), process.env.SCREEN_DEBUG === '1');
     await recordCaptionsOnEveryLoad(context); // YouTube navigates again right after loading
     const dir = path.join(OUT, `${mode}-${video.id}`);
     fs.rmSync(dir, { recursive: true, force: true });
@@ -187,6 +189,7 @@ for (const mode of MODES) for (const video of VIDEOS) {
           return o ? { path: o.dataset.path, raDropped: o.dataset.raDropped, raScheduled: o.dataset.raScheduled, raStats: o.dataset.raStats, dropped: o.dataset.dropped } : null;
         }),
         tap: await page.evaluate(() => (window as any).__astAudioTapStats ?? null),
+        debugPanel: await page.evaluate(() => document.getElementById('ast-debug-panel')?.shadowRoot?.textContent ?? null),
       });
       previous = page;
     }
