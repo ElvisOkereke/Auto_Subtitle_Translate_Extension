@@ -218,6 +218,8 @@ export interface ExtensionSettings {
   claudeGatewayAuth: 'x-api-key' | 'bearer';
   /** Popup and on-page panels: follow the OS, or force light/dark. */
   theme: import('../theme').ThemeChoice;
+  /** Audio mode's speech model on computers with a GPU: best accuracy (1.6 GB) or a smaller download (590 MB). */
+  speechModel: import('../utils/modelConfig').SpeechModel;
 }
 
 export type SubtitlePosition = 'top' | 'center' | 'bottom';

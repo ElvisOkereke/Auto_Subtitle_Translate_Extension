@@ -16,6 +16,7 @@ interface PopupElements {
   targetLanguage: HTMLSelectElement;
   subtitleStyle: HTMLSelectElement;
   fontSize: HTMLSelectElement;
+  speechModel: HTMLSelectElement;
   translationProvider: HTMLSelectElement;
   googleTranslateApiKey: HTMLInputElement;
   deeplApiKey: HTMLInputElement;
@@ -76,7 +77,7 @@ interface PopupElements {
 
 const ELEMENT_IDS: (keyof PopupElements)[] = [
   'toggleButton', 'screenTranslateButton', 'drawNewBoxButton', 'screenTranslateStatus', 'status',
-  'sourceLanguage', 'targetLanguage', 'subtitleStyle', 'fontSize', 'translationProvider',
+  'sourceLanguage', 'targetLanguage', 'subtitleStyle', 'fontSize', 'speechModel', 'translationProvider',
   'googleTranslateApiKey', 'deeplApiKey', 'googleApiKeyGroup', 'deeplApiKeyGroup',
   'modeAudio', 'modeSubtitles', 'audioPanel', 'subtitlePanel', 'subtitleLanguage',
   'startSubtitleMode', 'drawSubtitleBox', 'stopSubtitleMode', 'subtitleModeStatus',
@@ -659,6 +660,7 @@ class PopupController {
       this.elements.targetLanguage.value = settings.targetLanguage;
       this.elements.subtitleStyle.value = settings.subtitleStyle;
       this.elements.fontSize.value = settings.fontSize;
+      this.elements.speechModel.value = settings.speechModel;
       this.elements.translationProvider.value = settings.translationProvider;
       this.elements.googleTranslateApiKey.value = secrets.googleTranslateApiKey;
       this.elements.deeplApiKey.value = secrets.deeplApiKey;
@@ -695,6 +697,7 @@ class PopupController {
     this.elements.targetLanguage.value = 'en';
     this.elements.subtitleStyle.value = 'bottom';
     this.elements.fontSize.value = 'medium';
+    this.elements.speechModel.value = 'turbo';
     this.elements.translationProvider.value = 'google';
     this.elements.googleTranslateApiKey.value = '';
     this.elements.deeplApiKey.value = '';
@@ -711,6 +714,7 @@ class PopupController {
         targetLanguage: this.elements.targetLanguage.value,
         subtitleStyle: this.elements.subtitleStyle.value,
         fontSize: this.elements.fontSize.value,
+        speechModel: this.elements.speechModel.value,
         translationProvider: this.elements.translationProvider.value,
         googleTranslateApiKey: this.elements.googleTranslateApiKey.value,
         deeplApiKey: this.elements.deeplApiKey.value,

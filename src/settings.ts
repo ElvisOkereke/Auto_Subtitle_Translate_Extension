@@ -18,6 +18,7 @@ export const DEFAULT_SETTINGS: ExtensionSettings = {
   targetLanguage: 'en',
   subtitleStyle: 'bottom',
   fontSize: 'medium',
+  speechModel: 'turbo',
   translationProvider: 'google',
   subtitleLanguage: 'ko',
   enabled: false,

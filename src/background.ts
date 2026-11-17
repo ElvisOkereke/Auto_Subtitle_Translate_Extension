@@ -264,8 +264,10 @@ class SubtitleService {
       await this.ensureOffscreenDocument();
       // Dev/test only: another Whisper checkpoint (chrome.storage.local.devSttModel = { model, dtype }).
       const { devSttModel } = await chrome.storage.local.get('devSttModel');
+      const { speechModel } = await getSettings();
       const response = await chrome.runtime.sendMessage({
         type: 'START_OFFSCREEN_CAPTURE',
+        speechModel,
         sttOverrides: devSttModel && typeof devSttModel === 'object' ? devSttModel : undefined,
         tabId, // read-ahead audio is accepted from this tab only
         streamId,

@@ -81,6 +81,18 @@ describe('popup modes', () => {
     expect(saved.settings.subtitleLanguage).toBe('ja');
   });
 
+  it('Speech model: best accuracy by default; choosing the smaller download is saved', async () => {
+    const chromeMock = await loadPopup();
+    const select = document.getElementById('speechModel') as HTMLSelectElement;
+    expect(select.value).toBe('turbo');
+    expect([...select.options].map(o => o.textContent)).toEqual(['Best accuracy (1.6 GB download)', 'Smaller download (590 MB)']);
+    select.value = 'small';
+    select.dispatchEvent(new Event('change'));
+    await new Promise(r => setTimeout(r, 10));
+    const saved = chromeMock.runtime.sendMessage.mock.calls.map((c: any[]) => c[0]).filter((m: any) => m.type === 'UPDATE_SETTINGS').pop();
+    expect(saved.settings.speechModel).toBe('small');
+  });
+
   it('a tab opened before the extension was (re)loaded gets its scripts injected, then the click works', async () => {
     const chromeMock = await loadPopup({ subtitleLanguage: 'ko' });
     const executeScript = jest.fn(async () => []);

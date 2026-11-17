@@ -21,12 +21,14 @@ let currentSourceLanguage = 'auto';
 let segmentCounter = 0;
 // Set after a WebGPU model load fails, so the replacement worker uses the CPU.
 let workerOverrides: { device?: 'wasm'; model?: string; dtype?: unknown } = {};
+/** Settings: Audio mode's speech model on a GPU ('turbo' or 'small'). */
+let speechModel: string | undefined;
 
 function getWorker(): Worker {
   if (!worker) {
     worker = new Worker(chrome.runtime.getURL('whisper.worker.js'));
     worker.onmessage = handleWorkerMessage;
-    worker.postMessage({ type: 'load', overrides: workerOverrides });
+    worker.postMessage({ type: 'load', overrides: workerOverrides, speechModel });
   }
   return worker;
 }
@@ -215,7 +217,12 @@ chrome.runtime.onMessage.addListener((message: ExtensionMessage, _sender, sendRe
   }
 
   if (message.type === 'START_OFFSCREEN_CAPTURE') {
-    const { streamId, sourceLanguage, tabId, sttOverrides } = message as unknown as { streamId: string; sourceLanguage: string; tabId?: number; sttOverrides?: { model?: string; dtype?: unknown } };
+    const { streamId, sourceLanguage, tabId, sttOverrides, speechModel: chosen } = message as unknown as { streamId: string; sourceLanguage: string; tabId?: number; sttOverrides?: { model?: string; dtype?: unknown }; speechModel?: string };
+    if (chosen !== speechModel) {
+      speechModel = chosen;
+      worker?.terminate(); // a different model: the next capture loads it
+      worker = null;
+    }
     if (sttOverrides?.model) workerOverrides = { ...workerOverrides, model: sttOverrides.model, ...(sttOverrides.dtype ? { dtype: sttOverrides.dtype } : {}) } as typeof workerOverrides;
     startCapture(streamId, sourceLanguage, typeof tabId === 'number' ? tabId : null)
       .then(() => sendResponse({ success: true }))
