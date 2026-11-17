@@ -1,8 +1,10 @@
 // overlay.ts - translated subtitle laid over the user's box (style "C" from the design).
 import type { NormalizedBox } from './types';
-import { boxToPage, contentRect } from './videoGeometry';
+import { boxToPage, contentRect, widenAround } from './videoGeometry';
 
 const LINE_HEIGHT = 1.15;
+/** Below this the translation is hard to read in the box: the overlay widens instead (and never clips). */
+const MIN_READABLE_PX = 14;
 const MAX_LINES = 2;
 
 /**
@@ -81,16 +83,24 @@ export class SubtitleOverlay {
   }
 
   private position(): void {
-    const page = boxToPage(this.box, this.video.getBoundingClientRect(), contentRect(this.video));
-    Object.assign(this.element.style, {
-      left: `${page.x}px`,
-      top: `${page.y}px`,
-      width: `${page.width}px`,
-      height: `${page.height}px`,
-    });
+    const element = this.video.getBoundingClientRect();
+    const content = contentRect(this.video);
+    let page = boxToPage(this.box, element, content);
+    const place = (r: typeof page) =>
+      Object.assign(this.element.style, { left: `${r.x}px`, top: `${r.y}px`, width: `${r.width}px`, height: `${r.height}px` });
+    place(page);
     if (this.element.style.display !== 'none' && this.text.textContent) {
       this.text.style.maxWidth = `${page.width}px`;
-      fitText(this.text, page.width * 0.98, page.height * 0.96);
+      const size = fitText(this.text, page.width * 0.98, page.height * 0.96);
+      const clipped = this.text.scrollWidth > page.width * 0.98 + 0.5 || this.text.scrollHeight > page.height * 0.96 + 0.5;
+      if (size < MIN_READABLE_PX || clipped) {
+        // Too long for this box: give it room around the box (up to 90% of the video) instead of clipping it.
+        const video = { x: element.x + content.x, y: element.y + content.y, width: content.width, height: content.height };
+        page = widenAround(page, video, video.width);
+        place(page);
+        this.text.style.maxWidth = `${page.width}px`;
+        fitText(this.text, page.width * 0.98, page.height * 0.96);
+      }
     }
   }
 

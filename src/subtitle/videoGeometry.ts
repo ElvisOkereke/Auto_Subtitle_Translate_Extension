@@ -48,3 +48,17 @@ export function boxToSource(box: NormalizedBox, videoWidth: number, videoHeight:
     sh: Math.max(1, Math.round(box.h * videoHeight)),
   };
 }
+
+/**
+ * The box widened around its centre to `width` (at most 90% of the video, never
+ * narrower than the box), kept inside the video: room for a translation that
+ * is too long for a narrow subtitle box (English often needs more width than
+ * the original's characters).
+ */
+export function widenAround(box: Rect, video: Rect, width: number): Rect {
+  const w = Math.max(box.width, Math.min(width, video.width * 0.9));
+  if (w === box.width) return box;
+  const centre = box.x + box.width / 2;
+  const x = Math.min(Math.max(centre - w / 2, video.x), video.x + video.width - w);
+  return { x, y: box.y, width: w, height: box.height };
+}

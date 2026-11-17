@@ -1,4 +1,4 @@
-import { contentRect, boxToPage, pageToBox, boxToSource } from '../videoGeometry';
+import { contentRect, boxToPage, pageToBox, boxToSource , widenAround } from '../videoGeometry';
 
 describe('videoGeometry', () => {
   it('computes the letterboxed content rect (object-fit: contain)', () => {
@@ -35,5 +35,25 @@ describe('videoGeometry', () => {
 
   it('maps a normalized box to integer source pixels for drawImage', () => {
     expect(boxToSource({ x: 0.2, y: 0.76, w: 0.6, h: 0.1 }, 1920, 1080)).toEqual({ sx: 384, sy: 821, sw: 1152, sh: 108 });
+  });
+});
+
+describe('widenAround (a translation too long for a narrow box gets more room)', () => {
+  const video = { x: 100, y: 50, width: 1000, height: 562 };
+
+  it('widens around the box centre to the width asked for, at most 90% of the video', () => {
+    const box = { x: 500, y: 500, width: 200, height: 60 };
+    expect(widenAround(box, video, 600)).toEqual({ x: 300, y: 500, width: 600, height: 60 });
+    expect(widenAround(box, video, 5000)).toEqual({ x: 150, y: 500, width: 900, height: 60 });
+  });
+
+  it('stays inside the video when the box sits near an edge', () => {
+    expect(widenAround({ x: 110, y: 500, width: 100, height: 60 }, video, 500)).toEqual({ x: 100, y: 500, width: 500, height: 60 });
+    expect(widenAround({ x: 1000, y: 500, width: 90, height: 60 }, video, 500)).toEqual({ x: 600, y: 500, width: 500, height: 60 });
+  });
+
+  it('never narrower than the box', () => {
+    const box = { x: 300, y: 500, width: 700, height: 60 };
+    expect(widenAround(box, video, 400)).toEqual(box);
   });
 });
