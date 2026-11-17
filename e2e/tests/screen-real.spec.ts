@@ -8,7 +8,7 @@ import { browserKind } from '../helpers/launch';
 import { readEnv } from '../helpers/env';
 import { waitOutAds } from '../helpers/youtube';
 import { dragBox, clearTranslationState } from '../helpers/subtitles';
-import { recordCaptions, waitForSpeechModel } from '../helpers/captions';
+import { recordCaptionsOnEveryLoad, waitForSpeechModel } from '../helpers/captions';
 import { astTest } from '../helpers/bridge';
 import { anthropicRelayAvailable } from '../helpers/server';
 import { readFrames, alignLines, type CapturedSample } from '../bench/screenJudge';
@@ -33,7 +33,7 @@ test.skip(!anthropicRelayAvailable(), 'no Anthropic credentials (the judge reads
 
 const BOX = { x: 0.2, y: 0.75, w: 0.6, h: 0.14 }; // IRELKING's subtitle area
 const VIDEOS = [
-  { id: 'hrdfLfuHop4', start: 300 },
+  { id: 'hrdfLfuHop4', start: 20 }, // dialogue-dense opening (10-13 lines a minute in YouTube's captions)
   { id: '_zIrbXw-SVs', start: 540 },
 ].filter(v => !process.env.SCREEN_VIDEOS || process.env.SCREEN_VIDEOS.split(',').includes(v.id));
 const MODES = (process.env.SCREEN_MODES || 'subtitles,audio').split(',') as ('subtitles' | 'audio')[];
@@ -129,6 +129,7 @@ for (const mode of MODES) for (const video of VIDEOS) {
       targetLanguage: 'en',
     });
     await clearTranslationState(sw);
+    await recordCaptionsOnEveryLoad(context); // YouTube navigates again right after loading
     const dir = path.join(OUT, `${mode}-${video.id}`);
     fs.rmSync(dir, { recursive: true, force: true });
     fs.mkdirSync(dir, { recursive: true });
@@ -139,7 +140,6 @@ for (const mode of MODES) for (const video of VIDEOS) {
       const from = video.start + k * PIECE_S;
       const page = await context.newPage(); // a new tab in the same window
       await page.goto(`https://www.youtube.com/watch?v=${video.id}&t=${Math.floor(from - LEAD_IN_S)}s`);
-      await recordCaptions(page);
       await park(page, from - LEAD_IN_S);
       await startMode(page, openPopup, mode, k === 0);
       await page.evaluate(() => void (document.querySelector('video.html5-main-video') as HTMLVideoElement).play());

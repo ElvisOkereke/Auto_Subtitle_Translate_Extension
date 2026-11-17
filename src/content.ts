@@ -138,6 +138,7 @@ export class SubtitleOverlay {
     if (!this.overlay) return;
     Object.assign(this.overlay.style, POSITION_STYLES[this.position]);
     this.overlay.dataset.position = this.position;
+    this.placeOverlay();
     this.overlay.querySelectorAll('.subtitle-text').forEach(el => {
       FONT_SIZES.forEach(size => el.classList.toggle(size, size === this.fontSize));
     });
@@ -289,7 +290,37 @@ export class SubtitleOverlay {
     return { videoTime: m.currentTime, paused: m.paused, adShowing: !!m.closest('.html5-video-player')?.classList.contains('ad-showing'), rate: m.playbackRate || 1 };
   }
 
+  /**
+   * Captions sit on the video being followed (fixed coordinates from its box), so
+   * they're where the viewer looks in any layout - not at the bottom of the window,
+   * which on YouTube's default page is below the player. Inside the fullscreen
+   * element when the video is in it; without a video, the window-based style.
+   */
+  private placeOverlay(): void {
+    if (!this.overlay) return;
+    const video = this.media instanceof HTMLVideoElement ? this.media : null;
+    const r = video?.getBoundingClientRect();
+    const s = this.overlay.style;
+    if (!video || !r || r.width < 50 || r.height < 50) {
+      Object.assign(s, { left: '50%', maxWidth: '80%' }, POSITION_STYLES[this.position]);
+      return;
+    }
+    const fullscreen = document.fullscreenElement;
+    const parent = fullscreen && fullscreen.contains(video) ? fullscreen : document.body;
+    if (this.overlay.parentElement !== parent) parent.appendChild(this.overlay);
+    s.left = `${r.left + r.width / 2}px`;
+    s.maxWidth = `${r.width * 0.8}px`;
+    if (this.position === 'bottom') {
+      Object.assign(s, { top: '', bottom: `${window.innerHeight - r.bottom + r.height * 0.1}px`, transform: 'translateX(-50%)' });
+    } else if (this.position === 'top') {
+      Object.assign(s, { bottom: '', top: `${r.top + r.height * 0.08}px`, transform: 'translateX(-50%)' });
+    } else {
+      Object.assign(s, { bottom: '', top: `${r.top + r.height / 2}px`, transform: 'translate(-50%, -50%)' });
+    }
+  }
+
   private tick(): void {
+    this.placeOverlay();
     this.renderReadAhead(); // a pause freezes video time, so the read-ahead lines too
     this.reportReadAhead();
     const now = this.now();

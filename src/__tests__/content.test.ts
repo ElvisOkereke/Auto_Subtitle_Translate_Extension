@@ -168,6 +168,18 @@ describe('content script subtitle overlay', () => {
       expect(lines()).toEqual(['still captioned']);
     });
 
+    it('captions sit on the video, not at the bottom of the window (YouTube default layout)', async () => {
+      const v = media(false, 10);
+      v.getBoundingClientRect = () => ({ left: 100, top: 50, width: 800, height: 450, right: 900, bottom: 500, x: 100, y: 50 }) as DOMRect;
+      Object.defineProperty(window, 'innerHeight', { value: 1000, configurable: true });
+      await chromeMock.dispatch({ type: 'TOGGLE_SUBTITLES' });
+      await new Promise(r => setTimeout(r, 150));
+      const style = overlay()!.style;
+      expect(style.left).toBe('500px'); // the video's centre
+      expect(style.top).toBe('86px'); // the suite's setting is "top": 8% of the video's height below its top edge (50 + 36)
+      expect(style.maxWidth).toBe('640px'); // 80% of the video's width
+    });
+
     describe('read-ahead captions (shown by video time)', () => {
       const raLines = () => [...(overlay()?.querySelectorAll<HTMLElement>('.subtitle-text[data-video-start]') ?? [])].map(el => el.textContent);
       const wait = (ms: number) => new Promise(r => setTimeout(r, ms));

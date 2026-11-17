@@ -69,3 +69,13 @@ describe('screenMetrics: what a viewer saw at each moment', () => {
     expect(m.right).toBe(1);
   });
 });
+
+describe('screenMetrics: lingering', () => {
+  it('counts moments with an English subtitle on screen but no Korean subtitle (share of all moments)', () => {
+    const korean = [{ text: 'k0', from: 10, to: 12 }];
+    const overlay = [{ text: 'e0', from: 10, to: 14 }];
+    const samples = [s(10, 'k0', 'e0'), s(11, 'k0', 'e0'), s(12.5, null, 'e0'), s(13.5, null, 'e0'), s(15, null, null)];
+    const m = screenMetrics(samples, korean, overlay, [{ overlayIndex: 0, koreanIndex: 0, correct: true }]);
+    expect(m.shownWithoutSubtitle).toBeCloseTo(2 / 5);
+  });
+});

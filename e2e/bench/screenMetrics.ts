@@ -40,6 +40,8 @@ export interface ScreenMetrics {
   lagP90: number | null;
   /** Share of Korean lines that got a correct translation on screen at some point. */
   linesTranslated: number;
+  /** Share of all moments with an English subtitle on screen but no Korean one (lingering). */
+  shownWithoutSubtitle: number;
 }
 
 const GRACE_S = 0.5;
@@ -89,10 +91,14 @@ const at = (lines: Line[], t: number) => lines.findIndex(l => l.from <= t && t <
 export function screenMetrics(samples: FrameSample[], korean: Line[], overlay: Line[], alignment: Alignment[]): ScreenMetrics {
   const mapOf = new Map(alignment.map(a => [a.overlayIndex, a]));
   let scored = 0;
+  let lingering = 0;
   const counts = { right: 0, late: 0, missing: 0, wrong: 0 };
   for (const sample of samples) {
     const k = at(korean, sample.t);
-    if (k < 0) continue;
+    if (k < 0) {
+      if (sample.overlay) lingering++;
+      continue;
+    }
     scored++;
     const o = sample.overlay ? at(overlay, sample.t) : -1;
     if (o < 0) {
@@ -126,5 +132,6 @@ export function screenMetrics(samples: FrameSample[], korean: Line[], overlay: L
     lagP50: pct(0.5),
     lagP90: pct(0.9),
     linesTranslated: korean.length ? translated / korean.length : 0,
+    shownWithoutSubtitle: samples.length ? lingering / samples.length : 0,
   };
 }
