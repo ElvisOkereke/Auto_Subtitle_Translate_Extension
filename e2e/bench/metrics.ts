@@ -275,15 +275,17 @@ export function captionDelays(ref: RefLine[], shown: Caption[]): { fromSpeechEnd
 
 /**
  * Share of the reference's characters that appeared on screen near their time:
- * for each reference line, the characters it shares with captions shown from
- * 1 s before it to 8 s after it ended.
+ * for each reference line, the characters it shares with captions on screen at
+ * some point from 1 s before it to 8 s after it ended (a caption that appeared
+ * earlier and is still up counts: read-ahead lines start with their sentence,
+ * which may begin inside an earlier, longer reference cue).
  */
 export function wordsCovered(ref: RefLine[], shown: Caption[]): number {
   let total = 0;
   let covered = 0;
   for (const line of ref) {
     const near = shown
-      .filter(c => c.shownAt >= line.start - 1 && c.shownAt <= line.end + 8)
+      .filter(c => c.shownAt <= line.end + 8 && (c.hiddenAt ?? c.shownAt + 4) >= line.start - 1)
       .sort((a, b) => a.shownAt - b.shownAt)
       .map(sourceOf)
       .join('');

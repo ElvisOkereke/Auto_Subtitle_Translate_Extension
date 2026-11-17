@@ -93,3 +93,11 @@ describe('captionStartOffsets: does a caption start when its words do (read-ahea
     expect(captionStartOffsets(ref, [cap({ shownAt: 30, source: '전혀 다른 말' })]).matched).toBe(0);
   });
 });
+
+describe('wordsCovered counts captions on screen during the line, even if they appeared before it', () => {
+  it('a caption that appeared 3 s before a long reference cue and is still up when it starts counts', () => {
+    const ref: RefLine[] = [{ start: 20, end: 28, ko: '골입니다 정말 대단합니다' }];
+    expect(wordsCovered(ref, [cap({ shownAt: 17, hiddenAt: 21, source: '골입니다 정말 대단합니다' })])).toBeCloseTo(1);
+    expect(wordsCovered(ref, [cap({ shownAt: 14, hiddenAt: 17, source: '골입니다 정말 대단합니다' })])).toBe(0); // gone before the line
+  });
+});
