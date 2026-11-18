@@ -28,23 +28,35 @@ let speechModel: string | undefined;
 /** A model load that stalls (no progress, no error) is retried once, then reported. */
 const watchdog = new ModelWatchdog();
 
+function restartWorker(status: string): void {
+  worker?.terminate();
+  worker = null;
+  chrome.runtime.sendMessage({ type: 'MODEL_LOADING_PROGRESS', status }).catch(() => undefined);
+  getWorker();
+}
+
 function checkModelLoad(): void {
   const verdict = watchdog.check(Date.now());
-  if (verdict === 'retry') {
-    console.warn('Speech model load stalled; retrying with a fresh download');
+  if (verdict === 'retry-fresh') {
+    console.warn('Speech model download stalled; retrying with a fresh download');
     worker?.terminate();
     worker = null;
     // A partly downloaded or corrupted model in the cache can stall every later load.
     void caches
       .delete('transformers-cache')
       .catch(() => false)
-      .then(() => {
-        chrome.runtime.sendMessage({ type: 'MODEL_LOADING_PROGRESS', status: 'retrying' }).catch(() => undefined);
-        getWorker();
-      });
+      .then(() => restartWorker('retrying'));
+  } else if (verdict === 'retry') {
+    // Downloaded, but setting it up on the device took too long: try again, keeping the download.
+    console.warn('Speech model setup took too long; retrying');
+    restartWorker('retrying-prepare');
+  } else if (verdict === 'fallback') {
+    console.warn('Speech model did not start; using the smaller model');
+    speechModel = 'small';
+    restartWorker('fallback');
   } else if (verdict === 'fail') {
     diag.errors++;
-    diag.lastError = 'The speech model did not finish loading (no progress for 3 minutes, twice).';
+    diag.lastError = 'The speech model did not finish loading, even the smaller one.';
     chrome.runtime
       .sendMessage({
         type: 'TRANSCRIPTION_ERROR',
@@ -72,7 +84,7 @@ function restartWorkerOnCpu(): void {
 }
 
 /** Capture health, reported to the background every 2 s while capturing (tests read it). */
-const diag = { frames: 0, peakRms: 0, segments: 0, results: 0, emptyResults: 0, errors: 0, lastError: '', model: '', nonSpeech: 0, suppressed: 0, raChunks: 0, raSegments: 0, raResults: 0, raSkipped: 0 };
+const diag = { frames: 0, peakRms: 0, segments: 0, results: 0, emptyResults: 0, errors: 0, lastError: '', model: '', loadMs: 0, prepareMs: null as number | null, nonSpeech: 0, suppressed: 0, raChunks: 0, raSegments: 0, raResults: 0, raSkipped: 0 };
 let diagTimer: number | null = null;
 function reportDiag(): void {
   checkModelLoad();
@@ -126,9 +138,12 @@ function handleWorkerMessage(event: MessageEvent): void {
     readAhead.dropped(event.data.segmentId);
   } else if (type === 'progress') {
     watchdog.progress(Date.now());
+    if (event.data.status === 'preparing') watchdog.preparing(Date.now());
     if (event.data.status === 'ready') {
       watchdog.ready();
       diag.model = `${event.data.model} (${event.data.device})`;
+      diag.loadMs = Math.round(event.data.loadMs ?? 0);
+      diag.prepareMs = event.data.prepareMs == null ? null : Math.round(event.data.prepareMs);
     }
     chrome.runtime.sendMessage({
       type: 'MODEL_LOADING_PROGRESS',

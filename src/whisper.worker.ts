@@ -53,11 +53,26 @@ function loadPipeline(config: ModelConfig): Promise<any> {
   const files = new Map<string, { loaded: number; total: number }>();
   let lastReported = -1;
   const startedAt = performance.now();
+  // Files transformers.js fetches (or finds cached): once all are done, the model is set up on the device.
+  const initiated = new Set<string>();
+  const done = new Set<string>();
+  let preparingAt: number | null = null;
+  const preparing = () => {
+    if (preparingAt !== null) return;
+    preparingAt = performance.now();
+    ctx.postMessage({ type: 'progress', status: 'preparing', device: config.device });
+  };
 
   return pipeline('automatic-speech-recognition', config.model, {
     device: config.device,
     dtype: config.dtype as any,
     progress_callback: (p: any) => {
+      if (p.file && p.status === 'initiate') initiated.add(p.file);
+      if (p.file && p.status === 'done') {
+        done.add(p.file);
+        if (done.size >= initiated.size) preparing();
+        return;
+      }
       if (p.status !== 'progress' || !p.file || !p.total) return;
       files.set(p.file, { loaded: p.loaded, total: p.total });
       let loaded = 0;
@@ -71,6 +86,7 @@ function loadPipeline(config: ModelConfig): Promise<any> {
         lastReported = percent;
         ctx.postMessage({ type: 'progress', status: 'download-progress', percent });
       }
+      if (percent >= 100) preparing();
     }
   }).then((transcriber: any) => {
     let downloadBytes = 0;
@@ -81,6 +97,7 @@ function loadPipeline(config: ModelConfig): Promise<any> {
       model: config.model,
       device: config.device,
       loadMs: performance.now() - startedAt,
+      prepareMs: preparingAt === null ? null : performance.now() - preparingAt,
       downloadBytes,
       threads: env.backends.onnx.wasm!.numThreads,
       crossOriginIsolated: (self as any).crossOriginIsolated === true

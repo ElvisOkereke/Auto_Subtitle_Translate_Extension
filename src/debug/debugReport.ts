@@ -35,6 +35,8 @@ export interface DebugState {
       errors?: number;
       lastError?: string;
       model?: string;
+      loadMs?: number;
+      prepareMs?: number | null;
       suppressed?: number;
       nonSpeech?: number;
       ra?: { windows?: number; resets?: number; stale?: number; healthy?: boolean };
@@ -117,7 +119,13 @@ export function buildDebugReport(s: DebugState): DebugReport {
   if (s.audio?.active || (bg && bg.captureTabId !== null)) {
     const d = bg?.audioDiag ?? null;
     const capturingHere = !!bg && bg.captureTabId !== null && bg.captureTabId === bg.thisTabId;
-    const modelState = bg?.model ? (bg.model.status === 'download-progress' ? `downloading ${bg.model.percent ?? 0}%` : bg.model.status) : 'not loaded yet';
+    const modelState = bg?.model
+      ? bg.model.status === 'download-progress' && (bg.model.percent ?? 0) < 100
+        ? `downloading ${bg.model.percent ?? 0}%`
+        : bg.model.status === 'download-progress' || bg.model.status === 'preparing'
+          ? 'downloaded, preparing on the device'
+          : bg.model.status
+      : 'not loaded yet';
     const rows: [string, string][] = [
       ['Captions on in this tab', yes(s.audio?.active)],
       ['Capturing this tab', yes(capturingHere)],
@@ -126,6 +134,7 @@ export function buildDebugReport(s: DebugState): DebugReport {
       ['Sound level (last 2 s)', d ? (d.peakRms ?? 0).toFixed(3) : '–'],
       ['Transcriptions', d ? `${d.results ?? 0} with text, ${d.emptyResults ?? 0} empty, ${d.nonSpeech ?? 0} sound-only, ${d.errors ?? 0} errors` : '–'],
       ['Last health report', ago(s.at, d?.at)],
+      ['Model load time', d?.loadMs ? `${(d.loadMs / 1000).toFixed(0)} s${d.prepareMs != null ? ` (${(d.prepareMs / 1000).toFixed(0)} s preparing)` : ''}` : '–'],
     ];
     if (s.audio) {
       rows.push(['Path', s.audio.path === 'read-ahead' ? `read-ahead (${(s.audio.lead ?? 0).toFixed(1)} s of audio ahead)` : `${s.audio.path ?? 'live'} (captions after the speech)`]);
@@ -141,7 +150,11 @@ export function buildDebugReport(s: DebugState): DebugReport {
     if (bg?.gpu === false)
       problems.push('No WebGPU: speech recognition runs on the CPU with the small model (slower, less accurate). Turn on hardware acceleration in the browser settings and restart it.');
     rows.splice(4, 0, ['GPU (WebGPU)', bg?.gpu === null || bg?.gpu === undefined ? 'not known yet' : yes(bg.gpu)]);
-    if (bg?.model?.status === 'download-progress') problems.push(`Speech model still downloading (${bg.model.percent ?? 0}%): captions start when it is ready.`);
+    if (bg?.model?.status === 'download-progress' && (bg.model.percent ?? 0) < 100)
+      problems.push(`Speech model still downloading (${bg.model.percent ?? 0}%): captions start when it is ready.`);
+    else if (bg?.model?.status === 'preparing' || bg?.model?.status === 'download-progress')
+      problems.push('Speech model downloaded, now being prepared on your GPU: the first time takes several minutes (about 8 on an RTX 3070), later only seconds.');
+    if (bg?.model?.status === 'fallback') problems.push('The best-accuracy model did not start on this device: using the smaller model.');
     if (d?.lastError) problems.push(`Speech recognition error: ${d.lastError}`);
     if (bg?.transcripts.length) {
       sections.push({

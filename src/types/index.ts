@@ -195,7 +195,7 @@ export interface TranscriptionErrorMessage extends ExtensionMessage {
 
 export interface ModelLoadingProgressMessage extends ExtensionMessage {
   type: 'MODEL_LOADING_PROGRESS';
-  status: 'downloading' | 'download-progress' | 'cpu-fallback' | 'ready' | 'retrying';
+  status: 'downloading' | 'download-progress' | 'cpu-fallback' | 'ready' | 'retrying' | 'preparing' | 'retrying-prepare' | 'fallback';
   percent?: number;
 }
 
