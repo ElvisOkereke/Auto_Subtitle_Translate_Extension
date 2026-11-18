@@ -10,6 +10,8 @@ export interface TimelineLine {
   quality: TranslationQuality;
   /** Which path first read this line (absent in timelines saved before it was recorded). */
   origin?: 'read-ahead' | 'live';
+  /** Text height when read, fraction of the frame (absent in older timelines). */
+  height?: number;
 }
 
 const RANK: Record<TranslationQuality, number> = { none: 0, fast: 1, better: 2 };
@@ -46,12 +48,20 @@ export class Timeline {
       }
       existing.source = line.source;
       existing.end = line.end;
+      if (line.height !== undefined) existing.height = line.height;
       return existing;
     }
     const created: TimelineLine = { ...line, translation: null, quality: 'none' };
     const index = this.lines.findIndex(l => l.start > line.start);
     this.lines.splice(index === -1 ? this.lines.length : index, 0, created);
     return created;
+  }
+
+  /** Removes the lines matching `pred`; returns them. */
+  removeWhere(pred: (line: TimelineLine) => boolean): TimelineLine[] {
+    const removed = this.lines.filter(pred);
+    if (removed.length) this.lines = this.lines.filter(l => !removed.includes(l));
+    return removed;
   }
 
   setTranslation(start: number, text: string, quality: 'fast' | 'better'): void {

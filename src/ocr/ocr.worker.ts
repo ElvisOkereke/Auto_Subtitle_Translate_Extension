@@ -2,7 +2,7 @@
 // Hosted by ocr-frame.html (extension origin, so WebGPU and the extension CSP apply).
 import * as ort from 'onnxruntime-web/webgpu';
 import { ctcGreedyDecode } from './ctc';
-import { detBoxes, detInputSize, filterSubtitleBoxes, groupLines, Box } from './detect';
+import { detBoxes, detInputSize, filterSubtitleBoxes, groupLines, hasLetters, selectSubtitleBoxes, Box, CropGeometry } from './detect';
 import { modelFor } from './models';
 import { ConsecutiveFailures, PromiseCache } from './sessionCache';
 import { verifySha256 } from './integrity';
@@ -115,7 +115,21 @@ function toTensor(
   return new ort.Tensor('float32', out, [1, 3, height, width]);
 }
 
-async function recognize(bitmap: ImageBitmap, lang: SubtitleLanguage): Promise<{ text: string; confidence: number }> {
+const isRect = (r: any) =>
+  r && [r.x, r.y, r.w, r.h].every(v => typeof v === 'number' && Number.isFinite(v)) && r.x >= 0 && r.y >= 0 && r.w > 0 && r.h > 0 && r.x + r.w <= 1.000001 && r.y + r.h <= 1.000001;
+
+/** Where the crop came from, if the caller said (and it makes sense). */
+function geometryOf(g: any): CropGeometry | null {
+  if (!g || !isRect(g.region) || !isRect(g.box)) return null;
+  const textHeight = typeof g.textHeight === 'number' && g.textHeight > 0 && g.textHeight < 1 ? g.textHeight : undefined;
+  return { region: g.region, box: g.box, textHeight };
+}
+
+async function recognize(
+  bitmap: ImageBitmap,
+  lang: SubtitleLanguage,
+  geometry: CropGeometry | null
+): Promise<{ text: string; confidence: number; textHeight?: number; offSize?: boolean }> {
   const full: Box = { x1: 0, y1: 0, x2: bitmap.width, y2: bitmap.height };
   const det = await getDet(lang);
   const size = detInputSize(bitmap.width, bitmap.height);
@@ -130,7 +144,9 @@ async function recognize(bitmap: ImageBitmap, lang: SubtitleLanguage): Promise<{
     x2: b.x2 * sx,
     y2: b.y2 * sy,
   }));
-  const lines = groupLines(filterSubtitleBoxes(boxes, bitmap.height));
+  // With the crop's geometry the subtitle is found wherever the box was drawn; without it, the crop is the box.
+  const pick = geometry ? selectSubtitleBoxes(boxes, bitmap.width, bitmap.height, geometry) : { boxes: filterSubtitleBoxes(boxes, bitmap.height), height: 0, offSize: false };
+  const lines = groupLines(pick.boxes);
   if (!lines.length) return { text: '', confidence: 0 };
 
   const { session, charset } = await getRec(lang);
@@ -154,7 +170,13 @@ async function recognize(bitmap: ImageBitmap, lang: SubtitleLanguage): Promise<{
     if (parts.length) texts.push(parts.join(' '));
   }
   const text = texts.join(' ').replace(/\s+/g, ' ').trim();
-  return { text, confidence: confidences.length ? confidences.reduce((a, b) => a + b, 0) / confidences.length : 0 };
+  if (geometry && !hasLetters(text)) return { text: '', confidence: 0 }; // HUD numbers, scores, clocks
+  return {
+    text,
+    confidence: confidences.length ? confidences.reduce((a, b) => a + b, 0) / confidences.length : 0,
+    textHeight: pick.height,
+    offSize: pick.offSize,
+  };
 }
 
 let ready: Promise<void> | null = null;
@@ -185,7 +207,7 @@ async function handle(msg: any): Promise<void> {
     } else if (msg.type === 'recognize') {
       await init();
       const started = performance.now();
-      const result = await recognize(msg.bitmap, msg.lang);
+      const result = await recognize(msg.bitmap, msg.lang, geometryOf(msg.geometry));
       msg.bitmap.close();
       gpuRunFailures.success();
       ctx.postMessage({ type: 'result', id: msg.id, ...result, ms: performance.now() - started, device });

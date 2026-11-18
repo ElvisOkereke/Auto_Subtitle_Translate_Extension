@@ -1,6 +1,7 @@
 // frameSampler.ts - samples the user's box from presented video frames.
+// Crops are ocrRegion(box) (OCR reads around the box); the change signature is the box's alone.
 import { frameSignature } from './frameSignature';
-import { boxToSource } from './videoGeometry';
+import { boxInRegion, boxToSource, ocrRegion } from './videoGeometry';
 import type { NormalizedBox } from './types';
 
 export type FrameHandler = (sig: Uint8Array, videoTime: number, grab: () => Promise<ImageBitmap>) => void;
@@ -71,14 +72,16 @@ export class FrameSampler {
   private capture(videoTime: number) {
     const { videoWidth, videoHeight } = this.video;
     if (!videoWidth || !videoHeight) return null;
-    const { sx, sy, sw, sh } = boxToSource(this.box, videoWidth, videoHeight);
+    const region = ocrRegion(this.box);
+    const { sx, sy, sw, sh } = boxToSource(region, videoWidth, videoHeight);
     if (!this.canvas || this.canvas.width !== sw || this.canvas.height !== sh) {
       this.canvas = new OffscreenCanvas(sw, sh);
       this.ctx = this.canvas.getContext('2d', { willReadFrequently: true });
     }
     const ctx = this.ctx!;
     ctx.drawImage(this.video, sx, sy, sw, sh, 0, 0, sw, sh);
-    const sig = frameSignature(ctx.getImageData(0, 0, sw, sh).data, sw, sh);
+    const b = boxInRegion(this.box, region, sw, sh);
+    const sig = frameSignature(ctx.getImageData(b.x, b.y, b.w, b.h).data, b.w, b.h);
     const canvas = this.canvas;
     return { sig, videoTime, grab: () => createImageBitmap(canvas) };
   }

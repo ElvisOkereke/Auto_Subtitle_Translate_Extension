@@ -1,7 +1,7 @@
 // ocrClient.ts - content-script side of OCR. Injects the hidden extension
 // iframe that hosts the OCR worker and talks to it over a MessageChannel;
 // ImageBitmaps are transferred, not copied.
-import type { OcrResult, SubtitleLanguage } from './types';
+import type { NormalizedBox, OcrResult, SubtitleLanguage } from './types';
 import { Timeline, TimelineLine, TimelineStorage } from './timeline';
 
 const REQUEST_TIMEOUT_MS = 30_000;
@@ -60,9 +60,18 @@ export class OcrClient {
     });
   }
 
-  async recognize(crop: ImageBitmap, lang: SubtitleLanguage, tier: 'fast' | 'accurate' = 'fast'): Promise<OcrResult> {
-    const r = await this.request<{ text: string; confidence: number; ms: number; device: string }>({ type: 'recognize', bitmap: crop, lang }, [crop]);
-    return { text: r.text, confidence: r.confidence, ms: r.ms, tier, device: r.device };
+  /** `geometry`: the video region the crop shows and the box the user drew (normalized); without it the crop is the box. */
+  async recognize(
+    crop: ImageBitmap,
+    lang: SubtitleLanguage,
+    tier: 'fast' | 'accurate' = 'fast',
+    geometry?: { region: NormalizedBox; box: NormalizedBox; textHeight?: number }
+  ): Promise<OcrResult> {
+    const r = await this.request<{ text: string; confidence: number; ms: number; device: string; textHeight?: number; offSize?: boolean }>(
+      { type: 'recognize', bitmap: crop, lang, geometry },
+      [crop]
+    );
+    return { text: r.text, confidence: r.confidence, ms: r.ms, tier, device: r.device, textHeight: r.textHeight, offSize: r.offSize };
   }
 
   async preload(lang: SubtitleLanguage): Promise<void> {

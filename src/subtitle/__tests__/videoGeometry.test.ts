@@ -1,4 +1,4 @@
-import { contentRect, boxToPage, pageToBox, boxToSource , widenAround } from '../videoGeometry';
+import { contentRect, boxToPage, pageToBox, boxToSource, widenAround, ocrRegion, boxInRegion } from '../videoGeometry';
 
 describe('videoGeometry', () => {
   it('computes the letterboxed content rect (object-fit: contain)', () => {
@@ -55,5 +55,29 @@ describe('widenAround (a translation too long for a narrow box gets more room)',
   it('never narrower than the box', () => {
     const box = { x: 300, y: 500, width: 700, height: 60 };
     expect(widenAround(box, video, 400)).toEqual(box);
+  });
+});
+
+describe('ocrRegion / boxInRegion (OCR reads around the drawn box; change detection watches the box)', () => {
+  it('grows the box by 75% of its size on every side, inside the video', () => {
+    const r = ocrRegion({ x: 0.2, y: 0.75, w: 0.6, h: 0.14 });
+    expect(r.x).toBe(0);
+    expect(r.w).toBe(1);
+    expect(r.y).toBeCloseTo(0.645, 6);
+    expect(r.h).toBeCloseTo(0.35, 6);
+  });
+
+  it('a box in the middle of the video grows evenly', () => {
+    const r = ocrRegion({ x: 0.4, y: 0.4, w: 0.2, h: 0.1 });
+    expect(r.x).toBeCloseTo(0.25, 6);
+    expect(r.y).toBeCloseTo(0.325, 6);
+    expect(r.w).toBeCloseTo(0.5, 6);
+    expect(r.h).toBeCloseTo(0.25, 6);
+  });
+
+  it('locates the drawn box inside a crop of the region, in crop pixels', () => {
+    const box = { x: 0.4, y: 0.4, w: 0.2, h: 0.1 };
+    const region = ocrRegion(box);
+    expect(boxInRegion(box, region, 500, 250)).toEqual({ x: 150, y: 75, w: 200, h: 100 });
   });
 });

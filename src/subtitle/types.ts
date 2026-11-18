@@ -17,4 +17,8 @@ export interface OcrResult {
   tier: 'fast' | 'accurate';
   /** Execution provider that produced the result ('webgpu' | 'wasm'). */
   device?: string;
+  /** Height of the text found, fraction of the frame (when the crop's geometry was given). */
+  textHeight?: number;
+  /** The expected text height was given and only text of another size was found. */
+  offSize?: boolean;
 }

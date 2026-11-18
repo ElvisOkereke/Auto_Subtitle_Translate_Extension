@@ -6,7 +6,7 @@ import { CACHE, FIXTURES, ROOT } from '../helpers/paths';
 import { browserKind } from '../helpers/launch';
 import { astTest } from '../helpers/bridge';
 import { charErrorRate } from '../helpers/cer';
-import { clearTranslationState, recordOverlay, shownRecords } from '../helpers/subtitles';
+import { clearTranslationState, falseLines, recordOverlay, shownRecords } from '../helpers/subtitles';
 
 // Read-ahead: the fixture plays stretch s2 through MSE with ~30 s buffered ahead
 // (like YouTube); the extension decodes that buffer and translates subtitles
@@ -80,6 +80,7 @@ for (const container of ['mp4', 'webm'] as const) test(`subtitles are translated
     else notReady.push(`${line.start.toFixed(2)} ${line.ko} (translatedAt ${match?.translatedAt?.toFixed(2) ?? 'never'})`);
   }
   const steadyLines = lines.filter(l => l.start >= 20).length;
+  const wrongLines = falseLines(timeline, lines, 0, 180);
   const report = {
     browser: browserKind(),
     container,
@@ -94,6 +95,8 @@ for (const container of ['mp4', 'webm'] as const) test(`subtitles are translated
     liveOcrCallsSteady: end.ocrCalls - (atSteady?.ocrCalls ?? 0),
     steadyLines,
     readAheadOcrCalls: end.raOcrCalls,
+    falseLines: wrongLines,
+    liveRechecks: { atSteady: (atSteady as any)?.liveRechecks ?? null, end: (end as any).liveRechecks ?? null },
     tapStats,
   };
   console.log(JSON.stringify(report, null, 1));
@@ -103,6 +106,7 @@ for (const container of ['mp4', 'webm'] as const) test(`subtitles are translated
   expect(report.readyBeforeShownRatio).toBeGreaterThanOrEqual(0.9);
   if (!process.env.READAHEAD_OFF) expect(report.claudeReadyBeforeShownRatio).toBeGreaterThanOrEqual(0.9);
   expect(report.liveOcrCallsSteady).toBeLessThanOrEqual(Math.ceil(0.1 * steadyLines));
+  expect(wrongLines.length, `not subtitles: ${wrongLines.join(' | ')}`).toBeLessThanOrEqual(Math.ceil(0.1 * lines.length)); // game notices etc.
   if (!process.env.READAHEAD_OFF) expect(report.readAheadFrames).toBeGreaterThan(0);
 });
 

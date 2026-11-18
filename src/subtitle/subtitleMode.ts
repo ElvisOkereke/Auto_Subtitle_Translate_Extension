@@ -9,7 +9,16 @@ import { LineDisplay } from './displayPolicy';
 import { SubtitleOverlay } from './overlay';
 import { Timeline, TimelineLine, TimelineStorage } from './timeline';
 import { isSameLine } from './textSimilarity';
+import { ocrRegion } from './videoGeometry';
+import { TextSizeModel, isOffSize } from './textSize';
 import type { NormalizedBox, OcrResult, SubtitleLanguage } from './types';
+
+export interface CropGeometry {
+  region: NormalizedBox;
+  box: NormalizedBox;
+  /** This video's subtitle text height (fraction of the frame), once learned. */
+  textHeight?: number;
+}
 import type { ReadAheadSource } from './readAhead/readAheadSource';
 import type { VideoContext } from '../translation/types';
 
@@ -34,7 +43,8 @@ export interface TranslateResponse {
 }
 
 export interface SubtitleModeDeps {
-  ocr: { recognize(crop: ImageBitmap, lang: SubtitleLanguage, tier?: 'fast' | 'accurate'): Promise<OcrResult> };
+  /** `geometry`: the video region a crop shows (ocrRegion of the box) and the box itself, normalized. */
+  ocr: { recognize(crop: ImageBitmap, lang: SubtitleLanguage, tier?: 'fast' | 'accurate', geometry?: CropGeometry): Promise<OcrResult> };
   translate(req: TranslateRequest): Promise<TranslateResponse>;
   store: TimelineStorage | null;
   /** Future frames decoded from the player's buffer (null = live path only). */
@@ -52,8 +62,8 @@ export type LiveSampler = Pick<FrameSampler, 'start' | 'stop' | 'setBox' | 'samp
 export type SubtitleModeState = 'loading' | 'running' | 'paused-ad' | 'stopped';
 
 const MIN_CONFIDENCE = 0.5;
-const RECHECK_MS = 750; // re-read a displayed line if nothing triggered a read for this long
-/** Read-ahead re-reads an open line this often (video seconds): small text in a big box can change without moving the image signature. */
+const RECHECK_MS = 750; // re-read the box if nothing triggered a read for this long
+/** Read-ahead re-reads the box this often (video seconds) when no change triggered a read: small text in a big box can appear or change without moving the image signature. */
 const RA_RECHECK_S = 0.75;
 const SAVE_EVERY_MS = 10_000;
 const MAX_READ_AHEAD_QUEUE = 32;
@@ -73,6 +83,12 @@ export class SubtitleMode {
   private firstReadAt: number | null = null;
   private noTextUntil: number | null = null;
 
+  /** How tall this video's subtitles are: text of another size is game/stream UI, not a subtitle. */
+  private readonly textSize = new TextSizeModel();
+  /** Height of the text the latest accepted read found (stored on the line it creates). */
+  private lastTextHeight: number | undefined;
+  private knownTextHeight: number | null = null;
+
   /** The box being read (debug panel). */
   get currentBox(): NormalizedBox {
     return this.box;
@@ -81,6 +97,8 @@ export class SubtitleMode {
   state: SubtitleModeState = 'loading';
   /** Live-path OCR calls (read-ahead OCR is counted in raOcrCalls). */
   ocrCalls = 0;
+  /** Live reads that were periodic re-reads (no change seen), with a line on screen / with none. */
+  liveRechecks = { open: 0, empty: 0 };
   raOcrCalls = 0;
   translateCalls = 0;
   /** Lines first shown from a read-ahead entry vs a live read (which path is carrying the experience). */
@@ -209,6 +227,8 @@ export class SubtitleMode {
     this.overlay.setBox(box);
     this.sampler.setBox(box);
     this.deps.readAhead?.setBox(box);
+    this.textSize.reset();
+    this.knownTextHeight = null;
     this.tracker.reset();
     this.resetReadAhead();
   }
@@ -351,10 +371,16 @@ export class SubtitleMode {
 
   private recheck(): void {
     if (this.state === 'running' && !this.video.paused) this.tick(this.video.currentTime);
-    if (this.state !== 'running' || this.video.paused || !this.current || this.reading || this.current.end !== null) return;
+    if (this.state !== 'running' || this.video.paused || this.reading) return;
+    // A line on screen whose end is known needs no reads; with nothing on screen the box is re-read too
+    // (a subtitle can appear without moving the image signature), unless read-ahead already read this moment.
+    if (this.current ? this.current.end !== null : this.readAheadCovers(this.video.currentTime)) return;
     if (performance.now() - this.lastReadAt < RECHECK_MS) return;
     const frame = this.sampler.sampleNow();
-    if (frame) this.requestRead(frame.videoTime, frame.grab());
+    if (!frame) return;
+    if (this.current) this.liveRechecks.open++;
+    else this.liveRechecks.empty++;
+    this.requestRead(frame.videoTime, frame.grab());
   }
 
   private requestRead(t: number, crop: Promise<ImageBitmap>): void {
@@ -374,9 +400,9 @@ export class SubtitleMode {
       const crop = await cropPromise;
       this.ocrCalls++;
       this.lastReadAt = performance.now();
-      const result = await this.deps.ocr.recognize(crop, this.lang, 'fast');
+      const result = await this.deps.ocr.recognize(crop, this.lang, 'fast', this.geometry());
       if (epoch === this.epoch && this.state === 'running') {
-        const found = result.confidence >= MIN_CONFIDENCE ? result.text : '';
+        const found = this.subtitleText(result);
         if (found.trim()) this.textReads++;
         this.firstReadAt ??= t;
         this.handleText(t, found);
@@ -391,6 +417,35 @@ export class SubtitleMode {
       if (next && this.state === 'running') void this.read(next.t, next.crop);
       else void this.pumpReadAhead();
     }
+  }
+
+  /** Crops show ocrRegion(box) (the sampler and read-ahead source crop it): OCR finds the subtitle there. */
+  private geometry(): CropGeometry {
+    return { region: ocrRegion(this.box), box: this.box, textHeight: this.textSize.expected() ?? undefined };
+  }
+
+  /** The subtitle an OCR read found ('' = none): confident, and of this video's subtitle size. */
+  private subtitleText(result: OcrResult): string {
+    this.lastTextHeight = undefined;
+    if (result.confidence < MIN_CONFIDENCE || !result.text.trim()) return '';
+    if (!result.textHeight) return result.text;
+    if (!this.textSize.accept(result.text, result.textHeight)) return '';
+    this.lastTextHeight = result.textHeight;
+    const expected = this.textSize.expected();
+    if (expected !== null && expected !== this.knownTextHeight) {
+      this.knownTextHeight = expected;
+      this.dropOffSizeLines(expected);
+    }
+    return result.text;
+  }
+
+  /** Lines read ahead before the subtitle size was known that turn out to be another size (game notices): never shown. */
+  private dropOffSizeLines(expected: number): void {
+    const now = this.video.currentTime;
+    const removed = this.timeline.removeWhere(
+      l => l.start > now + 0.5 && l.height !== undefined && isOffSize(l.height, expected) && l !== this.current && l !== this.displayedLine
+    );
+    if (this.raCurrent && removed.includes(this.raCurrent)) this.raCurrent = null;
   }
 
   /** Nothing readable in the box for 20 s of playback: say so where the subtitles would be (once, for 10 s). */
@@ -448,6 +503,8 @@ export class SubtitleMode {
     this.raTo = t;
     const event = this.raTracker.push(sig, t);
     if (event) {
+      // Re-checks are only a safety net: when OCR falls behind, a subtitle change takes a queued re-check's place.
+      if (this.raGap === null && this.raQueue.length >= MAX_READ_AHEAD_QUEUE) this.dropQueuedRecheck();
       if (this.raGap !== null || this.raQueue.length >= MAX_READ_AHEAD_QUEUE) {
         // OCR can't keep up (or the page floods frames): drop this change, never an
         // older queued one, and stop trusting the timeline from here until the queue drains.
@@ -458,13 +515,22 @@ export class SubtitleMode {
       this.raQueue.push({ t: event.since, crop });
       this.raLastQueuedAt = t;
       void this.pumpReadAhead();
-    } else if (this.raCurrent?.end === null && t - this.raLastQueuedAt >= RA_RECHECK_S && this.raGap === null && this.raQueue.length < MAX_READ_AHEAD_QUEUE / 2) {
-      // No change seen, but a line is open: re-read now and then (like the live path's recheck).
+    } else if (t - this.raLastQueuedAt >= RA_RECHECK_S && this.raGap === null && this.raQueue.length < MAX_READ_AHEAD_QUEUE / 2) {
+      // No change seen: re-read now and then anyway (like the live path's recheck).
       this.raQueue.push({ t, crop, recheck: true });
       this.raLastQueuedAt = t;
       void this.pumpReadAhead();
     } else {
       crop.close();
+    }
+  }
+
+  private dropQueuedRecheck(): void {
+    for (let i = this.raQueue.length - 1; i >= 0; i--) {
+      if (!this.raQueue[i].recheck) continue;
+      this.raQueue[i].crop.close();
+      this.raQueue.splice(i, 1);
+      return;
     }
   }
 
@@ -476,9 +542,9 @@ export class SubtitleMode {
       const epoch = this.epoch;
       try {
         this.raOcrCalls++;
-        const result = await this.deps.ocr.recognize(crop, this.lang, 'accurate');
+        const result = await this.deps.ocr.recognize(crop, this.lang, 'accurate', this.geometry());
         if (epoch === this.epoch && this.state === 'running') {
-          this.handleReadAheadText(t, result.confidence >= MIN_CONFIDENCE ? result.text : '', !!recheck);
+          this.handleReadAheadText(t, this.subtitleText(result), !!recheck);
         }
       } catch (error) {
         console.warn('Read-ahead OCR failed:', error);
@@ -510,7 +576,7 @@ export class SubtitleMode {
       this.raCurrent = existing; // the live path already has this line
       return;
     }
-    const line = this.timeline.upsert({ start: t, end: null, source: text, origin: 'read-ahead' });
+    const line = this.timeline.upsert({ start: t, end: null, source: text, origin: 'read-ahead', height: this.lastTextHeight });
     this.raCurrent = line;
     void this.translate(line, 'readahead');
   }
@@ -533,7 +599,7 @@ export class SubtitleMode {
     }
 
     if (this.current && this.current.end === null) this.timeline.close(this.current.start, t);
-    const line = this.timeline.upsert({ start: t, end: null, source: text, origin: 'live' });
+    const line = this.timeline.upsert({ start: t, end: null, source: text, origin: 'live', height: this.lastTextHeight });
     this.nextLine(line, t);
     void this.translate(line, 'live');
   }

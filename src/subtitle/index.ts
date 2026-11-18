@@ -209,7 +209,7 @@ installTestBridge({
       parentIsFullscreenElement: overlay.element.parentElement === document.fullscreenElement,
     };
   },
-  ocr: async ({ bitmap, lang }) => (await getOcr()).recognize(bitmap, lang),
+  ocr: async ({ bitmap, lang, geometry }) => (await getOcr()).recognize(bitmap, lang, 'fast', geometry),
   'ocr.preload': async ({ lang }) => (await getOcr()).preload(lang),
   'timeline.save': async ({ videoId, lines }) => (await getOcr()).saveTimelineLines(videoId, lines),
   'timeline.load': async ({ videoId }) => (await getOcr()).loadTimelineLines(videoId),
@@ -235,6 +235,7 @@ installTestBridge({
     return {
     state: mode?.state ?? 'stopped',
     ocrCalls: mode?.ocrCalls ?? 0,
+    liveRechecks: mode?.liveRechecks ?? null,
     translateCalls: mode?.translateCalls ?? 0,
     raOcrCalls: mode?.raOcrCalls ?? 0,
     readAheadLead: mode?.readAheadLead ?? 0,

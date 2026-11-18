@@ -1,6 +1,7 @@
 // readAheadSource.ts - isolated-world side of read-ahead: drives the main-world
 // MSE tap (mseTap.main.ts) and turns its box crops into pipeline frames.
 import { frameSignature } from '../frameSignature';
+import { boxInRegion, ocrRegion } from '../videoGeometry';
 import type { NormalizedBox } from '../types';
 
 export type ReadAheadFrame = (crop: ImageBitmap, sig: Uint8Array, videoTime: number) => void;
@@ -79,18 +80,19 @@ export class MseReadAhead implements ReadAheadSource {
     this.onFrame = onFrame;
     this.onReset = onReset;
     window.addEventListener('message', this.onMessage);
-    this.post({ astTap: 'start', box: this.box, fps: READ_AHEAD_FPS });
+    this.post({ astTap: 'start', box: ocrRegion(this.box), fps: READ_AHEAD_FPS });
   }
 
   restart(): void {
     this.latest = -Infinity;
     this.seenSlots.clear();
-    this.post({ astTap: 'start', box: this.box, fps: READ_AHEAD_FPS });
+    this.post({ astTap: 'start', box: ocrRegion(this.box), fps: READ_AHEAD_FPS });
   }
 
+  /** The tap crops the OCR region around the box (OCR reads text the box cuts off). */
   setBox(box: NormalizedBox): void {
     this.box = box;
-    this.post({ astTap: 'box', box });
+    this.post({ astTap: 'box', box: ocrRegion(box) });
   }
 
   stop(): void {
@@ -112,7 +114,9 @@ export class MseReadAhead implements ReadAheadSource {
     if (!this.canvas || this.canvas.width !== width || this.canvas.height !== height) this.canvas = new OffscreenCanvas(width, height);
     const ctx = this.canvas.getContext('2d', { willReadFrequently: true })!;
     ctx.drawImage(bitmap, 0, 0);
-    const sig = frameSignature(ctx.getImageData(0, 0, width, height).data, width, height);
+    // Change detection watches the drawn box, not the margin around it.
+    const b = boxInRegion(this.box, ocrRegion(this.box), width, height);
+    const sig = frameSignature(ctx.getImageData(b.x, b.y, b.w, b.h).data, b.w, b.h);
     this.onFrame(bitmap, sig, t);
   }
 }

@@ -1,4 +1,4 @@
-import { detBoxes, detInputSize, filterSubtitleBoxes, groupLines, Box } from '../detect';
+import { detBoxes, detInputSize, filterSubtitleBoxes, groupLines, hasLetters, selectSubtitleBoxes, Box } from '../detect';
 
 function probMap(width: number, height: number, rects: { x1: number; y1: number; x2: number; y2: number; p: number }[]) {
   const map = new Float32Array(width * height);
@@ -66,5 +66,113 @@ describe('groupLines', () => {
     const b: Box = { x1: 10, y1: 12, x2: 150, y2: 62 };
     const c: Box = { x1: 50, y1: 80, x2: 200, y2: 130 };
     expect(groupLines([c, a, b])).toEqual([[b, a], [c]]);
+  });
+});
+
+describe('selectSubtitleBoxes (people draw loose, tight and shifted boxes)', () => {
+  // A 1920x1080 frame; the crop is the user's box plus a margin (region).
+  const FRAME = { w: 1920, h: 1080 };
+  const geo = (region: { x: number; y: number; w: number; h: number }, box = region) => ({ region, box });
+  /** A box given in frame pixels, returned in the crop's pixels. */
+  const inCrop = (region: { x: number; y: number }, x1: number, y1: number, x2: number, y2: number): Box => ({
+    x1: x1 - region.x * FRAME.w,
+    y1: y1 - region.y * FRAME.h,
+    x2: x2 - region.x * FRAME.w,
+    y2: y2 - region.y * FRAME.h,
+  });
+  const lowerHalf = { x: 0, y: 0.5, w: 1, h: 0.5 };
+  const pick = (boxes: Box[], g: ReturnType<typeof geo> & { textHeight?: number }) => selectSubtitleBoxes(boxes, g.region.w * FRAME.w, g.region.h * FRAME.h, g);
+  const select = (boxes: Box[], g: ReturnType<typeof geo>) => pick(boxes, g).boxes;
+
+  it('finds a normal-sized subtitle in a box far taller than the text (the old 35%-of-box rule dropped it)', () => {
+    const subtitle = inCrop(lowerHalf, 700, 880, 1220, 940); // 60 px = 5.6% of the frame, 11% of the box
+    expect(select([subtitle], geo(lowerHalf))).toEqual([subtitle]);
+  });
+
+  it('ignores stream chat and watermarks at the sides of the video', () => {
+    const subtitle = inCrop(lowerHalf, 700, 880, 1220, 940);
+    const chat = inCrop(lowerHalf, 20, 700, 520, 740);
+    const watermark = inCrop(lowerHalf, 1600, 1000, 1900, 1050);
+    expect(select([chat, subtitle, watermark], geo(lowerHalf))).toEqual([subtitle]);
+  });
+
+  it('prefers a long subtitle line over a big short logo behind it', () => {
+    const logo = inCrop(lowerHalf, 900, 700, 1020, 780); // taller, but short
+    const subtitle = inCrop(lowerHalf, 300, 960, 1620, 1000);
+    expect(select([logo, subtitle], geo(lowerHalf))).toEqual([subtitle]);
+  });
+
+  it('keeps both lines of a two-line subtitle, top line first', () => {
+    const top = inCrop(lowerHalf, 600, 860, 1320, 915);
+    const bottom = inCrop(lowerHalf, 650, 925, 1270, 980);
+    expect(select([bottom, top], geo(lowerHalf))).toEqual([top, bottom]);
+  });
+
+  it('drops smaller text on the same line as the subtitle (a scorebug behind it)', () => {
+    const subtitle = inCrop(lowerHalf, 700, 880, 1220, 940);
+    const score = inCrop(lowerHalf, 1240, 895, 1400, 925); // 30 px next to a 60 px subtitle
+    expect(select([subtitle, score], geo(lowerHalf))).toEqual([subtitle]);
+  });
+
+  it('text only in the margin around the box is not read (it completes cut-off text, it does not add lines)', () => {
+    const box = { x: 0.2, y: 0.75, w: 0.6, h: 0.14 };
+    const region = { x: 0, y: 0.645, w: 1, h: 0.35 };
+    const above = inCrop(region, 700, 710, 1220, 760); // a subtitle-sized caption above the user's box
+    expect(select([above], geo(region, box))).toEqual([]);
+    const cutOff = inCrop(region, 700, 790, 1220, 850); // straddles the box's top edge: kept whole
+    expect(select([cutOff], geo(region, box))).toEqual([cutOff]);
+  });
+
+  it('a box drawn too high still reads a subtitle that mostly sits below its edge', () => {
+    // Seen in the browser: box y 0.70-0.82, subtitle y 0.805-0.875 (21% of its height inside the box).
+    const box = { x: 0.2, y: 0.7, w: 0.6, h: 0.12 };
+    const region = { x: 0, y: 0.61, w: 1, h: 0.3 };
+    const subtitle = inCrop(region, 700, 869, 1220, 945);
+    expect(select([subtitle], geo(region, box))).toEqual([subtitle]);
+  });
+
+  it('reports the height of the text it found, as a fraction of the frame', () => {
+    const subtitle = inCrop(lowerHalf, 700, 880, 1220, 940);
+    const r = pick([subtitle], geo(lowerHalf));
+    expect(r.height).toBeCloseTo(60 / 1080, 6);
+    expect(r.offSize).toBe(false);
+  });
+
+  it('knowing the subtitle size, a wider game notice of another size loses to the subtitle', () => {
+    const notice = inCrop(lowerHalf, 560, 760, 1360, 796); // "skill not ready": 36 px, very wide
+    const subtitle = inCrop(lowerHalf, 800, 880, 1120, 950); // 70 px, short
+    expect(select([notice, subtitle], geo(lowerHalf))).toEqual([notice]); // without the size, the wider one wins
+    expect(pick([notice, subtitle], { ...geo(lowerHalf), textHeight: 70 / 1080 }).boxes).toEqual([subtitle]);
+  });
+
+  it('only text of another size: returned, but marked off-size (the caller decides)', () => {
+    const notice = inCrop(lowerHalf, 560, 760, 1360, 796);
+    const r = pick([notice], { ...geo(lowerHalf), textHeight: 70 / 1080 });
+    expect(r.boxes).toEqual([notice]);
+    expect(r.offSize).toBe(true);
+  });
+
+  it('nothing over the middle of the video: no subtitle', () => {
+    expect(select([inCrop(lowerHalf, 20, 900, 400, 950)], geo(lowerHalf))).toEqual([]);
+  });
+
+  it('tiny text is ignored, unless the user drew the box snugly around it', () => {
+    const small = inCrop(lowerHalf, 800, 900, 1120, 922); // 22 px = 2% of the frame
+    expect(select([small], geo(lowerHalf))).toEqual([]);
+    const snug = { x: 0.4, y: 0.82, w: 0.2, h: 0.04 };
+    const region = { x: 0.25, y: 0.79, w: 0.5, h: 0.1 };
+    const s = inCrop(region, 800, 890, 1120, 912);
+    expect(select([s], geo(region, snug))).toEqual([s]);
+  });
+});
+
+describe('hasLetters (numbers alone are HUD, scores or clocks, not subtitles)', () => {
+  it('rejects digits and punctuation only', () => {
+    expect(hasLetters('2 150 29')).toBe(false);
+    expect(hasLetters('185 /628 305 /.305')).toBe(false);
+    expect(hasLetters('43:52')).toBe(false);
+  });
+  it('accepts text in any script, also short and mixed with numbers', () => {
+    for (const t of ['아!', 'GG!', '生活', 'Да', '3번 와!']) expect(hasLetters(t)).toBe(true);
   });
 });

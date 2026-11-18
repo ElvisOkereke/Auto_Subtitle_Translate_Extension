@@ -39,6 +39,10 @@ interface Harness {
   requests: { tier: string; text: string; video: unknown; noFallback?: boolean }[];
   /** Held best-tier answers (holdBest). */
   heldBest: (() => void)[];
+  /** Crop geometry passed with each OCR request. */
+  geometries: any[];
+  /** Text size the live (fast) OCR reports with liveText. */
+  liveSize: { textHeight?: number; offSize?: boolean };
 }
 
 async function harness(
@@ -54,16 +58,20 @@ async function harness(
   player.appendChild(video);
   document.body.appendChild(player);
 
-  const h = { video, fastCalls: 0, liveText: '', held: [], sampleNow: null, saved: null, requests: [], heldBest: [] } as unknown as Harness;
+  const h = { video, fastCalls: 0, liveText: '', held: [], sampleNow: null, saved: null, requests: [], heldBest: [], geometries: [], liveSize: {} } as unknown as Harness;
   const ocr: SubtitleModeDeps['ocr'] = {
-    recognize(c, _lang, tier) {
+    recognize(c, _lang, tier, geometry) {
+      h.geometries.push(geometry);
       const result = (t: string): OcrResult => ({ text: t, confidence: t ? 1 : 0, ms: 1, tier: tier ?? 'fast' });
       if (tier !== 'accurate') {
         h.fastCalls++;
-        return Promise.resolve(result(h.liveText));
+        return Promise.resolve({ ...result(h.liveText), ...h.liveSize });
       }
       const n = (c as any).n as number;
-      const value = result(n >= 0 ? text(n) : '');
+      // Crops tagged 90+ show a game notice: half the subtitles' height.
+      const height = n >= 90 ? 0.034 : 0.068;
+      const offSize = !!geometry?.textHeight && Math.abs(height - geometry.textHeight) > 0.3 * geometry.textHeight;
+      const value = { ...result(n >= 0 ? text(n) : ''), ...(n >= 0 ? { textHeight: height, offSize } : {}) };
       if (!opts.holdAccurate) return Promise.resolve(value);
       return new Promise(resolve => h.held.push(() => resolve(value)));
     },
@@ -154,6 +162,42 @@ describe('SubtitleMode', () => {
     expect(h.fastCalls).toBeGreaterThan(before);
   });
 
+  it('when OCR falls behind, queued re-checks make way for subtitle changes (no gap, nothing re-read live)', async () => {
+    const h = (current = await harness({ holdAccurate: true }));
+    // A burst of decoded frames: 10 s with no change (re-checks queue up), then 24 subtitle changes.
+    for (let t = 100; t < 110; t += 0.125) h.raFrame(crop(-1), SIG(0), t);
+    for (let k = 0; k < 24; k++) {
+      const sig = SIG(k % 2 ? 200 : 60);
+      const t = 110 + k * 0.5;
+      h.raFrame(crop(k), sig, t);
+      h.raFrame(crop(k), sig, t + 0.125);
+    }
+    while (h.held.length) {
+      h.held.shift()!();
+      await flush(2);
+    }
+    await flush();
+    for (let k = 0; k < 24; k++) expect(h.mode.timeline.at(110.3 + k * 0.5)?.source).toBe(text(k));
+    // Read-ahead covered all of it: the live path doesn't read there.
+    const before = h.fastCalls;
+    await liveLine(h, SIG(90), 120.3, text(20));
+    expect(h.fastCalls).toBe(before);
+  });
+
+  it('a game notice read ahead before the subtitle size was known is dropped once it is (it never shows)', async () => {
+    const h = (current = await harness());
+    const frames: [number, number][] = [[95, 100], [1, 101], [2, 102.5], [3, 104], [4, 105.5]];
+    for (const [n, t0] of frames) {
+      for (let t = t0; t < t0 + 1.5; t += 0.125) {
+        h.raFrame(crop(n), SIG(40 + n * 2), t);
+        await flush(2);
+      }
+    }
+    await flush(10);
+    expect(h.mode.timeline.at(100.5)).toBeNull();
+    expect(h.mode.timeline.at(102.8)?.source).toBe(text(2));
+  });
+
   it('read-ahead re-reads an open line, so a change the image signature misses is still caught', async () => {
     const h = (current = await harness());
     // Small text in a big box: the next subtitle barely changes the box image (same signature).
@@ -165,6 +209,38 @@ describe('SubtitleMode', () => {
     await flush(10);
     expect(h.mode.timeline.at(100.5)?.source).toBe(text(1));
     expect(h.mode.timeline.at(102.6)?.source).toBe(text(2));
+  });
+
+  it('read-ahead re-reads the box with no line open, so a subtitle the image signature misses is still found', async () => {
+    const h = (current = await harness());
+    // Small text appearing in a big box: the box image (signature) never changes.
+    for (let t = 100; t < 103; t += 0.125) {
+      h.raFrame(crop(t < 101 ? -1 : 5), SIG(200), t);
+      await flush(2);
+    }
+    await flush(10);
+    const line = h.mode.timeline.at(102.5);
+    expect(line?.source).toBe(text(5));
+    expect(line!.start).toBeLessThan(101.8); // found within a re-check interval of appearing
+  });
+
+  it('OCR is told which part of the video the crop shows and where the box is', async () => {
+    const h = (current = await harness());
+    await liveLine(h, SIG(200), 10, text(1));
+    expect(h.geometries[0]).toEqual({ region: { x: 0, y: 0.645, w: 1, h: 0.35 }, box: { x: 0.2, y: 0.75, w: 0.6, h: 0.14 } });
+  });
+
+  it('once the subtitle size is learned, OCR is told it and text of another size is not a subtitle', async () => {
+    const h = (current = await harness({ readAhead: false }));
+    h.liveSize = { textHeight: 0.068, offSize: false };
+    for (let k = 0; k < 3; k++) await liveLine(h, SIG(50 + 50 * k), 10 + 2 * k, text(k));
+    await liveLine(h, SIG(250), 17, text(3)); // read with the learned size
+    expect(h.geometries[h.geometries.length - 1].textHeight).toBeCloseTo(0.068, 6);
+    // A game notice of another size, with no subtitle: not on the timeline, not on screen.
+    h.liveSize = { textHeight: 0.034, offSize: true };
+    await liveLine(h, SIG(10), 20, text(9));
+    expect(h.mode.timeline.at(20.5)?.source).not.toBe(text(9));
+    expect(h.overlayText() ?? '').not.toContain(text(9));
   });
 
   it('one blank read during a re-check does not end a line that is still there', async () => {
@@ -455,5 +531,20 @@ describe('SubtitleMode: a box with no subtitles in it says so', () => {
     await liveLine(h, SIG(10), 10, '안녕하세요');
     for (let k = 0; k < 20; k++) await liveLine(h, SIG(k % 2 ? 200 : k * 7 + 20), 12 + k * 1.5, '');
     expect(h.overlayText() ?? '').not.toMatch(/No subtitles found/);
+  });
+});
+
+describe('SubtitleMode live path with an empty box', () => {
+  afterEach(() => jest.useRealTimers());
+
+  it('re-reads the box now and then, so a subtitle the image signature misses still shows', async () => {
+    jest.useFakeTimers();
+    const h = (current = await harness({ readAhead: false }));
+    // Nothing changes in the box image (small text in a big box), and nothing is on screen.
+    h.liveText = text(7);
+    h.sampleNow = { sig: SIG(200), videoTime: 5, grab: async () => crop(-1) };
+    await jest.advanceTimersByTimeAsync(1500);
+    expect(h.fastCalls).toBeGreaterThan(0);
+    expect(h.mode.timeline.at(5.1)?.source).toBe(text(7));
   });
 });

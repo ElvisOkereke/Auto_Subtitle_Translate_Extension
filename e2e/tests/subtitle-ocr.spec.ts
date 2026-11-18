@@ -12,6 +12,9 @@ import { charErrorRate } from '../helpers/cer';
 test.use({ profileDir: path.join(CACHE, `profile-subtitles-${browserKind()}`) });
 
 interface Crop { file: string; stretch: string; ko: string | null }
+// The crops are exactly the box the tests draw (export_crops.py): the crop shows the box, nothing around it.
+const BOX = { x: 0.2, y: 0.75, w: 0.6, h: 0.14 };
+const GEOMETRY = { region: BOX, box: BOX };
 const crops: Crop[] = JSON.parse(fs.readFileSync(path.join(CACHE, 'ocr-crops/index.json'), 'utf8'));
 
 test('recognizes the Korean subtitles of stretch s1', async ({ context, fixtureURL }) => {
@@ -28,6 +31,7 @@ test('recognizes the Korean subtitles of stretch s1', async ({ context, fixtureU
     const result = await astTest<{ text: string; confidence: number; ms: number }>(page, 'ocr', {
       bitmapUrl: `${fixtureURL}/crops/${crop.file}`,
       lang: 'ko',
+      geometry: GEOMETRY,
     });
     workerMs.push(result.ms);
     if (crop.ko === null) {
@@ -68,7 +72,7 @@ test('concurrent OCR requests all succeed and keep the GPU path', async ({ conte
   const subs = crops.filter(c => c.stretch === 's1' && c.ko).slice(0, 6);
   // Live and read-ahead reads can overlap; the worker must serialize them itself.
   const results = await Promise.all(
-    subs.map(c => astTest<{ text: string; device: string }>(page, 'ocr', { bitmapUrl: `${fixtureURL}/crops/${c.file}`, lang: 'ko' }))
+    subs.map(c => astTest<{ text: string; device: string }>(page, 'ocr', { bitmapUrl: `${fixtureURL}/crops/${c.file}`, lang: 'ko', geometry: GEOMETRY }))
   );
   results.forEach((r, i) => expect(charErrorRate(subs[i].ko!, r.text).errors).toBeLessThanOrEqual(3));
   const expectedDevice = browserKind() === 'chrome' ? 'webgpu' : 'wasm';

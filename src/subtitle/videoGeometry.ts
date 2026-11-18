@@ -62,3 +62,27 @@ export function widenAround(box: Rect, video: Rect, width: number): Rect {
   const x = Math.min(Math.max(centre - w / 2, video.x), video.x + video.width - w);
   return { x, y: box.y, width: w, height: box.height };
 }
+
+/** OCR reads this much around the drawn box (fraction of its size, each side): text the box cuts off is read whole. */
+export const OCR_MARGIN = 0.75;
+
+/** The part of the video OCR reads for a drawn box: the box grown by OCR_MARGIN on every side, inside the video. */
+export function ocrRegion(box: NormalizedBox): NormalizedBox {
+  const x1 = clamp01(box.x - OCR_MARGIN * box.w);
+  const y1 = clamp01(box.y - OCR_MARGIN * box.h);
+  const x2 = clamp01(box.x + box.w + OCR_MARGIN * box.w);
+  const y2 = clamp01(box.y + box.h + OCR_MARGIN * box.h);
+  return { x: round6(x1), y: round6(y1), w: round6(x2 - x1), h: round6(y2 - y1) };
+}
+
+/** The drawn box inside a width x height crop of `region`, in integer crop pixels (at least 1x1). */
+export function boxInRegion(box: NormalizedBox, region: NormalizedBox, width: number, height: number): { x: number; y: number; w: number; h: number } {
+  const x = Math.max(0, Math.min(width - 1, Math.round(((box.x - region.x) / region.w) * width)));
+  const y = Math.max(0, Math.min(height - 1, Math.round(((box.y - region.y) / region.h) * height)));
+  return {
+    x,
+    y,
+    w: Math.max(1, Math.min(width - x, Math.round((box.w / region.w) * width))),
+    h: Math.max(1, Math.min(height - y, Math.round((box.h / region.h) * height))),
+  };
+}

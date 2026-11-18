@@ -85,6 +85,41 @@ Fixture buffers ~30 s ahead like YouTube.
 | Chromium | **29 / 29** | 27.9 s | 0 |
 | Read-ahead disabled (same test) | 0 / 29 | 0 s | 204 |
 
+### Box robustness — `e2e/bench/box_robustness.py` (offline), `e2e/tests/subtitle-readahead-boxes.spec.ts` (browser)
+
+People don't draw snug boxes. Each box shape below is drawn around the
+subtitle area a real user would aim at. The browser test plays 60–90 s of
+stretch s2; the offline sweep reads every labelled line of the 8 Subtitles-mode
+bench videos (ko, zh, pt, ru, fr) plus frames with no subtitle.
+
+| box | browser before (90 s, 17 lines) | browser after (Chrome, 60 s, 15 lines) | offline before (35% rule) | offline after |
+|---|---|---|---|---|
+| standard | 17/17 | 15/15 | 95% | 93% |
+| loose (2× tall, wider) | 0/17 | 15/15 | 13% | 92% |
+| lower half of the video | 0/17 | 14/15 | 0% | 89% |
+| full width, thin | 17/17 | 15/15 | 78% | 94% |
+| too small (cuts the text) | 17/17 | 15/15 | 61% | 91% |
+| shifted up (text below the edge) | 0/17 | 15/15 | 26% | 92% |
+| shifted down | 17/17 | 15/15 | 72% | 93% |
+| tall narrow | 0/17 | 15/15 | 2% | 91% |
+
+Lines not in the labelled timeline (game notices etc. read as subtitles): at
+most 1 per box in Chrome. The read-ahead test (stretch s2, 29 lines) went to
+29/29 translated before shown, 0 live OCR calls in steady state, 2 extra lines.
+
+What changed: OCR reads the box plus 75% of its size on every side; the
+subtitle is the widest text that reaches into the middle of the video and lies
+at least 10% inside the drawn box (stream chat, watermarks, logos and
+scorebugs sit elsewhere or are shorter); numbers alone are dropped (HUD); the
+subtitle text height is learned per video, so game notices of another size
+("스킬이 아직 준비되지 않았습니다") aren't read as subtitles; and the box is re-read
+every 0.75 s even with nothing on screen (small text in a big box barely moves
+the change signature). The size is the height shared by the most different
+texts seen, accepted or not, so HUD text read first can't lock it in (a Chrome
+run showed exactly that). Offline false positives on no-subtitle frames are
+8–18 of 72 per shape (some are unlabelled real subtitles; the offline sweep is
+per frame, without the size learning); the browser tests assert false lines ≤ 10%.
+
 ### Real YouTube — `npm run e2e:youtube`
 
 Installed Chrome, test profile, AV1 stream. YouTube stops automated playback

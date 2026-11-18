@@ -4,6 +4,23 @@ Wins worth sharing, newest first. Each has the headline, the proof (a number
 or what was shown working), and where the evidence lives. Numbers come from
 automated runs in a real browser (details: [performance.md](performance.md)).
 
+## 2026-11-18 — Subtitles mode works with the box people actually draw
+
+- Before: subtitles were only read if the box fit the text snugly. A loose box,
+  the whole lower half, a box drawn a bit too high or a tall narrow one read
+  **0 of 17** subtitles in the browser test.
+- Now all 8 box shapes read **14–15 of 15** subtitles in the browser test
+  (Chrome + GPU), and **89–94% across 8 hand-labelled videos in 5 languages**
+  offline (`e2e/bench/box_robustness.py`), against 0–26% before for most shapes.
+- How: OCR reads around the box (text the box cuts off is read whole), picks
+  the subtitle out of everything else on screen (stream chat, watermarks,
+  sponsor logos, football scorebugs, game HUD), learns each video's subtitle
+  text size so game notices ("skill not ready") aren't translated as
+  subtitles, and re-reads the box periodically so small text in a big box is
+  never missed.
+- Also: the large speech model no longer gets killed while it is being set up
+  on the GPU for the first time (7.7 min once on an RTX 3070, then 2.7 s).
+
 ## 2026-11-16 — Audio captions that land on the words
 
 - **Read-ahead for speech**: on YouTube, Audio mode now decodes the audio the

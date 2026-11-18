@@ -187,3 +187,31 @@ export async function clearTranslationState(sw: { evaluate: (fn: () => Promise<u
     (self as unknown as { __astResetTranslationState?: () => void }).__astResetTranslationState?.();
   });
 }
+
+/**
+ * Timeline lines (start in [from, to]) that are no labelled subtitle: text read from
+ * game notices, chat or logos and shown as if it were one. A line counts as a
+ * labelled one if it starts within 1 s of it and its text is at least half right.
+ */
+export function falseLines(
+  timeline: { start: number; source: string }[],
+  labelled: { start: number; end: number; ko: string }[],
+  from: number,
+  to: number
+): string[] {
+  const cer = (ref: string, hyp: string) => {
+    const a = [...ref.replace(/\s+/g, '')];
+    const b = [...hyp.replace(/\s+/g, '')];
+    let prev = Array.from({ length: b.length + 1 }, (_, j) => j);
+    for (let i = 1; i <= a.length; i++) {
+      const cur = [i];
+      for (let j = 1; j <= b.length; j++) cur.push(Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1)));
+      prev = cur;
+    }
+    return prev[b.length] / Math.max(1, a.length);
+  };
+  return timeline
+    .filter(tl => tl.start >= from && tl.start <= to)
+    .filter(tl => !labelled.some(l => tl.start >= l.start - 1 && tl.start <= l.end + 1 && cer(l.ko, tl.source) <= 0.5))
+    .map(tl => `${tl.start.toFixed(2)} ${tl.source}`);
+}
