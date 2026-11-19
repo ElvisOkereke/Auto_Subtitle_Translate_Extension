@@ -10,6 +10,7 @@ venv/
 
 # Build outputs
 dist/
+release/
 build/
 *.tsbuildinfo
 

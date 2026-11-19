@@ -97,7 +97,8 @@ export class SubtitleOverlay {
 
   private async debugState(): Promise<DebugState> {
     const background = (await chrome.runtime.sendMessage({ type: 'GET_DEBUG_STATE' }).catch(() => null)) as DebugState['background'];
-    const media = this.media ?? this.pickMedia();
+    // Muted videos count here too: Subtitles mode reads them (pickMedia only finds audible media, for Audio mode).
+    const media = this.media ?? this.pickMedia() ?? document.querySelector<HTMLMediaElement>('video');
     const subtitles = (globalThis as unknown as { __astSubtitleDebug?: () => DebugState['subtitles'] }).__astSubtitleDebug?.() ?? null;
     return {
       at: Date.now(),

@@ -40,12 +40,13 @@ Testing now also covers football, TV drama and other languages.
 
 | Feature | What the user gets |
 |---|---|
-| **Subtitles mode** | Draw a box around subtitles burned into a video, and the translation appears on top of the original line, in place. On YouTube most lines are translated *before* they appear, by reading the video the player has already buffered. |
-| **Audio mode** | Live translated captions from any tab's speech (Whisper speech recognition running locally). |
+| **Subtitles mode** | Draw a box around subtitles burned into a video, and the translation appears on top of the original line, in place. A rough box is fine. On YouTube most lines are translated *before* they appear, by reading the video the player has already buffered. |
+| **Audio mode** | Translated captions from any tab's speech (Whisper running locally). On YouTube the buffered audio is transcribed ahead, so captions land on the words. |
+| **First-run setup** | On install, a setup page asks what you watch, checks the graphics card and prepares the models ahead of use, so a mode never starts with a download or the one-time GPU setup. |
 | **Screen Translate** | Drag a box over text on any web page for a one-shot translation. |
 | **Translation engines** | Fast tier (DeepL / Google) and best tier (Claude with video context, topic summary and a learned glossary). The modes are *Fast then best*, *Fast only* and *Best only*. Users bring their own keys or an Anthropic-compatible gateway. |
 | **Subscription** | Sign in with an email code and subscribe through Stripe to use the hosted translation service with no API keys. Every request is metered against a monthly budget. |
-| **Popup UI** | A caption bar states what's happening in the tab. Main and settings views, light and dark themes, an editable per-video glossary. |
+| **Popup UI** | A caption bar states what's happening in the tab. Main and settings views, light and dark themes, an editable per-video glossary, and an on-page debug panel with a copyable report. |
 
 ## Engineering highlights (measured)
 
@@ -60,6 +61,12 @@ Testing now also covers football, TV drama and other languages.
   ahead of playback with WebCodecs. It then OCRs and translates subtitles about
   28 s before they appear: **29 of 29 lines** were ready in time, with zero OCR
   work during steady playback and zero extra network traffic.
+- **Robust to imperfect boxes:** OCR reads around the drawn box, picks the
+  subtitle out of other on-screen text (stream chat, logos, scorebugs, game
+  HUD) and learns each video's subtitle text size. All 8 box shapes tested
+  (loose, lower half, too high, tall and narrow…) read 14–15 of 15 lines in the
+  browser, where four read none before; offline across 8 labelled videos in 5
+  languages, 89–94% per shape.
 
 **Context-aware translation**
 - An engine benchmark on 36 real Korean League lines scored Claude Opus with
@@ -80,7 +87,14 @@ Testing now also covers football, TV drama and other languages.
   End of speech to translated caption takes **1.05 s**.
 - Model download was cut **from 971 MB to 209 MB**, and inference made **5×
   faster** (1.93 s to 0.38 s per clip), with no accuracy loss on the test
-  clips.
+  clips. Settings now also offers the large-v3-turbo model for accuracy.
+- **Read-ahead for speech:** on YouTube the buffered audio is decoded in the
+  page (WebCodecs, Opus and AAC), transcribed ahead with sentence timestamps
+  over a sliding window, and each caption shown 0.02–0.1 s after its words
+  start.
+- **First-time GPU setup moved out of the way:** the large model's first GPU
+  load compiles shaders for about 10 minutes (RTX 3070). The setup page does
+  it ahead of use; Audio mode then starts in **7.1 s**.
 
 **Hosted service**
 - Node 22, Hono and SQLite (`node:sqlite`), plus Stripe Checkout, the
@@ -94,7 +108,7 @@ Testing now also covers football, TV drama and other languages.
   server. Deployed with a one-command script.
 
 **Verification**
-- **371 automated tests** on main, plus 17 Playwright suites.
+- **588 unit tests and 67 browser tests** in the release gate.
 - Playwright drives a real Chromium or Chrome with the extension loaded. It
   covers captions from real tab audio, OCR on real video frames, real DeepL and
   Claude calls, and real YouTube. Claude itself scores translation quality.
@@ -125,7 +139,8 @@ YouTube / any <video> page
 - Language: TypeScript throughout.
 - Build: webpack, with a separate web-worker compiler for the ML workers.
 - Tests: Jest, plus Playwright.
-- Code size: about 8,700 lines of product TypeScript (extension and server).
+- Code size: about 12,300 lines of product TypeScript (extension and server),
+  6,400 lines of unit tests and 5,300 lines of browser tests.
 - Design documents, decision records (OCR engine choice, read-ahead source)
   and implementation plans are in `docs/superpowers/`.
 
@@ -144,9 +159,14 @@ YouTube / any <video> page
   screen went up on all three benchmark videos (Japanese commentary from about
   a third to more than half); live captions remain the fallback and follow
   pause, seek and ads
+- Subtitles mode robust to loose, misplaced and oversized boxes, with game and
+  stream UI text told apart from subtitles
+- First-run setup page (languages, graphics-card check, models prepared ahead
+  of use) and an on-page debug panel
 - Screen Translate
 - Context-aware Claude translation with glossary
 - Hosted subscription service (built and tested locally)
+- Chrome Web Store package build
 - Redesigned popup with light and dark themes
 - **Real-world benchmark:**
   - 8 YouTube videos with burned-in subtitles in 5 languages (Korean, Chinese,
@@ -161,21 +181,15 @@ YouTube / any <video> page
   - lines ready before they appear went from 0% to up to 100% on VP9;
   - small Chinese subtitles went from 28 to 43 of 47 lines on real YouTube.
 
-**Next**
-- **Remaining misses:** subtitles that fall short of the 97% coverage target on
-  the hardest videos (fast-cut compilations, a match clock inside the subtitle
-  box, two-line subtitles at 720p, stylised captions), and an open
-  investigation into occasional undisplayed lines in Fast then Best mode on
-  real YouTube.
+**Next** (detail in [launch-plan.md](launch-plan.md))
+- **Translation without keys:** Chrome's on-device translator as the default
+  fast tier, so new users get translations with no setup.
+- **Launch:** deploy the hosted service, publish on the Chrome Web Store.
+- **Automatic subtitle detection,** so no box has to be drawn.
 - **Audio accuracy:** fast, overlapping casters (Korean League casting) still
   lose about half their words; names are often misheard.
-- **Automatic subtitle detection,** so no box has to be drawn.
-- **Screen Translate as a separate tool:** its own card in the popup, a
-  right-click item and a keyboard shortcut.
-- **Deploy and publish:** deploy the hosted service and publish on the Chrome
-  Web Store.
-- **Research:** distil a cheaper open-weight translation model from Claude's
-  outputs.
+- **Screen Translate as a separate tool,** read-ahead beyond YouTube, and a
+  cheaper distilled translation model.
 
 ## Development process
 
@@ -193,6 +207,8 @@ YouTube / any <video> page
 | Topic | Document |
 |---|---|
 | Measured results, newest first | [milestones.md](milestones.md) |
+| What's left before launch, and the roadmap | [launch-plan.md](launch-plan.md) |
+| Privacy policy (draft) | [privacy.md](privacy.md) |
 | Benchmarks (speech, OCR, translation, latency) | [performance.md](performance.md) |
 | Subscription cost model and prices | [pricing.md](pricing.md) |
 | Hosted service and deployment | [../server/README.md](../server/README.md) |

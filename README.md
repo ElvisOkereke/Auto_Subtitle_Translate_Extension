@@ -1,188 +1,176 @@
 # Auto Subtitle Translator
 
-A Chrome (MV3) extension that translates what you watch, live:
+A Chrome extension that translates video as you watch it.
 
-- **Subtitles mode** — draw a box around subtitles that are *burned into* a
-  video (e.g. Korean subtitles on a League of Legends stream) and the English
-  appears on top of them, in place, as the video plays. Works on YouTube and
-  other `<video>` pages; on YouTube most lines are translated before they
-  appear (read-ahead).
-- **Audio mode** — translated captions from the tab's speech. On YouTube it
-  transcribes the audio the player has already buffered, so each caption
-  appears when its words are spoken.
-- **Screen Translate** — drag a box over text on any page for a one-shot
+![Korean subtitles burned into a League of Legends video, with the English translation shown in place over them](docs/images/subtitles-mode.webp)
+
+- **Subtitles mode:** draw a box around subtitles that are *burned into* the
+  picture (Korean on a League of Legends stream, Spanish on football, Japanese
+  on anime) and the translation appears over them, in place. A rough box is
+  fine. On YouTube most lines are translated before they appear.
+- **Audio mode:** translated captions from what people say in the tab. On
+  YouTube each caption appears as its words are spoken.
+- **Screen Translate:** drag a box over text on any page for a one-shot
   translation.
 
-Speech recognition and OCR run **locally in your browser** (no key, no server).
-Translation is **fast then best**: DeepL (or Google) puts a translation up
-immediately, then Claude replaces it with a context-aware one that knows what
-the video is about (title, channel, description) and keeps names and jargon
-consistent with a learned glossary. Either **bring your own keys** (a
-DeepL/Google key and an Anthropic API key, or any Anthropic-compatible gateway)
-or **sign in and subscribe** to use the hosted service with no keys at all.
+Speech recognition and subtitle reading run **on your computer**, in the
+browser, on the graphics card when there is one. Only text goes out, to the
+translation service you choose. Translation is **fast then best**: DeepL or
+Google puts a translation up at once, then Claude replaces it with one that
+knows what the video is about (title, channel, description) and keeps names
+consistent through a learned glossary.
+
+| Popup | First-run setup |
+|---|---|
+| <img src="docs/images/popup-light.webp" alt="The popup while translating Korean subtitles into English" width="300"> | <img src="docs/images/setup-page.webp" alt="The setup page: languages, graphics card check, download and prepare" width="480"> |
 
 ## Highlights
 
-The vision: watch anything, in any language, as if it had been subtitled for
-you. Every number below comes from an automated run in a real browser.
+Every number comes from an automated run in a real browser; details in
+[docs/performance.md](docs/performance.md).
 
-**Burned-in subtitle translation**
-- **0.20 s** from a subtitle appearing to its translation on screen, or
-  0.48 s including a real DeepL round trip.
-- On-device OCR: PaddleOCR on WebGPU via ONNX Runtime Web, at **2.3%
-  character error and 22 ms per frame**. Tesseract was benchmarked and
-  rejected at 17.4% error.
-- **Read-ahead:** the extension taps the YouTube player's Media Source stream
-  and decodes the buffered video ahead of playback with WebCodecs. **29 of 29
-  lines** were translated before they appeared, about 28 s early, with no
-  extra network traffic.
+**Burned-in subtitles**
+- **0.20 s** from a subtitle appearing to its translation on screen (0.48 s
+  including a real DeepL round trip).
+- On-device OCR (PaddleOCR on WebGPU through ONNX Runtime Web): **2.3%
+  character error, 22 ms per frame**. Tesseract was benchmarked and rejected
+  (17.4%).
+- **Read-ahead:** taps the YouTube player's Media Source stream, decodes the
+  buffered video ahead of playback with WebCodecs, and translates subtitles
+  about 28 s before they appear: **29 of 29 lines** ready in time.
+- **Works with the box people actually draw:** loose, the whole lower half,
+  too high, tall and narrow. Every shape reads 14–15 of 15 lines in the browser
+  test (four of them read none before), and 89–94% across 8 hand-labelled
+  videos in 5 languages. Stream chat, logos, scorebugs and game notices are
+  told apart from the subtitle.
 
-**Context-aware translation**
-- Claude with video context, topic summary and a learned glossary was judged
-  **0.93 vs 0.50 for DeepL** on Korean League of Legends subtitles, with names
-  and slang kept consistent.
-- In a blind comparison on real subtitles, Claude beat DeepL on Spanish
-  football, Japanese anime and a Korean drama.
+**Speech**
+- Whisper runs in the browser. On YouTube the audio the player has buffered
+  is transcribed ahead, so captions land **0.02–0.1 s** after the words start.
+- First-run setup does the one-time GPU preparation of the large speech model
+  (10 minutes once on an RTX 3070); Audio mode then starts in **7.1 s**.
 
-**On-device speech recognition**
-- Whisper runs in the browser: **1.05 s** from end of speech to translated
-  caption.
-- The model download was cut **from 971 MB to 209 MB**, and inference made
-  **5× faster**.
+**Translation**
+- Claude with video context and a glossary was judged **0.93 vs 0.50 for
+  DeepL** on Korean League subtitles, and beat DeepL in blind comparisons on
+  Spanish football, anime and a Korean drama.
+- About **$3.40 per hour of video** with Claude Opus, which sets the
+  subscription pricing ([docs/pricing.md](docs/pricing.md)).
 
-**Hosted subscription service**
-- Built with Node, Hono and SQLite: email-code auth, Stripe billing, and a
-  metered translation proxy with per-plan budgets.
-- Priced from measured cost: **~$3.40 per hour of video** with Claude Opus.
-- Docker on Google Cloud with least-privilege service accounts.
+**Hosted service** (built, not yet deployed): Node, Hono and SQLite with
+email-code sign-in, Stripe billing and a metered translation proxy, packaged
+for Docker on Google Cloud.
 
-**Verification:** 371 automated tests and 17 Playwright suites, which drive a
-real Chrome with the extension loaded. They cover real tab audio, real video
-frames, real DeepL and Claude calls, and real YouTube; Claude scores the
-translation quality.
+**Verified by machines:** 588 unit tests and 67 browser tests in one
+`npm run verify` gate. Playwright drives a real Chrome with the extension
+loaded: real tab audio, OCR on real video frames, real DeepL and Claude, real
+YouTube, and Claude grading the translations.
 
-**Stack:** TypeScript, Chrome MV3 (service worker, offscreen document,
-content scripts), WebGPU, WebCodecs and Media Source Extensions, ONNX Runtime
-Web, transformers.js, the Claude API, DeepL, Node, Hono, SQLite, Stripe,
-Docker, GCP, Playwright and Jest.
+**Stack:** TypeScript, Chrome MV3 (service worker, offscreen document, content
+scripts), WebGPU, WebCodecs, Media Source Extensions, ONNX Runtime Web,
+transformers.js, the Claude API, DeepL, Node, Hono, SQLite, Stripe, Docker,
+Google Cloud, Playwright and Jest.
 
-## Status and roadmap
+## Status
 
-- **Done:**
-  - Subtitles mode with read-ahead
-  - Audio mode
-  - Screen Translate
-  - Context-aware Claude translation with glossary
-  - Hosted subscription service
-  - Redesigned light and dark UI
-  - Real-world YouTube benchmark: 8 subtitle videos in 5 languages and 3
-    audio videos (Korean, Spanish, Japanese). It drove a minimum reading
-    time, read-ahead for YouTube's VP9 format, and audio captions that follow
-    the video.
-  - Audio read-ahead on YouTube: captions timed to the words (0.02–0.1 s in
-    tests), more of what is said on screen.
-- **Next:**
-  - automatic subtitle detection;
-  - deploying the service and publishing on the Chrome Web Store.
-
-More detail: [project overview](docs/project-overview.md) (vision,
-architecture, full status) and [milestones](docs/milestones.md) (measured
-wins, newest first).
+Subtitles mode, Audio mode, Screen Translate, context-aware translation, the
+first-run setup, a debug panel and the hosted service are built and verified.
+What stands between this and the Chrome Web Store, and what comes after, is
+in the [launch plan](docs/launch-plan.md). Measured wins, newest first:
+[docs/milestones.md](docs/milestones.md). The whole project on one page:
+[docs/project-overview.md](docs/project-overview.md).
 
 ## Install (developer build)
 
 ```bash
 npm install
-npm run build          # dev build into dist/   (npm run build:prod for minified)
+npm run build          # development build into dist/
 ```
 
-Chrome → `chrome://extensions` → enable Developer mode → **Load unpacked** →
-select `dist/`. Open the popup, click the gear (**Settings**) and paste a DeepL
-(free keys end in `:fx`) or Google Translate API key, and for context-aware
-translation an Anthropic API key (or choose **Anthropic-compatible gateway** and
-enter its URL and token). Keys are stored only in this browser's local extension
-storage.
+Chrome → `chrome://extensions` → Developer mode → **Load unpacked** → `dist/`.
+On first install a setup page opens: pick your languages and click
+**Download and prepare** (it can be reopened from Settings → Troubleshooting →
+Setup and tips). Then open the popup's Settings and add a DeepL (free keys end
+in `:fx`) or Google Translate key, and an Anthropic key (or an
+Anthropic-compatible gateway) for context-aware translation. Keys stay in this
+browser's local extension storage.
+
+`npm run package` builds the Chrome Web Store zip into `release/` (production
+build without the test-only page matches).
 
 ## Use
 
-The popup opens on what you do every time: the **caption bar** at the top says
-what's happening in this tab ("Translating Korean subtitles into English"),
-then the two modes, the **Translate into** language and **Screen Translate**.
-Setup (keys or subscription, engine, glossary, caption style, theme) lives
-behind the gear; the **Engine** and **Account** rows on the main view show the
-current choice and open the right settings. **Appearance** switches between
-light, dark and *Match system*; the Screen Translate panel on web pages follows
-it too.
+The popup's **caption bar** says what is happening in the tab ("Translating
+Korean subtitles into English"); below it are the two modes, **Translate
+into** and **Screen Translate**. Keys, subscription, engine, glossary, caption
+style and theme live behind the gear.
 
-**Subtitles mode** — on the video page open the popup → **Subtitles** →
-pick the subtitle language → **Draw subtitle box** → drag a box around where
-the subtitles appear. The box is remembered per video (**Use saved box**
-next time). The English sits on a see-through tint over the original line and
-updates as the subtitles change; nothing is shown when there's no subtitle.
-Each line stays up long enough to read: at least 1.5 s (longer for long lines,
-about 15 characters a second, up to 6 s) even when the original flashes by. A
-new subtitle replaces it at once, and pausing the video freezes it. On YouTube
-both video formats it serves (AV1/MP4 and VP9/WebM) are read ahead.
+**Subtitles mode:** on the video page open the popup → **Subtitles** → the
+subtitle language → **Draw subtitle box** → drag a box over where the
+subtitles appear. The box is remembered per video (**Use saved box** next
+time). Each line stays up long enough to read (at least 1.5 s, longer for long
+lines), a new subtitle replaces it at once, and pausing freezes it.
 
-**Audio mode** — popup → **Audio** → **Start live captions**. The first run
-downloads the speech model (~209 MB on GPUs with WebGPU, 80 MB otherwise).
-On YouTube, captions are made ahead from the buffered audio and appear when
-their words are spoken; pausing freezes them and seeking back shows them
-again. Elsewhere (or if read-ahead can't run) live captions take over and
-follow the video:
+**Audio mode:** popup → **Audio** → **Start live captions**. Settings offers
+the best-accuracy speech model (1.6 GB, needs a graphics card) or a smaller one
+(590 MB); without a usable graphics card an 80 MB model runs on the processor.
+On YouTube captions are made ahead from the buffered audio; elsewhere live
+captions follow the video (nothing new while paused or during an ad, a seek
+clears the screen).
 
-- nothing new appears while it's paused or during an ad;
-- a seek clears the screen;
-- a caption whose speech is more than 5 s behind is skipped;
-- each line stays at least its reading time, and the newest holds until the
-  next one (up to 7 s).
+**Translation engine** (Settings): *Fast then best*, *Fast only* or *Best
+only*, and the Claude model. **Glossary for this video** lists the names and
+terms Claude fixed (뽀삐 → Poppy); correct one and the lines using it are
+re-translated.
 
-Only one mode runs at a time. Caption position and size (Settings → Live
-captions) apply to audio captions.
+**Debug panel** (Settings → Troubleshooting): shows on the page what the
+extension is doing (capture, speech model, read-ahead, translations, errors),
+with a Copy report button. Keys are shown only as set or not set.
 
-**Translation engine** (Settings): *Fast then best* (default with Claude access),
-*Fast only*, or *Best only*; Claude model Opus 5.5 (default), Sonnet 5.5 or
-Haiku 5.5. **Glossary for this video** lists the names and terms Claude fixed
-(e.g. 뽀삐 → Poppy); correct or delete an entry and the lines using it are
-re-translated. Terms are shared with other videos of the same topic once two
-different channels agree (or immediately when you correct them).
+## Privacy
+
+Video frames and audio never leave your computer. Recognised text goes only to
+the translation service you picked (with Claude, also the video's title,
+channel and description). No analytics or tracking. The hosted service stores
+an account's email, plan and usage totals, never the text it translates.
+Details: [docs/privacy.md](docs/privacy.md) (draft).
 
 ## How it works
 
 | Piece | Where |
 |---|---|
-| Subtitle mode controller: frame sampling → change detection → OCR → translation → per-video timeline → overlay | `src/subtitle/` |
-| Read-ahead (YouTube): taps the player's MSE stream (main world), decodes buffered video ahead of playback with WebCodecs, so most subtitles are translated before they appear | `src/subtitle/readAhead/` |
-| OCR: PaddleOCR PP-OCRv5 (ONNX Runtime Web, WebGPU → wasm fallback) in a worker inside a hidden extension iframe; saved timelines live in that extension-origin iframe | `src/ocr/` |
-| Live captions: tab capture → offscreen VAD → Whisper (transformers.js) worker | `src/offscreen.ts`, `src/whisper.worker.ts` |
-| Translation engine layer: fast tier (DeepL / Google) and best tier (Claude with video context, topic summary, glossary, batching), browser-independent engines | `src/translation/`, `src/background.ts` |
-| Hosted service for subscribers: email-code accounts, Stripe billing, translation proxy with per-plan budgets (Docker on a Compute Engine VM) | `server/` — see [server/README.md](server/README.md), pricing in [docs/pricing.md](docs/pricing.md) |
-| Popup | `popup.html`, `src/popup.ts` |
+| Subtitles mode: frame sampling → change detection → OCR → translation → per-video timeline → overlay | `src/subtitle/` |
+| Read-ahead (YouTube): taps the player's MSE stream in the page, decodes buffered video and audio ahead of playback with WebCodecs | `src/subtitle/readAhead/` |
+| OCR: PaddleOCR PP-OCRv5 (ONNX Runtime Web, WebGPU with wasm fallback) in a worker inside a hidden extension iframe; picks the subtitle out of other on-screen text and learns each video's subtitle size | `src/ocr/`, `src/subtitle/textSize.ts` |
+| Speech: tab capture → voice activity detection → Whisper (transformers.js) worker in an offscreen document; read-ahead windows with sentence timestamps | `src/offscreen.ts`, `src/whisper.worker.ts`, `src/audio/` |
+| First-run setup: languages, graphics card check, prepares the models through the same workers ahead of use | `welcome.html`, `src/welcome.ts`, `src/setup/` |
+| Translation: fast tier (DeepL / Google) and best tier (Claude with video context, topic summary, glossary, batching) | `src/translation/`, `src/background.ts` |
+| Hosted service: email-code accounts, Stripe billing, metered translation proxy | `server/` ([server/README.md](server/README.md)) |
+| Popup and debug panel | `popup.html`, `src/popup.ts`, `src/debug/` |
 
-Design docs and decision records: `docs/superpowers/`. Benchmarks:
-[docs/performance.md](docs/performance.md).
+Design documents and decision records: `docs/superpowers/`.
 
 ## Testing
 
-Everything is verified automatically — Playwright drives a real browser with
-the extension loaded (Chromium by default, installed Chrome with
-`E2E_BROWSER=chrome` for real WebGPU).
+Playwright drives a real browser with the extension loaded (Chromium by
+default; installed Chrome with `E2E_BROWSER=chrome` for real WebGPU).
 
 ```bash
-npm run fixtures:video   # once: downloads the test video + cuts fixtures (Python venv in e2e/.cache)
-npm run verify           # types + lint + unit + e2e (ui, captions, subtitles) + live DeepL
+npm run fixtures:video   # once: downloads the test videos (Python venv in e2e/.cache)
+npm run verify           # types + lint + unit + browser tests + live DeepL
 ```
 
 | Command | What |
 |---|---|
-| `npm test` | Jest unit tests (extension + server) |
-| `npm run server:test` / `npm run server:dev` | Hosted service tests / local server (login codes at `/dev/outbox`) |
-| `npm run test:e2e` | Browser tests: popup, Screen Translate, live captions, subtitle mode (OCR, overlay, live path, read-ahead) |
-| `npm run test:live` | Real DeepL (`DEEPL_API_KEY` in `.env`) and real Claude through a local relay (`ANTHROPIC_AUTH_TOKEN`/`ANTHROPIC_BASE_URL` or `ANTHROPIC_API_KEY` in the environment; `CLAUDE_MODEL` to pick the model) |
-| `npm run e2e:youtube` | Subtitle mode on real YouTube (installed Chrome, opt-in) |
-| `npm run e2e:judge` | Claude scores displayed translations, and the cross-domain benchmark (football/anime/drama) — opt-in, Anthropic credentials |
-| `npm run perf:stt` | Speech-model benchmark |
+| `npm test` | Jest unit tests (extension and server) |
+| `npm run test:e2e` | Browser tests: popup, setup page, Screen Translate, captions, Subtitles mode (OCR, live path, read-ahead, 8 box shapes) |
+| `npm run test:live` | Real DeepL (`DEEPL_API_KEY` in `.env`) and real Claude through a relay |
+| `npm run e2e:youtube` | Subtitles mode on real YouTube (installed Chrome, opt-in) |
+| `npm run e2e:judge` | Claude scores the displayed translations (opt-in) |
+| `npx playwright test --project=perf perf-setup-gpu` | First-time GPU setup on the setup page vs Audio mode start (installed Chrome, `E2E_CLEAR_GPU_CACHE=1`) |
+| `npx playwright test --project=docs` | Regenerates the screenshots in `docs/images/` (real DeepL) |
+| `npm run perf:stt` | Speech model benchmark |
 
-Test pages, audio and the frame-labelled subtitle timeline are in
-`e2e/fixtures/`; reports land in `e2e/.perf/`. See `CLAUDE.md` for harness
-details and gotchas.
+Test pages, audio and frame-labelled subtitle timelines are in
+`e2e/fixtures/`; reports land in `e2e/.perf/`. Harness details and gotchas:
+`CLAUDE.md`.

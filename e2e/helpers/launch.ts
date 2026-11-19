@@ -99,6 +99,8 @@ export async function launchExtensionBrowser(o: LaunchOptions): Promise<Launched
       channel: 'chromium',
       headless: o.headless ?? true,
       viewport: { width: 1280, height: 800 },
+      // E2E_DPR=2: sharper screenshots (docs project).
+      deviceScaleFactor: Number(process.env.E2E_DPR ?? 1),
       // Playwright mutes headless browsers by default; a muted tab captures as silence.
       ignoreDefaultArgs: ['--mute-audio'],
       args: [`--disable-extensions-except=${DIST}`, `--load-extension=${DIST}`, ...baseArgs(o)],
