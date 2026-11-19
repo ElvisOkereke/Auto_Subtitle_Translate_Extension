@@ -18,5 +18,6 @@ describe('server lifecycle', () => {
     const reopened = new Repo(dbPath);
     expect(reopened.latestCode('a@example.com')).not.toBeNull();
     reopened.close();
+    fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   });
 });

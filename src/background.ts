@@ -11,6 +11,7 @@ import { ClaudeEngine } from './translation/engines/claude';
 import { DeepLEngine } from './translation/engines/deepl';
 import { videoIdFrom } from './subtitle/videoId';
 import { GoogleEngine } from './translation/engines/google';
+import { SETUP_KEY, markSpeechReady, type SetupState } from './setup/readiness';
 
 // Fast (DeepL/Google) and best (Claude with video context + glossary) tiers;
 // at most 4 requests in flight, lines on screen now first.
@@ -120,6 +121,10 @@ class SubtitleService {
       if (changeInfo.status === 'loading') this.stopIfActive(tabId);
     });
     chrome.tabs.onRemoved.addListener(tabId => this.stopIfActive(tabId));
+    // First install: the setup page, so models are ready before the first video (not downloaded when a mode starts).
+    chrome.runtime.onInstalled.addListener(details => {
+      if (details.reason === 'install') void chrome.tabs.create({ url: chrome.runtime.getURL('welcome.html') });
+    });
   }
 
   private async initializeSettings(): Promise<void> {
@@ -220,6 +225,11 @@ class SubtitleService {
           lastModelProgress = { status: message.status, percent: message.percent };
           if (message.status === 'cpu-fallback') gpuAvailable = false;
           else if (message.status === 'ready' && gpuAvailable === null) gpuAvailable = true;
+          if (message.status === 'ready' && message.model && message.device) {
+            // Loaded once (even without the setup page): later starts take seconds; the popup stops suggesting setup.
+            const stored = ((await chrome.storage.local.get(SETUP_KEY))[SETUP_KEY] as SetupState) ?? {};
+            await chrome.storage.local.set({ [SETUP_KEY]: markSpeechReady(stored, { model: message.model, device: message.device }, Date.now()) });
+          }
           await this.handleModelLoadingProgress(message.status, message.percent);
           return { success: true };
 

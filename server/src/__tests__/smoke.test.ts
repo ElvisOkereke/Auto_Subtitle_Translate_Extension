@@ -34,7 +34,10 @@ describe('built server', () => {
       }
       expect(body).toEqual({ ok: true });
     } finally {
+      const exited = new Promise(resolve => child.once('exit', resolve));
       child.kill();
+      await exited;
+      fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
     }
   }, 20_000);
 });

@@ -21,6 +21,14 @@ TTS clips of 6.9 s and 13 s; "per clip" = median inference once warm.
 The TTS clips are too clean to separate models on accuracy; speed and size are solid.
 Whisper always encodes a padded 30 s window, so per-caption cost is roughly fixed.
 
+### First-time GPU setup — `E2E_BROWSER=chrome E2E_CLEAR_GPU_CACHE=1 npx playwright test --project=perf perf-setup-gpu`
+
+The large speech model's first load on a GPU compiles its shaders: minutes once,
+seconds afterwards (Chrome caches them per extension). The setup page
+(`welcome.html`) does it ahead of use. RTX 3070, shader cache wiped, model
+already downloaded: setup page **602 s** (load + one warm-up transcription);
+Audio mode started afterwards: turbo on WebGPU loaded in **7.1 s**.
+
 ### End to end — `npm run test:e2e` (captions project)
 
 End of speech → caption on screen, mock translation: **1.05 s** in Chrome

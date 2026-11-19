@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="light dark">
+    <title>Set up Subtitle Translator</title>
+    <link rel="stylesheet" href="welcome.css">
+</head>
+<body>
+<main class="page">
+    <header class="app-header">
+        <svg class="mark" viewBox="0 0 28 20" aria-hidden="true">
+            <rect x="0.5" y="0.5" width="27" height="19" rx="4" class="mark-frame"/>
+            <rect x="5" y="11" width="18" height="4" rx="1.5" class="mark-line"/>
+        </svg>
+        <span class="brand">Subtitle Translator</span>
+    </header>
+
+    <div class="hero" aria-hidden="true">
+        <p class="hero-caption">Your subtitles, in your language.</p>
+    </div>
+
+    <h1>Let's get this computer ready</h1>
+    <p class="lede">A few minutes now, so captions start the moment you want them. Speech recognition and subtitle reading run on this computer.</p>
+
+    <ol class="steps">
+        <li class="step">
+            <h2>What do you watch?</h2>
+            <div class="fields">
+                <label class="field">
+                    <span>Subtitles shown in videos are in</span>
+                    <select id="subtitleLanguage">
+                        <option value="ko">Korean</option>
+                        <option value="ja">Japanese</option>
+                        <option value="zh-Hans">Chinese (Simplified)</option>
+                        <option value="zh-Hant">Chinese (Traditional)</option>
+                        <option value="es">Spanish</option>
+                        <option value="fr">French</option>
+                        <option value="de">German</option>
+                        <option value="pt">Portuguese</option>
+                        <option value="ru">Russian</option>
+                    </select>
+                </label>
+                <label class="field">
+                    <span>People in videos speak</span>
+                    <select id="sourceLanguage">
+                        <option value="auto">Detect automatically</option>
+                        <option value="en">English</option>
+                        <option value="es">Spanish</option>
+                        <option value="fr">French</option>
+                        <option value="de">German</option>
+                        <option value="it">Italian</option>
+                        <option value="pt">Portuguese</option>
+                        <option value="ja">Japanese</option>
+                        <option value="ko">Korean</option>
+                        <option value="zh">Chinese</option>
+                        <option value="ar">Arabic</option>
+                        <option value="hi">Hindi</option>
+                        <option value="ru">Russian</option>
+                    </select>
+                </label>
+                <label class="field">
+                    <span>Translate into</span>
+                    <select id="targetLanguage">
+                        <option value="en">English</option>
+                        <option value="es">Spanish</option>
+                        <option value="fr">French</option>
+                        <option value="de">German</option>
+                        <option value="it">Italian</option>
+                        <option value="pt">Portuguese</option>
+                        <option value="ja">Japanese</option>
+                        <option value="ko">Korean</option>
+                        <option value="zh">Chinese</option>
+                        <option value="ar">Arabic</option>
+                        <option value="hi">Hindi</option>
+                        <option value="ru">Russian</option>
+                    </select>
+                </label>
+            </div>
+        </li>
+
+        <li class="step">
+            <h2>Download and prepare</h2>
+            <p id="gpuStatus" class="gpu-status">Checking your graphics card…</p>
+            <div id="gpuHelp" class="callout hidden">
+                <p><strong>Turn on hardware acceleration for faster, more accurate captions.</strong></p>
+                <ol>
+                    <li>Open the browser's settings, then <em>System</em>.</li>
+                    <li>Turn on <em>Use graphics acceleration when available</em>.</li>
+                    <li>Relaunch the browser and open this page again from the extension's Settings.</li>
+                </ol>
+                <button id="openBrowserSettings" class="button" type="button">Open browser settings</button>
+            </div>
+
+            <fieldset id="speechChoice" class="choice hidden">
+                <legend>Speech model for Audio mode</legend>
+                <label class="choice-option">
+                    <input type="radio" name="speechModel" value="turbo">
+                    <span><strong>Best accuracy</strong> <span class="muted">1.6 GB</span></span>
+                </label>
+                <label class="choice-option">
+                    <input type="radio" name="speechModel" value="small">
+                    <span><strong>Smaller download</strong> <span class="muted">590 MB</span></span>
+                </label>
+            </fieldset>
+
+            <ul class="tasks">
+                <li class="task" id="taskSpeech">
+                    <div class="task-head">
+                        <span class="task-name">Speech recognition <span class="task-for">for Audio mode</span></span>
+                        <span class="task-state" id="speechState">Not prepared</span>
+                    </div>
+                    <div class="bar" id="speechBarTrack"><div class="bar-fill" id="speechBar"></div></div>
+                    <p class="task-note" id="speechNote"></p>
+                </li>
+                <li class="task" id="taskOcr">
+                    <div class="task-head">
+                        <span class="task-name">Subtitle reader <span class="task-for">for Subtitles mode</span></span>
+                        <span class="task-state" id="ocrState">Not prepared</span>
+                    </div>
+                    <div class="bar" id="ocrBarTrack"><div class="bar-fill" id="ocrBar"></div></div>
+                    <p class="task-note" id="ocrNote"></p>
+                </li>
+            </ul>
+
+            <div class="prepare-row">
+                <button id="prepare" class="button primary" type="button">Download and prepare</button>
+                <p id="keepOpen" class="keep-open hidden">Keep this tab open until both are ready. You can keep browsing in other tabs.</p>
+            </div>
+            <p id="allSet" class="all-set hidden" role="status">All set. Captions will start in seconds.</p>
+        </li>
+
+        <li class="step">
+            <h2>Use it on any video</h2>
+            <div class="howto">
+                <section>
+                    <h3>Subtitles in the video</h3>
+                    <ol>
+                        <li>Open a video and click the extension's icon. Pin it from the puzzle-piece menu to keep it handy.</li>
+                        <li>Choose <strong>Subtitles</strong>, then <strong>Draw subtitle box</strong>.</li>
+                        <li>Drag a box over where the subtitles appear. A rough box is fine.</li>
+                    </ol>
+                </section>
+                <section>
+                    <h3>Speech in the video</h3>
+                    <ol>
+                        <li>Open a video and click the extension's icon.</li>
+                        <li>Choose <strong>Audio</strong>, then <strong>Start live captions</strong>.</li>
+                        <li>Captions appear on the video as people speak.</li>
+                    </ol>
+                </section>
+            </div>
+            <p class="muted">How translations are made, and with which service, is in the extension's Settings.</p>
+        </li>
+    </ol>
+</main>
+<script src="welcome.js"></script>
+</body>
+</html>

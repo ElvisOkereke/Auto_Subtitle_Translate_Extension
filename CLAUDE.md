@@ -44,6 +44,13 @@ Look at screenshots the E2E tests write (`test.info().outputPath(...)`) when cha
 - Video fixtures: `npm run fixtures:video` (yt-dlp + ffmpeg in `e2e/.cache/venv`);
   ground truth in `e2e/fixtures/subtitles/_zIrbXw-SVs.timeline.json`.
 - `E2E_PRINT_LOGS=1` prints page/console logs for failing tests; `HEADED=1` shows the browser.
+- Install opens `welcome.html` (first-run setup); the `context` fixture closes it
+  unless a test sets `keepWelcome: true`. `E2E_CLEAR_GPU_CACHE=1` wipes Chrome's
+  shader caches (true first-time GPU setup, models stay cached): used by
+  `perf-setup-gpu.spec.ts`.
+- Global setup deletes our temp folders (`ast-e2e-*`, Playwright traces, server
+  test DBs) older than 2 h: killed runs leaked 8 GB onto C: before. Tests that
+  create temp folders must delete them.
 - Audio fixtures come from Windows TTS: `npm run audio:fixtures`.
 - `npm run build` wipes and rebuilds `dist/` — don't rebuild while a Playwright run is using it.
 - Playwright wipes `e2e/.results/` at the start of every run; keep anything durable elsewhere.

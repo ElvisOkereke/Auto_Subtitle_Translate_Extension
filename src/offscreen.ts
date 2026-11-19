@@ -148,7 +148,8 @@ function handleWorkerMessage(event: MessageEvent): void {
     chrome.runtime.sendMessage({
       type: 'MODEL_LOADING_PROGRESS',
       status: event.data.status,
-      percent: event.data.percent
+      percent: event.data.percent,
+      ...(event.data.status === 'ready' ? { model: event.data.model, device: event.data.device } : {})
     });
   } else if (type === 'error') {
     readAhead.error(event.data.loadFailedOn ? undefined : event.data.segmentId);

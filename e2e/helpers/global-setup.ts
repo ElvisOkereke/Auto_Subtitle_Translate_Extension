@@ -23,10 +23,34 @@ function bumpDistVersion(): void {
   fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2));
 }
 
+/**
+ * Temp folders tests create (browser profiles, Playwright traces, server test
+ * databases) are removed when a test ends, but not when a run is killed. They
+ * add up to gigabytes on the system drive: remove ours that are over 2 hours old
+ * (younger ones may belong to a run in progress).
+ */
+const TEMP_PREFIXES = ['ast-e2e-', 'ast-id-', 'ast-proxy-', 'ast-life-', 'playwright-artifacts-', 'playwright-tracing-'];
+export function sweepStaleTemp(dir = os.tmpdir(), maxAgeMs = 2 * 3600_000, now = Date.now()): number {
+  let removed = 0;
+  for (const name of fs.readdirSync(dir)) {
+    if (!TEMP_PREFIXES.some(p => name.startsWith(p))) continue;
+    const full = path.join(dir, name);
+    try {
+      if (now - fs.statSync(full).mtimeMs < maxAgeMs) continue;
+      fs.rmSync(full, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+      removed++;
+    } catch {
+      // in use or already gone
+    }
+  }
+  return removed;
+}
+
 // Unpacked extension IDs are derived from the load path, so we launch once to
 // learn the ID. Tests need it up front for --allowlisted-extension-id, which
 // lets chrome.tabCapture work without a real toolbar click.
 export default async function globalSetup() {
+  sweepStaleTemp();
   if (DIST_SOURCE) {
     if (!fs.existsSync(path.join(DIST_SOURCE, 'manifest.json'))) throw new Error(`E2E_DIST has no manifest.json: ${DIST_SOURCE}`);
     fs.rmSync(DIST, { recursive: true, force: true });

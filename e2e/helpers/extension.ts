@@ -40,11 +40,24 @@ export interface ExtensionOptions {
    * other pages are closed after each test.
    */
   reuseBrowser: boolean;
+  /** Keep the setup page the extension opens on install (closed by default: tests start from a clean set of tabs). */
+  keepWelcome: boolean;
 }
 
 /** Pages that should stay open between tests when the browser is reused. */
 const keptPages = new WeakSet<Page>();
 export const keepPage = (page: Page) => keptPages.add(page);
+
+/** Closes the setup tab the extension opens on first install (now, or when it appears). */
+function closeWelcomeTabs(context: BrowserContext): void {
+  const isWelcome = (url: string) => /\/welcome\.html/.test(url);
+  const check = (page: Page) => {
+    if (isWelcome(page.url())) void page.close().catch(() => undefined);
+    else void page.waitForURL(u => isWelcome(u.href), { timeout: 10_000 }).then(() => page.close(), () => undefined).catch(() => undefined);
+  };
+  context.pages().forEach(check);
+  context.on('page', check);
+}
 
 const SKIP_ON_COPY = new Set(['SingletonLock', 'SingletonCookie', 'SingletonSocket', 'DevToolsActivePort', 'lockfile', 'LOCK']);
 
@@ -100,6 +113,7 @@ export const test = base.extend<ExtensionFixtures & ExtensionOptions, { server: 
   extraArgs: [[], { option: true }],
   headed: [false, { option: true }],
   reuseBrowser: [false, { option: true }],
+  keepWelcome: [false, { option: true }],
 
   // Browsers kept for the whole worker (reuseBrowser), closed when the worker ends.
   browserPool: [
@@ -130,7 +144,7 @@ export const test = base.extend<ExtensionFixtures & ExtensionOptions, { server: 
     await use(id);
   },
 
-  context: async ({ extensionId, profileDir, extraArgs, headed, reuseBrowser, browserPool }, use, testInfo) => {
+  context: async ({ extensionId, profileDir, extraArgs, headed, reuseBrowser, browserPool, keepWelcome }, use, testInfo) => {
     const persistent = profileDir ? profileForWorker(profileDir, testInfo.parallelIndex) : undefined;
     const poolKey = persistent ?? `temp-${testInfo.parallelIndex}`;
     const reused = reuseBrowser ? browserPool.get(poolKey) : undefined;
@@ -170,6 +184,7 @@ export const test = base.extend<ExtensionFixtures & ExtensionOptions, { server: 
       }
     }
     const context = launched.context;
+    if (!keepWelcome) closeWelcomeTabs(context);
     if (reuseBrowser) {
       // First test of this worker: keep the browser for the next ones (and its first
       // tab: Chrome may quit when its last window closes).
@@ -219,7 +234,7 @@ export const test = base.extend<ExtensionFixtures & ExtensionOptions, { server: 
       // Persistent profiles keep keys and engine settings from earlier tests: start each
       // test without them so it gets exactly what it configures.
       await sw.evaluate(async () => {
-        await chrome.storage.local.remove(['deeplApiKey', 'googleTranslateApiKey', 'anthropicApiKey', 'claudeGatewayToken', 'accountToken']);
+        await chrome.storage.local.remove(['deeplApiKey', 'googleTranslateApiKey', 'anthropicApiKey', 'claudeGatewayToken', 'accountToken', 'popupMode']);
         await chrome.storage.sync.remove(['translationEngineMode', 'claudeModel', 'claudeAccess', 'claudeGatewayUrl', 'claudeGatewayAuth']);
       });
       if (mockTranslation) {

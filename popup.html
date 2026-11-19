@@ -59,6 +59,7 @@
             </div>
         </div>
         <div id="subtitleModeStatus" class="message hidden"></div>
+        <p id="ocrSetupNote" class="setup-note hidden"><span>The first start downloads the subtitle reader for this language (about 20 MB).</span> <button id="ocrSetupButton" class="link-button" type="button">Prepare now</button></p>
     </section>
 
     <!-- Audio mode: live captions from the tab's speech -->
@@ -84,6 +85,7 @@
         <div class="actions">
             <button id="toggleButton" class="button primary" type="button">Start live captions</button>
         </div>
+        <p id="speechSetupNote" class="setup-note hidden"><span id="speechSetupText">Audio mode needs a one-time setup.</span> <button id="speechSetupButton" class="link-button" type="button">Set up now</button></p>
     </section>
 
     <label class="row target-row">
@@ -299,6 +301,11 @@
             <input type="checkbox" id="debugPanel">
         </label>
         <p class="hint">Shows what the extension is doing in the tab (capture, speech model, translations, errors), with a Copy report button.</p>
+        <div class="row">
+            <span>Setup and tips</span>
+            <button id="openWelcome" class="button" type="button">Open</button>
+        </div>
+        <p class="hint">Downloads and prepares the speech model and subtitle reader ahead of use, and shows how each mode works.</p>
     </section>
     <p class="version">Subtitle Translator 1.0</p>
 </section>

@@ -80,8 +80,20 @@ function clearStaleWorker(profileDir: string): void {
  *   browser users actually run, and (unlike Playwright's Chromium build on
  *   Windows) it ships the D3D12 shader compiler WebGPU needs.
  */
+/**
+ * E2E_CLEAR_GPU_CACHE=1: drop the browser's compiled-shader caches, so the next
+ * WebGPU model load is a true first time (minutes for the large speech model)
+ * while downloaded models stay cached.
+ */
+function clearGpuCaches(profileDir: string): void {
+  for (const dir of ['GrShaderCache', 'GraphiteDawnCache', 'ShaderCache', 'Default/GPUCache', 'Default/DawnGraphiteCache', 'Default/DawnWebGPUCache']) {
+    fs.rmSync(path.join(profileDir, dir), { recursive: true, force: true });
+  }
+}
+
 export async function launchExtensionBrowser(o: LaunchOptions): Promise<LaunchedBrowser> {
   clearStaleWorker(o.profileDir);
+  if (process.env.E2E_CLEAR_GPU_CACHE === '1') clearGpuCaches(o.profileDir);
   if (browserKind() === 'chromium') {
     const context = await chromium.launchPersistentContext(o.profileDir, {
       channel: 'chromium',

@@ -4,6 +4,19 @@ Wins worth sharing, newest first. Each has the headline, the proof (a number
 or what was shown working), and where the evidence lives. Numbers come from
 automated runs in a real browser (details: [performance.md](performance.md)).
 
+## 2026-11-18 — Set up once, captions start in seconds
+
+- On install a setup page asks what you watch, checks the graphics card (with
+  steps to turn hardware acceleration on), and prepares everything ahead of
+  use: the speech model is downloaded and set up on the GPU, the subtitle
+  reader for your language downloaded and warmed up.
+- Measured on an RTX 3070 with a wiped shader cache: the setup page took the
+  one-time **10 minutes**; Audio mode afterwards loaded the best-accuracy model
+  in **7.1 s** (`e2e/tests/perf-setup-gpu.spec.ts`). Before, those 10 minutes
+  happened the first time someone pressed Start.
+- The popup says when a mode still needs its one-time setup, with a button to
+  the setup page.
+
 ## 2026-11-18 — Subtitles mode works with the box people actually draw
 
 - Before: subtitles were only read if the box fit the text snugly. A loose box,

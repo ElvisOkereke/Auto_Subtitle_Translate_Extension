@@ -197,6 +197,9 @@ export interface ModelLoadingProgressMessage extends ExtensionMessage {
   type: 'MODEL_LOADING_PROGRESS';
   status: 'downloading' | 'download-progress' | 'cpu-fallback' | 'ready' | 'retrying' | 'preparing' | 'retrying-prepare' | 'fallback';
   percent?: number;
+  /** With 'ready': the model that loaded and where (recorded as prepared). */
+  model?: string;
+  device?: 'webgpu' | 'wasm';
 }
 
 // Settings types

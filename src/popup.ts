@@ -4,6 +4,7 @@ import { ExtensionSettings } from './types';
 import { DEFAULT_SETTINGS, getSecrets } from './settings';
 import { validateGatewayUrl } from './translation/claudeAccess';
 import { applyTheme, ThemeChoice } from './theme';
+import { installSetupNotes } from './setup/setupNotes';
 import { captionText, engineSummaryText, PopupState } from './popupText';
 
 interface PopupElements {
@@ -302,6 +303,7 @@ class PopupController {
     this.refreshSubtitleModeState();
     this.loadGlossary();
     this.refreshAccount();
+    installSetupNotes();
   }
 
   // ---- account (hosted translation) ----

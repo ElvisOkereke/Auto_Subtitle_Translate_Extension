@@ -1,0 +1,478 @@
+/* Subtitle Translator welcome / setup page. Same tokens and type as the popup
+   (popup.css); the caption bar is the one signature element. */
+
+@font-face {
+  font-family: 'Atkinson Hyperlegible';
+  src: url('fonts/atkinson-400.woff2') format('woff2');
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Atkinson Hyperlegible';
+  src: url('fonts/atkinson-700.woff2') format('woff2');
+  font-weight: 700;
+  font-display: swap;
+}
+
+:root {
+  --bg: #f3f4f7;
+  --surface: #ffffff;
+  --ink: #171a21;
+  --muted: #5e6573;
+  --line: #dfe3ea;
+  --field-line: #c9cfd9;
+  --hover: #e8ebf0;
+  --caption-bg: rgba(16, 18, 24, 0.92);
+  --caption-text: #ffd23f;
+  --frame: #2a2f3a;
+  --primary-bg: #171a21;
+  --primary-text: #ffd23f;
+  --primary-hover: #2a2f3a;
+  --good: #17744a;
+  --bad: #c23a3a;
+  --bad-bg: #fbeaea;
+  --warn-bg: #fff6d6;
+  --warn-line: #e8cf73;
+  --focus: #2f6fe4;
+  --radius-field: 8px;
+  --radius-button: 10px;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --bg: #181b22;
+    --surface: #20242d;
+    --ink: #eceef2;
+    --muted: #a3aab8;
+    --line: #2e3440;
+    --field-line: #3b4250;
+    --hover: #272c36;
+    --frame: #0f1116;
+    --primary-bg: #ffd23f;
+    --primary-text: #171a21;
+    --primary-hover: #ffdc66;
+    --good: #4cc38a;
+    --bad: #f07171;
+    --bad-bg: #3a2326;
+    --warn-bg: #352f1a;
+    --warn-line: #6b5a22;
+    --focus: #7aa7ff;
+    color-scheme: dark;
+  }
+}
+
+:root[data-theme='dark'] {
+  --bg: #181b22;
+  --surface: #20242d;
+  --ink: #eceef2;
+  --muted: #a3aab8;
+  --line: #2e3440;
+  --field-line: #3b4250;
+  --hover: #272c36;
+  --frame: #0f1116;
+  --primary-bg: #ffd23f;
+  --primary-text: #171a21;
+  --primary-hover: #ffdc66;
+  --good: #4cc38a;
+  --bad: #f07171;
+  --bad-bg: #3a2326;
+  --warn-bg: #352f1a;
+  --warn-line: #6b5a22;
+  --focus: #7aa7ff;
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font: 400 15px/1.55 'Atkinson Hyperlegible', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+.hidden {
+  display: none !important;
+}
+
+button,
+input,
+select {
+  font: inherit;
+  color: inherit;
+}
+
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+.page {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 28px max(16px, env(safe-area-inset-right, 0px)) 64px max(16px, env(safe-area-inset-left, 0px));
+}
+
+.app-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.brand {
+  font-weight: 700;
+  font-size: 16px;
+}
+
+.mark {
+  width: 28px;
+  height: 20px;
+  flex: none;
+}
+
+.mark-frame {
+  fill: var(--caption-bg);
+}
+
+.mark-line {
+  fill: var(--caption-text);
+}
+
+/* The signature: a video frame with the product's own subtitle on it. */
+.hero {
+  margin: 24px 0 28px;
+  aspect-ratio: 16 / 5;
+  max-width: 100%;
+  border-radius: 14px;
+  background:
+    radial-gradient(120% 140% at 20% 0%, #3b4252 0%, transparent 60%),
+    linear-gradient(160deg, #262b36, var(--frame));
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 0 16px 6%;
+}
+
+.hero-caption {
+  margin: 0;
+  padding: 8px 16px;
+  border-radius: 6px;
+  background: var(--caption-bg);
+  color: var(--caption-text);
+  font-weight: 700;
+  font-size: clamp(16px, 3.4vw, 24px);
+  text-align: center;
+}
+
+h1 {
+  margin: 0 0 8px;
+  font-size: clamp(24px, 4vw, 30px);
+  line-height: 1.2;
+  text-wrap: balance;
+}
+
+.lede {
+  margin: 0 0 28px;
+  color: var(--muted);
+  max-width: 60ch;
+}
+
+.steps {
+  list-style: none;
+  counter-reset: step;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 16px;
+}
+
+.step {
+  counter-increment: step;
+  position: relative;
+  padding: 20px 20px 20px 64px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+  min-width: 0;
+}
+
+.step::before {
+  content: counter(step);
+  position: absolute;
+  left: 20px;
+  top: 18px;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--caption-bg);
+  color: var(--caption-text);
+  font-weight: 700;
+  font-size: 14px;
+}
+
+.step h2 {
+  margin: 2px 0 14px;
+  font-size: 18px;
+  text-wrap: balance;
+}
+
+.step h3 {
+  margin: 0 0 6px;
+  font-size: 15px;
+}
+
+.fields {
+  display: grid;
+  gap: 12px;
+}
+
+.field {
+  display: grid;
+  gap: 4px;
+}
+
+.field > span {
+  color: var(--muted);
+  font-size: 14px;
+}
+
+select {
+  width: 100%;
+  max-width: 360px;
+  padding: 8px 10px;
+  border: 1px solid var(--field-line);
+  border-radius: var(--radius-field);
+  background: var(--surface);
+}
+
+.gpu-status {
+  margin: 0 0 12px;
+}
+
+.gpu-status.good::before,
+.task-state.good::before {
+  content: '✓ ';
+  color: var(--good);
+  font-weight: 700;
+}
+
+.callout {
+  margin: 0 0 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--warn-line);
+  border-radius: 10px;
+  background: var(--warn-bg);
+}
+
+.callout p,
+.callout ol {
+  margin: 0 0 8px;
+}
+
+.callout ol {
+  padding-left: 20px;
+}
+
+.choice {
+  margin: 0 0 16px;
+  padding: 0;
+  border: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.choice legend {
+  margin-bottom: 8px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.choice-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border: 1px solid var(--field-line);
+  border-radius: var(--radius-field);
+  cursor: pointer;
+}
+
+.choice-option:has(input:checked) {
+  border-color: var(--ink);
+}
+
+.muted {
+  color: var(--muted);
+}
+
+.tasks {
+  list-style: none;
+  margin: 0 0 16px;
+  padding: 0;
+  display: grid;
+  gap: 14px;
+}
+
+.task-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 4px 12px;
+  margin-bottom: 6px;
+}
+
+.task-name {
+  font-weight: 700;
+}
+
+.task-for {
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.task-state {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.task-state.good {
+  color: var(--good);
+}
+
+.task-state.bad {
+  color: var(--bad);
+}
+
+.bar {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--hover);
+  overflow: hidden;
+}
+
+.bar-fill {
+  height: 100%;
+  width: 0;
+  background: var(--caption-text);
+  transition: width 200ms ease-out;
+}
+
+.bar.done .bar-fill {
+  width: 100%;
+  background: var(--good);
+}
+
+/* Indeterminate: the GPU setup reports no progress. */
+.bar.busy .bar-fill {
+  width: 30%;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .bar.busy .bar-fill {
+    animation: busy 1.4s ease-in-out infinite;
+  }
+}
+
+@keyframes busy {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(340%); }
+}
+
+.task-note {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.task-note:empty {
+  display: none;
+}
+
+.prepare-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+}
+
+.keep-open {
+  margin: 0;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.all-set {
+  margin: 12px 0 0;
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: var(--caption-bg);
+  color: var(--caption-text);
+  font-weight: 700;
+}
+
+.button {
+  padding: 10px 16px;
+  border: 1px solid var(--field-line);
+  border-radius: var(--radius-button);
+  background: var(--surface);
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.button:hover {
+  background: var(--hover);
+}
+
+.button.primary {
+  border-color: transparent;
+  background: var(--primary-bg);
+  color: var(--primary-text);
+}
+
+.button.primary:hover {
+  background: var(--primary-hover);
+}
+
+.button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.howto {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.howto section {
+  min-width: 0;
+}
+
+.howto ol {
+  margin: 0;
+  padding-left: 20px;
+  display: grid;
+  gap: 4px;
+}
+
+@media (max-width: 480px) {
+  .step {
+    padding: 56px 16px 16px;
+  }
+  .step::before {
+    left: 16px;
+    top: 16px;
+  }
+}
