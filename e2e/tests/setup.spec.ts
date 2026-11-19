@@ -1,4 +1,5 @@
 import { test, expect } from '../helpers/extension';
+import { fakeTranslator } from '../helpers/builtin';
 
 // First-run setup: the page the extension opens on install, and the popup's
 // "needs a one-time setup" notes. Preparing for real (downloads, warm-up) runs
@@ -51,7 +52,8 @@ test.describe('setup page', () => {
       if (!gpu) {
         await expect(page.locator('#gpuHelp')).toBeVisible();
         await expect(page.locator('#speechChoice')).toBeHidden();
-        await expect(page.locator('#prepare')).toHaveText('Download and prepare (80 MB + 20 MB)');
+        // Playwright's Chromium offers the free translator's language packs too.
+        await expect(page.locator('#prepare')).toHaveText('Download and prepare (language packs + 80 MB + 20 MB)');
       } else {
         await expect(page.locator('#speechChoice')).toBeVisible();
       }
@@ -76,6 +78,7 @@ test.describe('setup page', () => {
       KOREAN_READER
     );
     const page = await context.newPage();
+    await fakeTranslator(page, 'available'); // the free translator's packs are downloaded too
     await page.goto(`chrome-extension://${extensionId}/welcome.html`);
     await expect(page.locator('#speechState')).toHaveText('Ready');
     await expect(page.locator('#ocrState')).toHaveText('Ready');

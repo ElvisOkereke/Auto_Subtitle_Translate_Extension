@@ -50,6 +50,7 @@ Scripts: `e2e/.recon/translate-bench.mjs`, `e2e/.recon/claude-bench.mjs` (resear
 | DeepL, line by line | 46% | 0.27 s |
 | Claude Haiku 5.5, context | 58% | 0.79 s |
 | Google (unofficial free endpoint) | 42% | 1.1 s |
+| **Chrome built-in Translator (on-device, free; scored 2026-11-19)** | **~47%** | **~25 ms** (pack download once: 13-15 s) |
 | Local opus-mt-ko-en / NLLB-600M | ≤ 15% | 0.1 / 1.0 s (CPU) |
 
 Neighbouring-line context is the single largest quality gain.

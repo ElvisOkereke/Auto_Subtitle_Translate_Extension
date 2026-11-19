@@ -1,4 +1,4 @@
-import { ApiService } from '../apiService';
+import { ApiService, setBuiltinHost } from '../apiService';
 import { APIError } from '../../types';
 
 describe('ApiService.translateText', () => {
@@ -253,5 +253,32 @@ describe('ApiService.translateText with subtitle context', () => {
     (globalThis.fetch as jest.Mock).mockResolvedValue(okDeepL);
     await apiService.translateText('hello', 'en', 'zh-Hant');
     expect(JSON.parse((globalThis.fetch as jest.Mock).mock.calls[0][1].body).target_lang).toBe('ZH-HANT');
+  });
+});
+
+describe('ApiService with no translation key (the free built-in translator)', () => {
+  beforeEach(() => {
+    (globalThis as any).chrome = {
+      storage: {
+        local: { get: jest.fn().mockResolvedValue({}) },
+        sync: { get: jest.fn().mockResolvedValue({ translationProvider: 'google' }) },
+      },
+    };
+    (globalThis as any).fetch = jest.fn();
+  });
+  afterEach(() => setBuiltinHost(null));
+
+  it('translates through the built-in host, with no network request', async () => {
+    const host = jest.fn(async (req: { text: string }) => ({ text: `EN ${req.text}` }));
+    setBuiltinHost(host);
+    expect(await new ApiService().translateText('안녕하세요', 'ko', 'en')).toEqual({ translatedText: 'EN 안녕하세요' });
+    expect(host).toHaveBeenCalledWith({ text: '안녕하세요', source: 'ko', target: 'en' });
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+
+  it('no host (not wired): says no translation is set up, as a 401', async () => {
+    const error = await new ApiService().translateText('안녕하세요', 'ko', 'en').catch(e => e);
+    expect(error).toBeInstanceOf(APIError);
+    expect(error.status).toBe(401);
   });
 });

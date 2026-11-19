@@ -31,6 +31,7 @@ const request = (over: Partial<LineTranslateRequest> = {}): LineTranslateRequest
 });
 
 interface Fakes {
+  deps: TranslationServiceDeps;
   service: TranslationService;
   claudeBatches: TranslateBatchRequest[];
   topicCalls: number;
@@ -84,10 +85,10 @@ function fakes(opts: { settings?: Partial<typeof DEFAULT_SETTINGS>; secrets?: Re
         },
       };
     },
-    makeFast: () => ({
+    makeFast: provider => ({
       async translateOne(text: string) {
         f.fastCalls.push(text);
-        return { text: `DEEPL(${text})` };
+        return { text: `${provider.toUpperCase()}(${text})` };
       },
     }),
     batch: { maxLines: 8, windowMs: 20 },
@@ -98,6 +99,7 @@ function fakes(opts: { settings?: Partial<typeof DEFAULT_SETTINGS>; secrets?: Re
     clock: () => f.now.t,
   };
   f.service = new TranslationService(deps);
+  f.deps = deps;
   return f;
 }
 
@@ -164,15 +166,26 @@ describe('TranslationService', () => {
     expect(f.claudeBatches[1].lines.map(l => l.text)).toEqual(['live one']);
   });
 
-  it('Claude failure falls back to the fast engine; with no fast key the line fails', async () => {
+  it('Claude failure falls back to the fast engine; with no fast key, to the free built-in translator', async () => {
     const f = fakes();
     f.setClaudeFailure(new APIError('rate limited', 429));
     expect(await f.service.translateLine(request())).toEqual({ success: true, translatedText: 'DEEPL(뽀삐 나왔네)', quality: 'fast', engine: 'deepl' });
     const noFast = fakes({ secrets: { deeplApiKey: '' } });
     noFast.setClaudeFailure(new APIError('rate limited', 429));
-    const r = await noFast.service.translateLine(request());
+    expect(await noFast.service.translateLine(request())).toEqual({ success: true, translatedText: 'BUILTIN(뽀삐 나왔네)', quality: 'fast', engine: 'builtin' });
+  });
+
+  it('no key at all: the fast tier is the free built-in translator', async () => {
+    const f = fakes({ settings: { translationProvider: 'google' }, secrets: { deeplApiKey: '', anthropicApiKey: '' } });
+    expect(await f.service.translateLine(request({ tier: 'fast' }))).toEqual({ success: true, translatedText: 'BUILTIN(뽀삐 나왔네)', quality: 'fast', engine: 'builtin' });
+  });
+
+  it('the built-in translator failing (another browser) fails the line with its message', async () => {
+    const f = fakes({ secrets: { deeplApiKey: '', anthropicApiKey: '' } });
+    f.service = new TranslationService({ ...f.deps, makeFast: () => ({ translateOne: async () => Promise.reject(new APIError('Free translation needs Google Chrome.', 401)) }) });
+    const r = await f.service.translateLine(request({ tier: 'fast' }));
     expect(r.success).toBe(false);
-    expect(r.error).toMatch(/rate limited|Claude/);
+    expect(r.error).toMatch(/Google Chrome/);
   });
 
   it('a 401 from Claude is reported once, then falls back quietly', async () => {

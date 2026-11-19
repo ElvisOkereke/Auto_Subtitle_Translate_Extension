@@ -220,3 +220,18 @@ test('drawing a new box discards lines read with the old one', async ({ context,
   expect(lines.filter(l => l.translation === 'STALE LINE')).toEqual([]);
   await expect(page.locator('.ast-subtitle-overlay')).not.toContainText('STALE LINE');
 });
+
+test('with no translation key, subtitles are translated by the free built-in translator', async ({ context, fixtureURL, openPopup, configure, sw, translationCalls }) => {
+  test.setTimeout(300_000);
+  await configure({ translationProvider: 'builtin', translationEngineMode: 'fast' });
+  await sw.evaluate(() => chrome.storage.local.set({ devBuiltinTranslator: 'stub' })); // no language packs in Playwright's Chromium
+  const page = await context.newPage();
+  await openFixture(page, fixtureURL);
+  await startViaPopup(page, openPopup);
+  await playUntil(page, 12);
+  const records = await shown(page);
+  expect(records.length).toBeGreaterThan(2);
+  for (const r of records) expect(r.text).toMatch(/^\[built-in\] /);
+  expect(translationCalls).toEqual([]);
+  await sw.evaluate(() => chrome.storage.local.remove('devBuiltinTranslator'));
+});

@@ -44,6 +44,7 @@ Testing now also covers football, TV drama and other languages.
 | **Audio mode** | Translated captions from any tab's speech (Whisper running locally). On YouTube the buffered audio is transcribed ahead, so captions land on the words. |
 | **First-run setup** | On install, a setup page asks what you watch, checks the graphics card and prepares the models ahead of use, so a mode never starts with a download or the one-time GPU setup. |
 | **Screen Translate** | Drag a box over text on any web page for a one-shot translation. |
+| **Free translation** | In Chrome, translation works out of the box with Chrome's built-in on-device translator (no key, nothing leaves the computer); its language packs download on the setup page. |
 | **Translation engines** | Fast tier (DeepL / Google) and best tier (Claude with video context, topic summary and a learned glossary). The modes are *Fast then best*, *Fast only* and *Best only*. Users bring their own keys or an Anthropic-compatible gateway. |
 | **Subscription** | Sign in with an email code and subscribe through Stripe to use the hosted translation service with no API keys. Every request is metered against a monthly budget. |
 | **Popup UI** | A caption bar states what's happening in the tab. Main and settings views, light and dark themes, an editable per-video glossary, and an on-page debug panel with a copyable report. |
@@ -166,7 +167,10 @@ YouTube / any <video> page
 - Screen Translate
 - Context-aware Claude translation with glossary
 - Hosted subscription service (built and tested locally)
-- Chrome Web Store package build
+- Chrome Web Store package build, listing and assets
+- **Free tier:** Chrome's built-in translator as the default with no key
+  (about 47% on the Korean benchmark, level with Google and DeepL line by
+  line), verified end to end in installed Chrome
 - Redesigned popup with light and dark themes
 - **Real-world benchmark:**
   - 8 YouTube videos with burned-in subtitles in 5 languages (Korean, Chinese,
@@ -182,9 +186,8 @@ YouTube / any <video> page
   - small Chinese subtitles went from 28 to 43 of 47 lines on real YouTube.
 
 **Next** (detail in [launch-plan.md](launch-plan.md))
-- **Translation without keys:** Chrome's on-device translator as the default
-  fast tier, so new users get translations with no setup.
-- **Launch:** deploy the hosted service, publish on the Chrome Web Store.
+- **Launch:** publish on the Chrome Web Store (package, listing and privacy
+  policy ready), then deploy the hosted service for subscriptions.
 - **Automatic subtitle detection,** so no box has to be drawn.
 - **Audio accuracy:** fast, overlapping casters (Korean League casting) still
   lose about half their words; names are often misheard.

@@ -2,6 +2,7 @@
 // "fast" (DeepL/Google) and "best" (Claude with video context, topic and
 // glossary) tiers, Claude batching by priority, fallback to the fast engine,
 // usage metering. Dependencies are injected so the rules are unit-tested.
+import { chooseFastProvider, type FastProvider } from './fastProvider';
 import { ExtensionSettings } from '../types';
 import { hostedServiceUrl, type Secrets } from '../settings';
 import type { EndpointOverrides } from '../services/apiService';
@@ -44,7 +45,7 @@ export interface LineTranslateResponse {
   success: boolean;
   translatedText?: string;
   quality?: 'fast' | 'better';
-  engine?: 'deepl' | 'google' | 'subscription' | 'claude';
+  engine?: 'deepl' | 'google' | 'subscription' | 'builtin' | 'claude';
   error?: string;
   /** Shown to the user once (e.g. Claude rejected the key); the line still has a translation. */
   warning?: string;
@@ -109,7 +110,7 @@ export interface TranslationServiceDeps {
   glossary: GlossaryStore;
   usage: UsageMeter;
   makeClaude(cfg: ClaudeConfig): ClaudeLike;
-  makeFast(provider: 'deepl' | 'google' | 'subscription', apiKey: string, endpoint?: string): FastLike;
+  makeFast(provider: FastProvider, apiKey: string, endpoint?: string): FastLike;
   batch?: { maxLines: number; windowMs: number };
   /** How long a line waits for the video's topic summary before going without it (ms). */
   topicWaitMs?: number;
@@ -210,10 +211,11 @@ export class TranslationService {
     if (req.sourceLang.split('-')[0] === targetLang.split('-')[0]) {
       return { success: true, translatedText: req.text, quality: 'fast' };
     }
-    const provider = settings.translationProvider === 'deepl' || settings.translationProvider === 'subscription' ? settings.translationProvider : 'google';
     const hosted = hostedServiceUrl(overrides.server);
-    const fastKey = provider === 'deepl' ? secrets.deeplApiKey : provider === 'subscription' ? (hosted ? secrets.accountToken : '') : secrets.googleTranslateApiKey;
-    const fastEndpoint = provider === 'subscription' ? (hosted ?? undefined) : overrides[provider];
+    // No key for the chosen provider: Chrome's built-in translator (the free tier).
+    const provider = chooseFastProvider(settings.translationProvider, secrets, hosted);
+    const fastKey = provider === 'deepl' ? secrets.deeplApiKey : provider === 'subscription' ? secrets.accountToken : provider === 'google' ? secrets.googleTranslateApiKey : '';
+    const fastEndpoint = provider === 'subscription' ? (hosted ?? undefined) : provider === 'builtin' ? undefined : overrides[provider];
     const fast = async (): Promise<LineTranslateResponse> => {
       const engine = this.deps.makeFast(provider, fastKey, fastEndpoint);
       const result = await this.runner.run(
@@ -270,7 +272,7 @@ export class TranslationService {
         }
       }
     }
-    if (!fastKey || req.noFallback) return { success: false, error: claudeError, ...(warning ? { warning } : {}) };
+    if (req.noFallback) return { success: false, error: claudeError, ...(warning ? { warning } : {}) };
     try {
       return { ...(await fast()), ...(warning ? { warning } : {}) };
     } catch (error) {

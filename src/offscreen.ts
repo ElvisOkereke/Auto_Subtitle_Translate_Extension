@@ -5,6 +5,20 @@ import { ReadAheadPipeline } from './audio/readAheadPipeline';
 import { fromInt16Base64 } from './audio/readAhead/pcm';
 import { isLikelyHallucination, isNonSpeech } from './audio/nonSpeech';
 import { ModelWatchdog } from './audio/modelWatchdog';
+import { createBuiltinHost } from './translation/builtinHost';
+import type { BuiltinHost } from './translation/engines/builtin';
+
+// Chrome's built-in translator lives here: the API isn't available in the service worker.
+const builtinHosts: { real?: BuiltinHost; stub?: BuiltinHost } = {};
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.type !== 'BUILTIN_TRANSLATE') return false;
+  if (sender.id !== chrome.runtime.id || sender.tab) return false; // the background only
+  const host = message.stub ? (builtinHosts.stub ??= createBuiltinHost(undefined, { stub: true })) : (builtinHosts.real ??= createBuiltinHost());
+  host({ text: String(message.text ?? ''), source: String(message.source ?? 'auto'), target: String(message.target ?? 'en') }).then(sendResponse, error =>
+    sendResponse({ error: String(error) })
+  );
+  return true;
+});
 
 // 1024 samples = 64 ms per frame: fine-grained enough that end-of-speech is
 // detected promptly (4096 = 256 ms added up to ~200 ms of caption latency).

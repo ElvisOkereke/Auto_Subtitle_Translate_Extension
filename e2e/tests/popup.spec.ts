@@ -13,7 +13,7 @@ test.describe('Popup', () => {
     const page = await context.newPage();
     await page.goto(`chrome-extension://${extensionId}/popup.html`);
     const settings = await page.evaluate(() => chrome.runtime.sendMessage({ type: 'GET_SETTINGS' }));
-    expect(settings).toMatchObject({ targetLanguage: 'en', translationProvider: 'google' });
+    expect(settings).toMatchObject({ targetLanguage: 'en', translationProvider: 'builtin' }); // the free tier by default
   });
 
   for (const theme of ['light', 'dark'] as const) {
@@ -83,6 +83,12 @@ test.describe('Popup', () => {
     await popup.selectOption('#targetLanguage', 'fr'); // on the main view
     await popup.click('#openSettings');
 
+    // The free built-in translator by default: no key fields.
+    await expect(popup.locator('#translationProvider')).toHaveValue('builtin');
+    await expect(popup.locator('#googleApiKeyGroup')).toBeHidden();
+    await expect(popup.locator('#deeplApiKeyGroup')).toBeHidden();
+
+    await popup.selectOption('#translationProvider', 'google');
     await expect(popup.locator('#googleApiKeyGroup')).toBeVisible();
     await expect(popup.locator('#deeplApiKeyGroup')).toBeHidden();
 

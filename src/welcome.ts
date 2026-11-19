@@ -6,6 +6,7 @@ import { applyTheme, type ThemeChoice } from './theme';
 import { detectGpu, type GpuSupport } from './utils/gpu';
 import { SETUP_KEY, markOcrReady, markSpeechReady, ocrSetupNeeded, speechSetupNeeded, type SetupState } from './setup/readiness';
 import { prepareOcr, prepareSpeech } from './setup/prepare';
+import { startTranslatorDownloads, translatorPlan, translatorStatus, type ChromeAi, type TranslatorNeed } from './setup/translatorSetup';
 import type { SpeechModel } from './utils/modelConfig';
 import type { SubtitleLanguage } from './subtitle/types';
 
@@ -15,9 +16,14 @@ const OCR_DOWNLOAD = '20 MB';
 let gpu: GpuSupport = { ok: false, f16: false };
 let speechModel: SpeechModel = 'turbo';
 let subtitleLanguage: SubtitleLanguage = 'ko';
+let spokenLanguage = 'auto';
+let targetLanguage = 'en';
 let running = false;
+/** The free translator (Chrome's built-in one): its language packs still to download, 'ready', or not in this browser. */
+let translator: 'unsupported' | 'ready' | TranslatorNeed = 'unsupported';
+const chromeAi = globalThis as unknown as ChromeAi;
 /** "Ready in 12 s" after preparing here, kept when the page re-renders. */
-const readyNote: { speech?: string; ocr?: string } = {};
+const readyNote: { speech?: string; ocr?: string; translator?: string } = {};
 
 async function loadState(): Promise<SetupState> {
   return ((await chrome.storage.local.get(SETUP_KEY))[SETUP_KEY] as SetupState) ?? {};
@@ -27,7 +33,7 @@ async function updateState(change: (s: SetupState) => SetupState): Promise<void>
   await chrome.storage.local.set({ [SETUP_KEY]: change(await loadState()) });
 }
 
-function setTask(task: 'speech' | 'ocr', state: string, opts: { tone?: 'good' | 'bad'; percent?: number; busy?: boolean; done?: boolean; note?: string } = {}): void {
+function setTask(task: 'speech' | 'ocr' | 'translator', state: string, opts: { tone?: 'good' | 'bad'; percent?: number; busy?: boolean; done?: boolean; note?: string } = {}): void {
   const label = $(`${task}State`);
   label.textContent = state;
   label.className = `task-state${opts.tone ? ` ${opts.tone}` : ''}`;
@@ -44,13 +50,21 @@ async function render(): Promise<void> {
   const state = await loadState();
   const speech = speechSetupNeeded(state, speechModel, gpu);
   const ocr = ocrSetupNeeded(state, subtitleLanguage);
+  translator = await translatorStatus(chromeAi, translatorPlan(subtitleLanguage, spokenLanguage, targetLanguage));
+  if (translator === 'unsupported') {
+    setTask('translator', 'Needs Google Chrome', {
+      note: "Free translation runs only in Google Chrome. In this browser, add a DeepL or Google key, or subscribe, in the extension's Settings.",
+    });
+  } else if (translator === 'ready') setTask('translator', 'Ready', { tone: 'good', done: true, note: readyNote.translator ?? '' });
+  else setTask('translator', 'Not prepared', { note: 'A one-time download of the languages you picked. Nothing you translate leaves this computer.' });
+  const needTranslator = typeof translator === 'object';
   if (speech) setTask('speech', 'Not prepared', { note: `${speech.download} download${speech.gpuSetup ? ', then a one-time setup on your graphics card' : ''}.` });
   else setTask('speech', 'Ready', { tone: 'good', done: true, note: readyNote.speech ?? '' });
   if (ocr) setTask('ocr', 'Not prepared', { note: `About ${OCR_DOWNLOAD}.` });
   else setTask('ocr', 'Ready', { tone: 'good', done: true, note: readyNote.ocr ?? '' });
   const button = $<HTMLButtonElement>('prepare');
-  const sizes = [speech?.download, ocr ? OCR_DOWNLOAD : null].filter(Boolean);
-  button.disabled = !speech && !ocr;
+  const sizes = [needTranslator ? 'language packs' : null, speech?.download, ocr ? OCR_DOWNLOAD : null].filter(Boolean);
+  button.disabled = !speech && !ocr && !needTranslator;
   button.textContent = button.disabled ? 'Prepared' : `Download and prepare (${sizes.join(' + ')})`;
   $('allSet').classList.toggle('hidden', !button.disabled);
 }
@@ -110,7 +124,18 @@ async function runOcr(): Promise<void> {
   setTask('ocr', 'Ready', { tone: 'good', done: true, note: readyNote.ocr });
 }
 
+function runTranslator(need: TranslatorNeed): Promise<void> {
+  const startedAt = performance.now();
+  setTask('translator', 'Downloading 0%', { percent: 0, note: '' });
+  return startTranslatorDownloads(chromeAi, need, percent => setTask('translator', `Downloading ${percent}%`, { percent })).then(() => {
+    readyNote.translator = `Prepared in ${Math.max(1, Math.round((performance.now() - startedAt) / 1000))} s.`;
+    setTask('translator', 'Ready', { tone: 'good', done: true, note: readyNote.translator });
+  });
+}
+
 async function prepareAll(): Promise<void> {
+  // First, before any await: language-pack downloads need the click, and it only counts for a moment.
+  const translatorJob = typeof translator === 'object' ? runTranslator(translator) : null;
   const state = await loadState();
   const needSpeech = !!speechSetupNeeded(state, speechModel, gpu);
   const needOcr = ocrSetupNeeded(state, subtitleLanguage);
@@ -131,6 +156,14 @@ async function prepareAll(): Promise<void> {
       setTask(task, "Couldn't finish", { tone: 'bad', note: error instanceof Error ? error.message : String(error) });
     }
   }
+  if (translatorJob) {
+    try {
+      await translatorJob;
+    } catch (error) {
+      failed = true;
+      setTask('translator', "Couldn't finish", { tone: 'bad', note: error instanceof Error ? error.message : String(error) });
+    }
+  }
   running = false;
   document.querySelectorAll<HTMLInputElement | HTMLSelectElement | HTMLButtonElement>('select, input, #prepare').forEach(el => (el.disabled = false));
   $('keepOpen').classList.add('hidden');
@@ -148,12 +181,16 @@ async function init(): Promise<void> {
   applyTheme(document.documentElement, (settings.theme ?? 'system') as ThemeChoice);
   speechModel = settings.speechModel ?? 'turbo';
   subtitleLanguage = settings.subtitleLanguage ?? 'ko';
+  spokenLanguage = settings.sourceLanguage ?? 'auto';
+  targetLanguage = settings.targetLanguage ?? 'en';
   for (const key of ['subtitleLanguage', 'sourceLanguage', 'targetLanguage'] as const) {
     const select = $<HTMLSelectElement>(key);
     select.value = String(settings[key]);
     select.addEventListener('change', async () => {
       await saveSettings({ [key]: select.value });
       if (key === 'subtitleLanguage') subtitleLanguage = select.value as SubtitleLanguage;
+      if (key === 'sourceLanguage') spokenLanguage = select.value;
+      if (key === 'targetLanguage') targetLanguage = select.value;
       await render();
     });
   }

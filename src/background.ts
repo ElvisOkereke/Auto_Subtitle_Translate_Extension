@@ -12,6 +12,36 @@ import { DeepLEngine } from './translation/engines/deepl';
 import { videoIdFrom } from './subtitle/videoId';
 import { GoogleEngine } from './translation/engines/google';
 import { SETUP_KEY, markSpeechReady, type SetupState } from './setup/readiness';
+import { builtinEngine, setBuiltinHost } from './services/apiService';
+import type { BuiltinReply, BuiltinRequest } from './translation/engines/builtin';
+
+/**
+ * The offscreen document hosts tab-audio capture and Chrome's built-in
+ * translator (neither works in the service worker). One at a time per
+ * extension: concurrent callers share one creation.
+ */
+let offscreenCreating: Promise<void> | null = null;
+async function ensureOffscreen(): Promise<void> {
+  if (await chrome.offscreen.hasDocument()) return;
+  offscreenCreating ??= chrome.offscreen
+    .createDocument({
+      url: 'offscreen.html',
+      reasons: [chrome.offscreen.Reason.USER_MEDIA, chrome.offscreen.Reason.WORKERS],
+      justification: "Capture and transcribe tab audio for live captions, and run Chrome's built-in translator (not available in service workers)",
+    })
+    .finally(() => (offscreenCreating = null));
+  await offscreenCreating;
+}
+
+/** A line for the built-in translator, answered by the offscreen document. */
+async function builtinViaOffscreen(req: BuiltinRequest): Promise<BuiltinReply> {
+  await ensureOffscreen();
+  // Dev/test hook: a recognisable fake translation (browsers without language packs).
+  const { devBuiltinTranslator } = await chrome.storage.local.get('devBuiltinTranslator');
+  const reply = (await chrome.runtime.sendMessage({ type: 'BUILTIN_TRANSLATE', ...req, stub: devBuiltinTranslator === 'stub' })) as BuiltinReply | undefined;
+  return reply ?? { error: 'unavailable' };
+}
+setBuiltinHost(builtinViaOffscreen);
 
 // Fast (DeepL/Google) and best (Claude with video context + glossary) tiers;
 // at most 4 requests in flight, lines on screen now first.
@@ -24,11 +54,13 @@ const translation = new TranslationService({
   usage: new StorageUsageMeter(chrome.storage.local),
   makeClaude: cfg => (cfg.via === 'proxy' ? proxyClaude(new ProxyClient({ baseURL: cfg.baseURL, token: cfg.auth.token }), cfg.model) : new ClaudeEngine(cfg)),
   makeFast: (provider, apiKey, endpoint) =>
-    provider === 'subscription'
-      ? proxyFast(new ProxyClient({ baseURL: endpoint ?? 'https://proxy.invalid', token: apiKey }))
-      : provider === 'deepl'
-        ? new DeepLEngine({ apiKey, endpoint })
-        : new GoogleEngine({ apiKey, endpoint }),
+    provider === 'builtin'
+      ? builtinEngine()
+      : provider === 'subscription'
+        ? proxyFast(new ProxyClient({ baseURL: endpoint ?? 'https://proxy.invalid', token: apiKey }))
+        : provider === 'deepl'
+          ? new DeepLEngine({ apiKey, endpoint })
+          : new GoogleEngine({ apiKey, endpoint }),
   // The popup shows the last Claude failure (e.g. a rejected key) until Claude works again.
   reportClaudeError: error => (error ? chrome.storage.session.set({ claudeError: error }) : chrome.storage.session.remove('claudeError')),
 });
@@ -252,14 +284,7 @@ class SubtitleService {
   }
 
   private async ensureOffscreenDocument(): Promise<void> {
-    if (await chrome.offscreen.hasDocument()) {
-      return;
-    }
-    await chrome.offscreen.createDocument({
-      url: 'offscreen.html',
-      reasons: [chrome.offscreen.Reason.USER_MEDIA],
-      justification: 'Capture and transcribe tab audio to generate live captions'
-    });
+    await ensureOffscreen();
   }
 
   private async closeOffscreenDocument(): Promise<void> {
@@ -539,10 +564,14 @@ class SubtitleService {
       const result = await apiService.translateText(text, sourceLanguage, targetLanguage);
       return { text: result.translatedText, language: targetLanguage };
     } catch (error) {
-      if (error instanceof APIError && error.status === 401 && !(await this.alreadyWarned(tabId))) {
+      if (error instanceof APIError && (error.status === 401 || error.status === 428) && !(await this.alreadyWarned(tabId))) {
+        // The free translator explains itself (needs Chrome, or a one-time language download).
+        const free = error.status === 428 || /Free translation|No translation is set up/.test(error.message);
         await this.safeSendMessage(tabId, {
           type: 'CAPTION_ERROR',
-          message: `No ${providerName} API key configured. Showing untranslated captions - add a key in the extension popup to enable translation.`
+          message: free
+            ? `Showing untranslated captions. ${error.message}`
+            : `No ${providerName} API key configured. Showing untranslated captions - add a key in the extension popup to enable translation.`
         });
       }
       console.error('Translation failed, falling back to untranslated text:', error);

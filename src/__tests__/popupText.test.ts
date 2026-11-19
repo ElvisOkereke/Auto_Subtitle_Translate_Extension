@@ -50,6 +50,18 @@ describe('engine summary', () => {
     expect(engineSummaryText({ ...form, translateWith: 'subscription' })).toBe('Your subscription, Claude Opus 5.5');
   });
 
+  it('in Chrome with no key, the free built-in translator is the fast tier', () => {
+    expect(engineSummaryText({ ...form, hasFastKey: false, hasClaude: false, builtin: true })).toBe('Built-in translator (free)');
+    expect(engineSummaryText({ ...form, hasFastKey: false, builtin: true })).toBe('Built-in translator (free), then Claude Opus 5.5');
+    expect(engineSummaryText({ ...form, provider: 'builtin', hasFastKey: false, hasClaude: false, builtin: true })).toBe('Built-in translator (free)');
+    // A key for the chosen provider still wins.
+    expect(engineSummaryText({ ...form, hasClaude: false, builtin: true, engineMode: 'fast' })).toBe('DeepL');
+  });
+
+  it('the built-in translator chosen in a browser without it', () => {
+    expect(engineSummaryText({ ...form, provider: 'builtin', hasFastKey: false, hasClaude: false, builtin: false })).toBe('Free translation needs Google Chrome: add a key in Settings');
+  });
+
   it('says what is missing instead of pretending', () => {
     expect(engineSummaryText({ ...form, hasClaude: false })).toBe('DeepL (add Claude access for best quality)');
     expect(engineSummaryText({ ...form, hasFastKey: false, hasClaude: false })).toBe('Add a translation key to start');

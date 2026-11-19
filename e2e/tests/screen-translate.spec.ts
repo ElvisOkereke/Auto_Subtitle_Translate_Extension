@@ -101,7 +101,7 @@ test.describe('Screen Translate', () => {
     await expect(popup2.locator('#screenTranslateStatus')).toBeHidden();
   });
 
-  test('missing API key shows a readable error on the page', async ({ context, fixtureURL, openPopup, configure }) => {
+  test('missing API key falls back to the free translator, with a readable message when it is not ready', async ({ context, fixtureURL, openPopup, configure }) => {
     await configure({ deeplApiKey: '' });
     const page = await context.newPage();
     await page.goto(`${fixtureURL}/screen-translate.html`);
@@ -111,8 +111,10 @@ test.describe('Screen Translate', () => {
     await expect.poll(() => page.evaluate(() => document.body.style.cursor)).toBe('crosshair');
     const started = Date.now();
     await dragOver(page, '#target');
-    await expect(page.getByText(/No DeepL API key/)).toBeVisible();
-    // Auth errors must not be retried with backoff.
+    // No DeepL key: the free built-in translator takes over. Playwright's Chromium hasn't downloaded its
+    // Korean/French pack, so the page says how to get it (the setup page).
+    await expect(page.getByText(/free translator needs this language downloaded once/)).toBeVisible();
+    // Errors that need the user must not be retried with backoff.
     expect(Date.now() - started).toBeLessThan(3000);
   });
 

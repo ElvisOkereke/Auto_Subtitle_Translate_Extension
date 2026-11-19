@@ -203,3 +203,19 @@ test('no translation request when source and target language match', async ({ co
   expect(normalize((await captionLines(page).first().textContent())!)).toContain('hello world');
   expect(translationCalls).toEqual([]);
 });
+
+test('with no translation key, speech is translated by the free built-in translator', async ({ context, fixtureURL, openPopup, translationCalls, configure, sw }) => {
+  await configure({ translationProvider: 'builtin', sourceLanguage: 'en', targetLanguage: 'fr', translationEngineMode: 'fast' });
+  await sw.evaluate(() => chrome.storage.local.set({ devBuiltinTranslator: 'stub' })); // no language packs in Playwright's Chromium
+  const page = await context.newPage();
+  await page.goto(`${fixtureURL}/captions.html?audio=hello.wav`);
+  await recordCaptions(page);
+  await startCaptions(page, openPopup);
+  await waitForModel(page);
+  await play(page);
+  await expect(captionLines(page).filter({ hasText: /weather/i })).toBeVisible({ timeout: 60_000 });
+  const records = await shownCaptions(page);
+  for (const r of records) expect(r.text).toMatch(/^\[built-in\] /);
+  expect(translationCalls).toEqual([]);
+  await sw.evaluate(() => chrome.storage.local.remove('devBuiltinTranslator'));
+});

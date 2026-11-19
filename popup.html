@@ -105,6 +105,7 @@
             <option value="ru">Russian</option>
         </select>
     </label>
+    <p id="translatorSetupNote" class="setup-note hidden"><span>Free translation needs these languages downloaded once.</span> <button id="translatorSetupButton" class="link-button" type="button">Prepare now</button></p>
 
     <!-- Page text: one-shot translation of text under a box (both modes) -->
     <section class="page-text" aria-label="Text on this page">
@@ -158,6 +159,7 @@
             <label class="field">
                 <span>Fast engine</span>
                 <select id="translationProvider">
+                    <option value="builtin">Built-in (free, on this computer)</option>
                     <option value="google">Google Translate</option>
                     <option value="deepl">DeepL</option>
                     <option value="subscription">Subscription (signed in)</option>

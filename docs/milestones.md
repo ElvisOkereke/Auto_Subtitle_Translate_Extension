@@ -4,6 +4,17 @@ Wins worth sharing, newest first. Each has the headline, the proof (a number
 or what was shown working), and where the evidence lives. Numbers come from
 automated runs in a real browser (details: [performance.md](performance.md)).
 
+## 2026-11-19 — Free translation out of the box (Chrome)
+
+- New users no longer need any key: Chrome's built-in translator, running on
+  their computer, is the default. Its language packs download from the setup
+  page's one click (Korean: 13 s).
+- Measured on the 36-line Korean League benchmark: **about 47%**, level with
+  Google (42%) and DeepL line by line (46%), at **~25 ms per line**, free and
+  private. Claude with context (89%) stays the paid upgrade.
+- Verified end to end in installed Chrome: a fresh profile with no key, the
+  setup page's click, then Subtitles mode translated a Korean stream.
+
 ## 2026-11-18 — Set up once, captions start in seconds
 
 - On install a setup page asks what you watch, checks the graphics card (with

@@ -21,10 +21,14 @@ only to the translation service you choose.
   you have Chrome sync on.
 - **API keys.** Stored only in this browser's local extension storage, never
   synced, and only ever sent to the service they belong to.
+- **Translation with Chrome's built-in translator** (the free option, and the
+  default when no key is set): runs inside Chrome on your computer; the text
+  is not sent anywhere. Its language packs are downloaded by Chrome itself.
 
 ## What is sent, and to whom
 
-- **Text to translate.** The subtitle or speech text the extension recognised,
+- **Text to translate** (only when you use DeepL, Google, Claude or the hosted
+  service instead of the built-in translator). The subtitle or speech text the extension recognised,
   with up to two lines before and after it for context (DeepL and Claude), goes to the translation
   service you chose in Settings: Google Cloud Translation, DeepL, Anthropic
   (Claude), an Anthropic-compatible gateway you entered, or our hosted service

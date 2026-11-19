@@ -5,6 +5,20 @@ import { getSecrets, hostedServiceUrl } from '../settings';
 import { ProxyClient, proxyFast } from '../translation/engines/proxy';
 import { DeepLEngine } from '../translation/engines/deepl';
 import { GoogleEngine } from '../translation/engines/google';
+import { BuiltinEngine, type BuiltinHost } from '../translation/engines/builtin';
+import { chooseFastProvider } from '../translation/fastProvider';
+import { APIError } from '../types';
+
+/** How the built-in translator is reached (the background wires the offscreen document in). */
+let builtinHost: BuiltinHost | null = null;
+export function setBuiltinHost(host: BuiltinHost | null): void {
+  builtinHost = host;
+}
+
+/** The free tier, or a 401 like a missing key when nothing can reach it. */
+export function builtinEngine(): BuiltinEngine {
+  return new BuiltinEngine(builtinHost ?? (async () => Promise.reject(new APIError('No translation is set up: add a DeepL or Google key in Settings.', 401))));
+}
 
 export interface TranslationResult {
   translatedText: string;
@@ -49,14 +63,13 @@ export async function fastEngine(): Promise<FastEngine> {
     getSecrets(),
     getEndpointOverrides(),
   ]);
-  if (settings.translationProvider === 'subscription') {
-    const baseURL = hostedServiceUrl(overrides.server);
-    if (!baseURL) throw new Error('The hosted translation service is not available in this build.');
-    return proxyFast(new ProxyClient({ baseURL, token: secrets.accountToken }));
-  }
-  return settings.translationProvider === 'deepl'
-    ? new DeepLEngine({ apiKey: secrets.deeplApiKey, endpoint: overrides.deepl })
-    : new GoogleEngine({ apiKey: secrets.googleTranslateApiKey, endpoint: overrides.google });
+  const hosted = hostedServiceUrl(overrides.server);
+  // No key for the chosen provider: Chrome's built-in translator (the free tier).
+  const provider = chooseFastProvider(settings.translationProvider ?? 'google', secrets, hosted); // unset: the old default
+  if (provider === 'subscription') return proxyFast(new ProxyClient({ baseURL: hosted!, token: secrets.accountToken }));
+  if (provider === 'deepl') return new DeepLEngine({ apiKey: secrets.deeplApiKey, endpoint: overrides.deepl });
+  if (provider === 'google') return new GoogleEngine({ apiKey: secrets.googleTranslateApiKey, endpoint: overrides.google });
+  return builtinEngine();
 }
 
 export class ApiService {

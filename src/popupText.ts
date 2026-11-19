@@ -37,8 +37,10 @@ export function captionText(s: PopupState): string {
 
 export interface EngineForm {
   translateWith: 'subscription' | 'keys';
-  provider: 'deepl' | 'google' | 'subscription';
+  provider: 'builtin' | 'deepl' | 'google' | 'subscription';
   hasFastKey: boolean;
+  /** This browser has Chrome's built-in translator (the free tier; not in Opera GX, Edge, Brave). */
+  builtin?: boolean;
   hasClaude: boolean;
   engineMode: 'fast-then-best' | 'fast' | 'best';
   /** e.g. "Claude Opus 5.5" */
@@ -47,7 +49,7 @@ export interface EngineForm {
   account?: 'signed-out' | 'not-subscribed' | 'active';
 }
 
-const PROVIDER_NAMES: Record<string, string> = { deepl: 'DeepL', google: 'Google Translate', subscription: 'Your subscription' };
+const PROVIDER_NAMES: Record<string, string> = { builtin: 'Built-in translator (free)', deepl: 'DeepL', google: 'Google Translate', subscription: 'Your subscription' };
 
 /** What will translate, in plain words; says what is missing instead of pretending. */
 export function engineSummaryText(f: EngineForm): string {
@@ -56,10 +58,15 @@ export function engineSummaryText(f: EngineForm): string {
     if (f.account === 'not-subscribed') return 'Subscribe to translate with your account';
     return f.engineMode === 'fast' ? 'Your subscription' : `Your subscription, ${f.modelLabel}`;
   }
+  // No key for the chosen provider (or the built-in one chosen): the free built-in translator, where the browser has it.
+  const useBuiltin = f.provider === 'builtin' || !f.hasFastKey;
+  if (useBuiltin && f.builtin) f = { ...f, provider: 'builtin', hasFastKey: true };
+  else if (f.provider === 'builtin' && !f.hasClaude) return 'Free translation needs Google Chrome: add a key in Settings';
   const fast = PROVIDER_NAMES[f.provider] ?? f.provider;
   if (!f.hasFastKey && !f.hasClaude) return 'Add a translation key to start';
   if (f.engineMode === 'fast' || !f.hasClaude) {
     if (!f.hasFastKey) return 'Add a translation key to start';
+    if (f.provider === 'builtin') return fast; // the free tier: no upsell on the main view
     return f.engineMode === 'fast' ? fast : `${fast} (add Claude access for best quality)`;
   }
   if (!f.hasFastKey) return `${f.modelLabel} (add a ${fast} key for instant lines)`;

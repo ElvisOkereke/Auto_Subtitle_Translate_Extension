@@ -6,6 +6,7 @@ import { CACHE, ROOT } from '../helpers/paths';
 import { browserKind } from '../helpers/launch';
 import { readEnv } from '../helpers/env';
 import { clearTranslationState, openFixture, startViaPopup } from '../helpers/subtitles';
+import { fakeTranslator, PREPARED_MODELS } from '../helpers/builtin';
 
 // Screenshots of the real extension for the README and the portfolio
 // (docs/images/). Real DeepL translates (DEEPL_API_KEY in .env). Opt-in:
@@ -63,4 +64,16 @@ test('the setup page', async ({ context, extensionId, configure }) => {
   await page.goto(`chrome-extension://${extensionId}/welcome.html`);
   await expect(page.locator('#gpuStatus')).not.toHaveText('Checking your graphics card…');
   await shot(page, 'setup-page');
+});
+
+test('the setup page, all prepared (store listing)', async ({ context, extensionId, configure, sw }) => {
+  await configure({ theme: 'light', speechModel: 'turbo', subtitleLanguage: 'ko', sourceLanguage: 'auto', targetLanguage: 'en' });
+  await sw.evaluate(m => chrome.storage.local.set({ setupState: m }), PREPARED_MODELS);
+  const page = await context.newPage();
+  await fakeTranslator(page, 'available'); // as after "Download and prepare" in Chrome
+  await page.setViewportSize({ width: 1100, height: 1000 });
+  await page.goto(`chrome-extension://${extensionId}/welcome.html`);
+  await expect(page.locator('#allSet')).toBeVisible();
+  await page.waitForTimeout(600); // progress bars finish filling
+  await shot(page, 'setup-ready', { fullPage: true });
 });

@@ -14,11 +14,12 @@ A Chrome extension that translates video as you watch it.
   translation.
 
 Speech recognition and subtitle reading run **on your computer**, in the
-browser, on the graphics card when there is one. Only text goes out, to the
-translation service you choose. Translation is **fast then best**: DeepL or
-Google puts a translation up at once, then Claude replaces it with one that
-knows what the video is about (title, channel, description) and keeps names
-consistent through a learned glossary.
+browser, on the graphics card when there is one. **In Chrome, translation is
+free out of the box**: Chrome's built-in translator, also on your computer, so
+nothing leaves it. For better quality, translation is **fast then best**:
+DeepL or Google puts a translation up at once, then Claude replaces it with one
+that knows what the video is about (title, channel, description) and keeps
+names consistent through a learned glossary.
 
 | Popup | First-run setup |
 |---|---|
@@ -51,6 +52,10 @@ Every number comes from an automated run in a real browser; details in
   (10 minutes once on an RTX 3070); Audio mode then starts in **7.1 s**.
 
 **Translation**
+- **Free tier:** Chrome's built-in translator, on the user's computer, about
+  **47%** on the Korean League benchmark: level with Google (42%) and DeepL line
+  by line (46%). A language pack downloads once (13-15 s), then a line takes
+  ~25 ms. Used automatically when no key is set.
 - Claude with video context and a glossary was judged **0.93 vs 0.50 for
   DeepL** on Korean League subtitles, and beat DeepL in blind comparisons on
   Spanish football, anime and a Korean drama.
@@ -76,7 +81,8 @@ Google Cloud, Playwright and Jest.
 Subtitles mode, Audio mode, Screen Translate, context-aware translation, the
 first-run setup, a debug panel and the hosted service are built and verified.
 What stands between this and the Chrome Web Store, and what comes after, is
-in the [launch plan](docs/launch-plan.md). Measured wins, newest first:
+in the [launch plan](docs/launch-plan.md); the owner's steps are in the
+[launch guide](docs/launch-guide.md), the listing in [store/](store/listing.md). Measured wins, newest first:
 [docs/milestones.md](docs/milestones.md). The whole project on one page:
 [docs/project-overview.md](docs/project-overview.md).
 
@@ -90,10 +96,12 @@ npm run build          # development build into dist/
 Chrome → `chrome://extensions` → Developer mode → **Load unpacked** → `dist/`.
 On first install a setup page opens: pick your languages and click
 **Download and prepare** (it can be reopened from Settings → Troubleshooting →
-Setup and tips). Then open the popup's Settings and add a DeepL (free keys end
-in `:fx`) or Google Translate key, and an Anthropic key (or an
-Anthropic-compatible gateway) for context-aware translation. Keys stay in this
-browser's local extension storage.
+Setup and tips). In Chrome that's all: translation is free. Optionally, in the
+popup's Settings, add a DeepL (free keys end in `:fx`) or Google Translate key,
+and an Anthropic key (or an Anthropic-compatible gateway) for context-aware
+translation. Keys stay in this browser's local extension storage. Other
+Chromium browsers (Opera GX, Edge, Brave) have no built-in language packs and
+need a key or the subscription.
 
 `npm run package` builds the Chrome Web Store zip into `release/` (production
 build without the test-only page matches).
@@ -129,7 +137,8 @@ with a Copy report button. Keys are shown only as set or not set.
 
 ## Privacy
 
-Video frames and audio never leave your computer. Recognised text goes only to
+Video frames and audio never leave your computer. With Chrome's built-in
+translator nothing leaves it at all; otherwise recognised text goes only to
 the translation service you picked (with Claude, also the video's title,
 channel and description). No analytics or tracking. The hosted service stores
 an account's email, plan and usage totals, never the text it translates.
@@ -169,6 +178,7 @@ npm run verify           # types + lint + unit + browser tests + live DeepL
 | `npm run e2e:judge` | Claude scores the displayed translations (opt-in) |
 | `npx playwright test --project=perf perf-setup-gpu` | First-time GPU setup on the setup page vs Audio mode start (installed Chrome, `E2E_CLEAR_GPU_CACHE=1`) |
 | `npx playwright test --project=docs` | Regenerates the screenshots in `docs/images/` (real DeepL) |
+| `E2E_BROWSER=chrome npx playwright test --project=chrome` | The free tier for real: setup page downloads the language pack, Subtitles mode translates with no key |
 | `npm run perf:stt` | Speech model benchmark |
 
 Test pages, audio and frame-labelled subtitle timelines are in

@@ -2,6 +2,7 @@ import path from 'node:path';
 import { test, expect } from '../helpers/extension';
 import { CACHE } from '../helpers/paths';
 import { browserKind } from '../helpers/launch';
+import { fakeTranslator } from '../helpers/builtin';
 
 // Preparing for real from the setup page: the speech model this computer will
 // use (loaded and run once) and the subtitle reader, recorded as ready, so the
@@ -13,6 +14,7 @@ test('the setup page prepares speech recognition and the subtitle reader ahead o
   await configure({ speechModel: 'turbo', subtitleLanguage: 'ko' });
   await sw.evaluate(() => chrome.storage.local.remove('setupState'));
   const page = await context.newPage();
+  await fakeTranslator(page, 'available'); // this test is about the models; the free translator: free-tier specs
   await page.goto(`chrome-extension://${extensionId}/welcome.html`);
   await expect(page.locator('#prepare')).toBeEnabled();
   await page.click('#prepare');

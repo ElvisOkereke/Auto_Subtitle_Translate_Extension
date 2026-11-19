@@ -19,7 +19,7 @@ export const DEFAULT_SETTINGS: ExtensionSettings = {
   subtitleStyle: 'bottom',
   fontSize: 'medium',
   speechModel: 'turbo',
-  translationProvider: 'google',
+  translationProvider: 'builtin',
   subtitleLanguage: 'ko',
   enabled: false,
   translationEngineMode: 'fast-then-best',

@@ -5,6 +5,7 @@ import { DEFAULT_SETTINGS, getSecrets } from './settings';
 import { validateGatewayUrl } from './translation/claudeAccess';
 import { applyTheme, ThemeChoice } from './theme';
 import { installSetupNotes } from './setup/setupNotes';
+import { builtinLanguage } from './translation/fastProvider';
 import { captionText, engineSummaryText, PopupState } from './popupText';
 
 interface PopupElements {
@@ -235,14 +236,15 @@ class PopupController {
     const e = this.elements;
     const gateway = e.claudeAccess.value === 'gateway';
     const subscription = e.claudeAccess.value === 'subscription' || e.translationProvider.value === 'subscription';
-    const provider = e.translationProvider.value as 'deepl' | 'google' | 'subscription';
-    const hasFastKey = provider === 'deepl' ? !!e.deeplApiKey.value : provider === 'google' ? !!e.googleTranslateApiKey.value : this.signedIn;
+    const provider = e.translationProvider.value as 'builtin' | 'deepl' | 'google' | 'subscription';
+    const hasFastKey = provider === 'deepl' ? !!e.deeplApiKey.value : provider === 'google' ? !!e.googleTranslateApiKey.value : provider === 'subscription' ? this.signedIn : false;
     const hasClaude = subscription ? this.signedIn : gateway ? !!e.claudeGatewayUrl.value && !!e.claudeGatewayToken.value : !!e.anthropicApiKey.value;
     e.engineSummaryValue.textContent = engineSummaryText({
       translateWith: subscription ? 'subscription' : 'keys',
       provider,
       hasFastKey,
       hasClaude,
+      builtin: this.builtinAvailable,
       engineMode: e.engineMode.value as 'fast-then-best' | 'fast' | 'best',
       modelLabel: this.optionText(e.claudeModel).replace(/\s*\(.*\)$/, ''),
       account: !this.signedIn ? 'signed-out' : this.accountActive ? 'active' : 'not-subscribed',
@@ -304,6 +306,7 @@ class PopupController {
     this.loadGlossary();
     this.refreshAccount();
     installSetupNotes();
+    setTimeout(() => void this.detectBuiltin(), 200); // after the saved languages load
   }
 
   // ---- account (hosted translation) ----
@@ -651,10 +654,27 @@ class PopupController {
     return urlOk;
   }
 
+  /** Chrome's built-in translator (the free tier) works in this browser: Opera GX, Edge and Brave have the API but no language packs. */
+  private builtinAvailable = false;
+  private async detectBuiltin(): Promise<void> {
+    const T = (globalThis as { Translator?: { availability(o: { sourceLanguage: string; targetLanguage: string }): Promise<string> } }).Translator;
+    if (!T) return;
+    const target = builtinLanguage(this.elements.targetLanguage.value || 'en');
+    const subtitle = builtinLanguage(this.elements.subtitleLanguage.value || 'ko');
+    const source = subtitle !== target ? subtitle : target === 'en' ? 'es' : 'en';
+    try {
+      this.builtinAvailable = (await T.availability({ sourceLanguage: source, targetLanguage: target })) !== 'unavailable';
+    } catch {
+      this.builtinAvailable = false;
+    }
+    this.renderEngineSummary();
+  }
+
   private updateApiKeyVisibility() {
     const isDeepL = this.elements.translationProvider.value === 'deepl';
     const isSubscription = this.elements.translationProvider.value === 'subscription';
-    this.elements.googleApiKeyGroup.classList.toggle('hidden', isDeepL || isSubscription);
+    const isBuiltin = this.elements.translationProvider.value === 'builtin';
+    this.elements.googleApiKeyGroup.classList.toggle('hidden', isDeepL || isSubscription || isBuiltin);
     this.elements.deeplApiKeyGroup.classList.toggle('hidden', !isDeepL);
   }
 
@@ -705,7 +725,7 @@ class PopupController {
     this.elements.subtitleStyle.value = 'bottom';
     this.elements.fontSize.value = 'medium';
     this.elements.speechModel.value = 'turbo';
-    this.elements.translationProvider.value = 'google';
+    this.elements.translationProvider.value = 'builtin';
     this.elements.googleTranslateApiKey.value = '';
     this.elements.deeplApiKey.value = '';
     this.updateApiKeyVisibility();

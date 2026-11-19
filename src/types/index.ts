@@ -210,7 +210,7 @@ export interface ExtensionSettings {
   fontSize: FontSize;
   enabled: boolean;
   /** Fast engine (API keys live in chrome.storage.local - see settings.ts SECRET_KEYS). */
-  translationProvider: 'google' | 'deepl' | 'subscription';
+  translationProvider: 'builtin' | 'google' | 'deepl' | 'subscription';
   /** Language of burned-in subtitles read by subtitle mode (OCR model choice). */
   subtitleLanguage: import('../subtitle/types').SubtitleLanguage;
   /** Fast engine first then Claude ('fast-then-best'), fast engine only, or Claude only. */

@@ -22,11 +22,16 @@ Built and verified by the automated suite (588 unit tests, 67 browser tests):
 
 ## 1. Blockers for a public launch
 
-### Translation must work without API keys
+### Translation must work without API keys (done for Chrome, 2026-11-19)
 
-Today a new user gets recognition but no translation until they paste a
-Google, DeepL or Anthropic key, and almost nobody has one. Two ways out, best
-done in this order:
+**Done:** Chrome's built-in translator is the free default (design:
+`docs/superpowers/specs/2026-11-19-free-tier-design.md`). About 47% on the
+Korean benchmark, level with Google and DeepL line by line; the setup page
+downloads the language packs. Opera GX, Edge and Brave have no packs: their
+users need a key or the subscription (decided: Chrome-only for now). Your
+remaining steps: [launch-guide.md](launch-guide.md).
+
+The options as they were weighed:
 
 1. **Chrome's built-in translator as the default fast tier.** Chrome's
    on-device Translator API (stable on desktop since Chrome 138) translates

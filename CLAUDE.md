@@ -48,6 +48,14 @@ Look at screenshots the E2E tests write (`test.info().outputPath(...)`) when cha
   unless a test sets `keepWelcome: true`. `E2E_CLEAR_GPU_CACHE=1` wipes Chrome's
   shader caches (true first-time GPU setup, models stay cached): used by
   `perf-setup-gpu.spec.ts`.
+- Free tier = Chrome's built-in Translator API, hosted in the offscreen
+  document (`src/translation/builtinHost.ts`; not available in workers).
+  Downloading a language pack needs a user click, so only the setup page does
+  it. Playwright's Chromium has the API but tests don't rely on its packs:
+  `devBuiltinTranslator: 'stub'` (storage.local) makes the host return
+  `[built-in] <text>`, and `fakeTranslator()` (`e2e/helpers/builtin.ts`) fakes
+  the API on pages. Real packs: the opt-in `chrome` project. Opera GX / Edge /
+  Brave report every pair "unavailable".
 - Global setup deletes our temp folders (`ast-e2e-*`, Playwright traces, server
   test DBs) older than 2 h: killed runs leaked 8 GB onto C: before. Tests that
   create temp folders must delete them.
