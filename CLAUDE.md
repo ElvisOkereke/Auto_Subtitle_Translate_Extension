@@ -72,6 +72,14 @@ the real server in the Playwright worker with mock upstreams, dev outbox and a
 fake Stripe, and points the extension at it via `devEndpointOverrides.server`.
 Deploy steps: `server/README.md`.
 
+## Costs
+
+`npx tsx e2e/bench/cost-run.ts --variant product` measures Claude token usage
+(paid plan: Opus, Best only) through the real translation service; results in
+`docs/cost-analysis.md`, prices in `docs/cost-calculator.html`. Keep only the
+video-stable prompt part cached (a breakpoint on per-request text costs a cache
+write per request); batching read-ahead lines is the biggest saving.
+
 ## Performance
 
 `npm run perf:stt` benchmarks Whisper model/device/precision choices

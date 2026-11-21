@@ -74,13 +74,9 @@ export function buildTranslateMessages(req: TranslateBatchRequest): { system: Te
     `- ${DATA_RULE}`,
     'Reply with only one JSON object: {"translations":[{"id":"…","text":"…"}],"glossary":[{"source":"…","target":"…","note":"…"}]}. "glossary" lists only new or corrected entries (it may be empty).',
   ].join('\n');
-  const context = [
-    videoBlock(req.video),
-    req.topic ? `Topic: ${escapeTags(req.topic)}` : '',
-    glossaryBlock(req.glossary),
-  ]
-    .filter(Boolean)
-    .join('\n\n');
+  // Cache order, most stable first: instructions + video context + topic (the same for the whole
+  // video), then the glossary (grows now and then). The lines are new in every request: not cached.
+  const stable = [instructions, videoBlock(req.video), req.topic ? `Topic: ${escapeTags(req.topic)}` : ''].filter(Boolean).join('\n\n');
   const lines = req.lines
     .map(l =>
       [
@@ -95,11 +91,8 @@ export function buildTranslateMessages(req: TranslateBatchRequest): { system: Te
     )
     .join('\n');
   return {
-    system: [
-      { type: 'text', text: instructions },
-      { type: 'text', text: context, cache_control: CACHE },
-    ],
-    messages: [{ role: 'user', content: [{ type: 'text', text: `<lines>\n${lines}\n</lines>`, cache_control: CACHE }] }],
+    system: [{ type: 'text', text: stable, cache_control: CACHE }],
+    messages: [{ role: 'user', content: [{ type: 'text', text: `${glossaryBlock(req.glossary)}\n\n<lines>\n${lines}\n</lines>` }] }],
   };
 }
 
@@ -162,7 +155,8 @@ export function buildTopicMessages(
   const lines = firstLines.length ? `<lines>\n${firstLines.map(escapeTags).join('\n')}\n</lines>` : '<lines>\n(none yet)\n</lines>';
   return {
     system: [{ type: 'text', text: instructions, cache_control: CACHE }],
-    messages: [{ role: 'user', content: [{ type: 'text', text: `${videoBlock(video)}\n\n${lines}`, cache_control: CACHE }] }],
+    // One summary per video: caching the per-video part would only pay for a write nobody reads.
+    messages: [{ role: 'user', content: [{ type: 'text', text: `${videoBlock(video)}\n\n${lines}` }] }],
   };
 }
 

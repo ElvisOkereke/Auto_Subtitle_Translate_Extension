@@ -1,5 +1,12 @@
 # Pricing analysis — hosted translation subscription
 
+> **Update 2026-11-21:** re-measured in [cost-analysis.md](cost-analysis.md)
+> (token counts, your own prices in `docs/cost-calculator.html`). Fixing prompt
+> caching and batching read-ahead lines cut Claude Opus from ~$3.79 to
+> **~$2.21 per busy hour** (list-style prices): the Pro budget below now covers
+> ~7.7 busy / ~11 typical hours of Opus instead of 4.5 / 6.5. The paid plan
+> will be Best only (Claude for every line, no DeepL tier).
+
 What it costs us to translate an hour of video through the hosted proxy, and
 what the subscription must cost to cover that. The prices and budgets below are
 enforced by `server/src/plans.ts`. Inputs are measured

@@ -4,6 +4,16 @@ Wins worth sharing, newest first. Each has the headline, the proof (a number
 or what was shown working), and where the evidence lives. Numbers come from
 automated runs in a real browser (details: [performance.md](performance.md)).
 
+## 2026-11-21 — Claude translation 42% cheaper per line, measured
+
+- Measured the paid plan (Claude Opus 5.5, every line) on 411 real subtitle
+  lines in 5 languages through the extension's own translation code.
+- Found prompt caching writing more than it read, and batching that put ~1 line
+  in each request. Fixed both: **$3.79 → $2.21 per busy hour of video** at
+  list-style prices (−42%), same translations (411/411 every run).
+- A cost calculator takes the measured token counts and any price list, and
+  models 10 to 10,000 subscribers (`docs/cost-calculator.html`).
+
 ## 2026-11-19 — Free translation out of the box (Chrome)
 
 - New users no longer need any key: Chrome's built-in translator, running on

@@ -43,17 +43,19 @@ test('Claude requests carry the page title and the learned glossary', async ({ c
   const page = await context.newPage();
   await openFixture(page, fixtureURL);
   await startViaPopup(page, openPopup);
-  await playUntil(page, 11);
+  await playUntil(page, 25); // read-ahead lines are batched for up to 8 s: give a later batch time to go out
   const claude = translationCalls.filter(c => c.provider === 'anthropic');
   expect(claude[0].kind).toBe('topic');
   const translate = claude.filter(c => c.kind === 'translate');
   expect(translate.length).toBeGreaterThanOrEqual(3);
   expect(translate[0].system).toContain('롤 솔랭 하이라이트'); // page title
   expect(translate[0].system).toContain('League of Legends Korean solo queue'); // page description
-  // After the line with 뽀삐 (2.9 s), later requests carry the learned entry.
+  // After the line with 뽀삐 (2.9 s), later requests carry the learned entry (next to the lines: the glossary
+  // changes often, so it stays out of the cached system prompt).
   const poppyAt = translate.findIndex(c => c.text.includes('뽀삐'));
   expect(poppyAt).toBeGreaterThanOrEqual(0);
-  expect(translate.slice(poppyAt + 1).some(c => c.system!.includes('뽀삐 → Poppy'))).toBe(true);
+  expect(translate.slice(poppyAt + 1).some(c => `${c.system}
+${c.text}`.includes('뽀삐 → Poppy'))).toBe(true);
 });
 
 test('Claude failing (429) keeps DeepL translations on screen', async ({ context, fixtureURL, openPopup, server }) => {
@@ -88,7 +90,7 @@ test('the glossary editor lists learned terms, and a correction re-translates th
   await row.locator('input').fill('Poppy (champion)');
   await row.locator('input').blur();
   await expect
-    .poll(() => translationCalls.slice(before).filter(c => c.provider === 'anthropic' && c.kind === 'translate' && c.system!.includes('뽀삐 → Poppy (champion)')).length)
+    .poll(() => translationCalls.slice(before).filter(c => c.provider === 'anthropic' && c.kind === 'translate' && `${c.system} ${c.text}`.includes('뽀삐 → Poppy (champion)')).length)
     .toBeGreaterThan(0);
   await expect(editor.locator('.glossary-row[data-source="뽀삐"] input')).toHaveValue('Poppy (champion)');
 });

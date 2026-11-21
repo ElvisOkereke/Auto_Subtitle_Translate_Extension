@@ -243,6 +243,29 @@ describe('SubtitleMode', () => {
     expect(h.overlayText() ?? '').not.toContain(text(9));
   });
 
+  it('before the subtitle size is known, a notice that keeps coming back becomes a line once, not every time', async () => {
+    const h = (current = await harness({ readAhead: false }));
+    h.liveSize = { textHeight: 0.034, offSize: false };
+    await liveLine(h, SIG(100), 5, text(9)); // a game notice, before any subtitle
+    await liveLine(h, SIG(0), 6.5, ''); // gone
+    await liveLine(h, SIG(110), 8, text(9)); // back again
+    await liveLine(h, SIG(0), 9, '');
+    await liveLine(h, SIG(120), 10, text(9)); // and again
+    expect(h.mode.timeline.matching(l => l.source === text(9))).toHaveLength(1);
+    // A real subtitle still becomes a line.
+    await liveLine(h, SIG(200), 12, text(1));
+    expect(h.mode.timeline.at(12.5)?.source).toBe(text(1));
+  });
+
+  it('before the subtitle size is known, a cut-off read of the line on screen is that same line', async () => {
+    const h = (current = await harness({ readAhead: false }));
+    h.liveSize = { textHeight: 0.034, offSize: false };
+    await liveLine(h, SIG(100), 5, text(9));
+    await liveLine(h, SIG(140), 5.6, text(9).slice(2)); // 4 of 6 characters: not "the same line" by the usual rule
+    expect(h.mode.timeline.matching(() => true)).toHaveLength(1);
+    expect(h.mode.timeline.at(5.8)?.source).toBe(text(9));
+  });
+
   it('one blank read during a re-check does not end a line that is still there', async () => {
     const h = (current = await harness());
     // The box image never changes. Re-checks read at 100.875, 101.625, ...: the first OCRs blank, the next read the line again.

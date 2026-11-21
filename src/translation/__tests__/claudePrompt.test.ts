@@ -28,18 +28,29 @@ const allText = (blocks: { type: string; text?: string }[] | string): string =>
   typeof blocks === 'string' ? blocks : blocks.map(b => b.text ?? '').join('\n');
 
 describe('buildTranslateMessages', () => {
-  it('system prompt carries video context, topic and glossary, with a cache breakpoint on the last system block', () => {
+  it('the prompt carries video context, topic and glossary', () => {
     const { system, messages } = buildTranslateMessages(req());
-    const text = allText(system as any);
+    const text = allText(system as any) + '\n' + allText(messages[0].content as any);
     expect(text).toContain('뽀삐 장인의 솔랭');
     expect(text).toContain('League of Legends solo queue highlights');
     expect(text).toContain('League of Legends solo queue stream');
     expect(text).toContain('뽀삐 → Poppy');
-    expect((system[system.length - 1] as any).cache_control).toEqual({ type: 'ephemeral' });
-    const lastUser = messages[messages.length - 1];
-    expect(lastUser.role).toBe('user');
-    const blocks = lastUser.content as any[];
-    expect(blocks[blocks.length - 1].cache_control).toEqual({ type: 'ephemeral' });
+  });
+
+  it('caching: only what stays the same for the whole video is cached; the glossary and lines are not', () => {
+    // Measured (e2e/bench/cost-run.ts): a breakpoint on the lines (new in every request) wrote a cache
+    // entry nobody read, and the glossary (Claude extends it most requests) re-wrote whatever it was in.
+    const a = buildTranslateMessages(req());
+    const b = buildTranslateMessages({ ...req([{ id: 'L9', text: '다른 줄', previous: [], next: [] }]), glossary: [{ source: '뽀삐', target: 'Poppy', note: 'champion' }, { source: '렙차', target: 'level gap' }] });
+    const system = a.system as any[];
+    expect(system).toHaveLength(1);
+    expect(system[0].cache_control).toEqual({ type: 'ephemeral' });
+    expect(system[0].text).toContain('League of Legends solo queue stream');
+    expect(system[0].text).not.toContain('뽀삐 → Poppy');
+    expect((b.system as any[])[0].text).toBe(system[0].text); // identical across requests, glossary changes or not
+    const blocks = a.messages[a.messages.length - 1].content as any[];
+    expect(allText(blocks)).toContain('뽀삐 → Poppy');
+    expect(blocks.every(bl => bl.cache_control === undefined)).toBe(true);
   });
 
   it('each line is sent with its id and neighbouring lines', () => {

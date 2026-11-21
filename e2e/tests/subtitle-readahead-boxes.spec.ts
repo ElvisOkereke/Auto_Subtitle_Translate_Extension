@@ -30,7 +30,7 @@ const ONLY = process.env.BOXES?.split(',');
 
 interface Line { stretch: string; start: number; end: number; ko: string }
 const lines: Line[] = (JSON.parse(fs.readFileSync(path.join(FIXTURES, 'subtitles/_zIrbXw-SVs.timeline.json'), 'utf8')).lines as Line[]).filter(l => l.stretch === 's2');
-interface TLine { start: number; end: number | null; source: string; translatedAt: number | null }
+interface TLine { start: number; end: number | null; source: string; translatedAt: number | null; origin?: string | null; height?: number | null }
 
 async function drawBox(page: Page, box: { x: number; y: number; w: number; h: number }) {
   const r = await page.evaluate(b => {
@@ -76,6 +76,8 @@ for (const [name, box] of Object.entries(BOXES)) {
       if (!match) missed.push(`${line.start.toFixed(1)} ${line.ko}`);
     }
     const wrong = falseLines(timeline, lines, from + 3, from + WINDOW_S);
+    const detail = (txt: string) => timeline.find(tl => txt.endsWith(tl.source));
+    if (wrong.length) console.log('false lines:', JSON.stringify(wrong.map(w => ({ w, origin: detail(w)?.origin, height: detail(w)?.height }))), 'subtitle heights:', JSON.stringify(timeline.filter(tl => !wrong.some(w => w.endsWith(tl.source))).slice(0, 5).map(tl => tl.height)));
     const report = { box: name, rect: box, browser: browserKind(), lines: window.length, read, readyBefore, readRatio: read / window.length, readyRatio: readyBefore / window.length, missed, falseLines: wrong };
     console.log(JSON.stringify(report));
     fs.mkdirSync(path.join(ROOT, 'e2e/.perf/boxes'), { recursive: true });

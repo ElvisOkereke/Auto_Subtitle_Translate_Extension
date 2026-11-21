@@ -10,7 +10,7 @@ import { SubtitleOverlay } from './overlay';
 import { Timeline, TimelineLine, TimelineStorage } from './timeline';
 import { isSameLine } from './textSimilarity';
 import { ocrRegion } from './videoGeometry';
-import { TextSizeModel, isOffSize } from './textSize';
+import { TextSizeModel, isOffSize, similarText } from './textSize';
 import type { NormalizedBox, OcrResult, SubtitleLanguage } from './types';
 
 export interface CropGeometry {
@@ -68,7 +68,7 @@ const RA_RECHECK_S = 0.75;
 const SAVE_EVERY_MS = 10_000;
 const MAX_READ_AHEAD_QUEUE = 32;
 const MAX_OPEN_LINE_S = 8; // a saved line with no end is closed after this long
-const IMMINENT_S = 10; // read-ahead lines due sooner than this are translated like live ones (no batching)
+const IMMINENT_S = 14; // read-ahead lines due sooner than this are translated like live ones (batching waits up to 8 s, Claude ~3 s)
 const NO_VIDEO: VideoContext = { videoId: null, url: '', title: '', channel: '', description: '' };
 
 /** Shown in the box when nothing readable was found there for a while (often: no burned-in subtitles). */
@@ -402,7 +402,7 @@ export class SubtitleMode {
       this.lastReadAt = performance.now();
       const result = await this.deps.ocr.recognize(crop, this.lang, 'fast', this.geometry());
       if (epoch === this.epoch && this.state === 'running') {
-        const found = this.subtitleText(result);
+        const found = this.subtitleText(result, t, this.current);
         if (found.trim()) this.textReads++;
         this.firstReadAt ??= t;
         this.handleText(t, found);
@@ -425,10 +425,15 @@ export class SubtitleMode {
   }
 
   /** The subtitle an OCR read found ('' = none): confident, and of this video's subtitle size. */
-  private subtitleText(result: OcrResult): string {
+  private subtitleText(result: OcrResult, t: number, onScreen: TimelineLine | null): string {
     this.lastTextHeight = undefined;
     if (result.confidence < MIN_CONFIDENCE || !result.text.trim()) return '';
     if (!result.textHeight) return result.text;
+    if (this.textSize.expected() === null) {
+      // A cut-off or partly faded read of what's on screen is that same line (not a new one).
+      if (onScreen && similarText(onScreen.source, result.text)) return onScreen.source;
+      if (this.isRepeatedNotice(result.text, t, onScreen)) return '';
+    }
     if (!this.textSize.accept(result.text, result.textHeight)) return '';
     this.lastTextHeight = result.textHeight;
     const expected = this.textSize.expected();
@@ -437,6 +442,16 @@ export class SubtitleMode {
       this.dropOffSizeLines(expected);
     }
     return result.text;
+  }
+
+  /**
+   * Before the subtitle size is known (no subtitle seen yet), game and stream notices are what gets read:
+   * a new line repeating one that already came and went in the last minute is a notice coming back, not a
+   * subtitle (re-reads of the line on screen are not new lines).
+   */
+  private isRepeatedNotice(text: string, t: number, onScreen: TimelineLine | null): boolean {
+    if (onScreen && similarText(onScreen.source, text)) return false;
+    return this.timeline.matching(l => l.end !== null && l.end <= t && t - l.start < 60 && similarText(l.source, text)).length > 0;
   }
 
   /** Lines read ahead before the subtitle size was known that turn out to be another size (game notices): never shown. */
@@ -544,7 +559,7 @@ export class SubtitleMode {
         this.raOcrCalls++;
         const result = await this.deps.ocr.recognize(crop, this.lang, 'accurate', this.geometry());
         if (epoch === this.epoch && this.state === 'running') {
-          this.handleReadAheadText(t, this.subtitleText(result), !!recheck);
+          this.handleReadAheadText(t, this.subtitleText(result, t, this.raCurrent), !!recheck);
         }
       } catch (error) {
         console.warn('Read-ahead OCR failed:', error);

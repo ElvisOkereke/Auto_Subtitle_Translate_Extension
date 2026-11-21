@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="light dark">
+<title>Paid Plan Cost Calculator</title>
+<style>
+  :root { --bg:#f3f4f7; --surface:#fff; --ink:#171a21; --muted:#5e6573; --line:#dfe3ea; --accent:#171a21; --hi:#ffd23f; --good:#17744a; --bad:#c23a3a; color-scheme: light; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#181b22; --surface:#20242d; --ink:#eceef2; --muted:#a3aab8; --line:#2e3440; --accent:#ffd23f; --good:#4cc38a; --bad:#f07171; color-scheme: dark; } }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.5 system-ui, -apple-system, 'Segoe UI', sans-serif; }
+  main { max-width: 1040px; margin: 0 auto; padding: 28px max(16px, env(safe-area-inset-right)) 64px max(16px, env(safe-area-inset-left)); }
+  h1 { margin: 0 0 4px; font-size: 26px; } h2 { font-size: 18px; margin: 0 0 12px; }
+  .lede { color: var(--muted); margin: 0 0 24px; max-width: 70ch; }
+  .card { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; margin-bottom: 16px; min-width: 0; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px 20px; }
+  label { display: grid; gap: 4px; font-size: 13px; color: var(--muted); }
+  input, select { font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 7px 9px; width: 100%; }
+  .scroll { overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+  th, td { text-align: right; padding: 7px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  th:first-child, td:first-child { text-align: left; }
+  th { font-size: 12px; color: var(--muted); font-weight: 600; }
+  .pos { color: var(--good); font-weight: 600; } .neg { color: var(--bad); font-weight: 600; }
+  .note { font-size: 13px; color: var(--muted); margin: 10px 0 0; }
+  .big { font-size: 22px; font-weight: 700; }
+  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; }
+  .kpi { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+  .kpi span { display: block; font-size: 12px; color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Paid plan cost calculator</h1>
+  <p class="lede">Claude Opus 5.5, "Best only". Token counts measured through the extension's real translation code (<code>e2e/bench/cost-run.ts</code>); prices are yours. Nothing on this page leaves your computer.</p>
+
+  <section class="card">
+    <h2>1. Your prices (USD per million tokens)</h2>
+    <div class="grid">
+      <label>Input<input id="pIn" type="number" step="0.01" value="5"></label>
+      <label>Cache write<input id="pCw" type="number" step="0.01" value="6.25"></label>
+      <label>Cache read<input id="pCr" type="number" step="0.01" value="0.5"></label>
+      <label>Output<input id="pOut" type="number" step="0.01" value="25"></label>
+    </div>
+    <p class="note">Pre-filled with list-style prices (the ones docs/pricing.md was based on): replace them with the rates on your dashboard.</p>
+  </section>
+
+  <section class="card">
+    <h2>2. System design and usage</h2>
+    <div class="grid">
+      <label>Configuration<select id="variant"></select></label>
+      <label>Subtitle lines per hour of video<input id="lph" type="number" value="580"></label>
+      <label>Average video length (minutes)<input id="vidMin" type="number" value="20"></label>
+      <label>Watch hours per subscriber per month<input id="hours" type="number" step="0.5" value="10"></label>
+      <label>Share of viewing already translated for someone else (server cache)<input id="shared" type="number" step="5" value="0"> </label>
+    </div>
+    <p class="note">580 lines/hour = a talkative stream (measured); calmer videos ~400. The shared share applies once a server-side translation cache exists (not built yet): lines another subscriber already watched cost nothing.</p>
+  </section>
+
+  <section class="card">
+    <h2>3. Business</h2>
+    <div class="grid">
+      <label>Plan price per month (USD)<input id="price" type="number" step="0.01" value="24.99"></label>
+      <label>Payment fees (% + fixed per charge)<input id="fee" type="text" value="2.9 + 0.30"></label>
+      <label>Fixed infrastructure per month at 10 / 100 / 1k / 10k users<input id="infra" type="text" value="20 / 20 / 40 / 150"></label>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Per hour and per subscriber</h2>
+    <div class="kpis" id="kpis"></div>
+  </section>
+
+  <section class="card">
+    <h2>At scale</h2>
+    <div class="scroll"><table id="scale"></table></div>
+    <p class="note" id="scaleNote"></p>
+  </section>
+
+  <section class="card">
+    <h2>Measured tokens (per line, and per topic summary)</h2>
+    <div class="scroll"><table id="measured"></table></div>
+    <p class="note" id="measuredNote"></p>
+  </section>
+</main>
+<script>
+// Filled from e2e/.perf/cost/*.json (see docs/cost-analysis.md).
+const DATA = /*DATA*/{"variants":{"today":{"label":"Before (150 ms batching, original caching)","linesPerRequest":1.1385041551246537,"perLine":{"inputTokens":3.51338199513382,"cacheWriteTokens":741.316301703163,"cacheReadTokens":473.5523114355231,"outputTokens":61.583941605839414},"perTopic":{"inputTokens":76,"cacheWriteTokens":648.6363636363636,"cacheReadTokens":83.54545454545455,"outputTokens":585.1818181818181},"requests":372,"lines":411},"product":{"label":"Now (8 s batching, fixed caching): recommended","linesPerRequest":2.56875,"perLine":{"inputTokens":232.1435523114355,"cacheWriteTokens":205.76642335766422,"cacheReadTokens":150.46715328467153,"outputTokens":47.21654501216545},"perTopic":{"inputTokens":808.1818181818181,"cacheWriteTokens":0,"cacheReadTokens":0,"outputTokens":608.8181818181819},"requests":171,"lines":411},"window10s":{"label":"Experiment: 10 s batching, glossary next to lines","linesPerRequest":3.1374045801526718,"perLine":{"inputTokens":193.5523114355231,"cacheWriteTokens":185.93430656934308,"cacheReadTokens":109.91484184914842,"outputTokens":43.038929440389296},"perTopic":{"inputTokens":808.1818181818181,"cacheWriteTokens":0,"cacheReadTokens":0,"outputTokens":540.1818181818181},"requests":142,"lines":411}},"recommended":"product","source":"Measured 2026-11-21 with Claude Opus 5.5 through the enterprise gateway, 411 lines from 11 videos in 5 languages (Korean League, Spanish football, Chinese, Russian, French) plus 3 audio videos. Runs: Before (150 ms batching, original caching): 2026-11-21T02:02:02.323Z to 2026-11-21T02:10:26.398Z; Now (8 s batching, fixed caching): recommended: 2026-11-21T02:59:09.482Z to 2026-11-21T03:04:50.731Z; Experiment: 10 s batching, glossary next to lines: 2026-11-21T02:50:18.247Z to 2026-11-21T02:56:01.189Z."}/*END*/;
+
+const $ = id => document.getElementById(id);
+const num = id => Number($(id).value) || 0;
+const money = v => (Math.abs(v) >= 100 ? '$' + Math.round(v).toLocaleString() : '$' + v.toFixed(2));
+const fmt = v => Math.round(v).toLocaleString();
+
+for (const [key, v] of Object.entries(DATA.variants)) {
+  const o = document.createElement('option'); o.value = key; o.textContent = v.label; $('variant').append(o);
+}
+$('variant').value = DATA.recommended;
+
+function costOf(tokens) {
+  return (tokens.inputTokens * num('pIn') + tokens.cacheWriteTokens * num('pCw') + tokens.cacheReadTokens * num('pCr') + tokens.outputTokens * num('pOut')) / 1e6;
+}
+
+function render() {
+  const v = DATA.variants[$('variant').value];
+  const lph = num('lph'), shared = Math.min(100, Math.max(0, num('shared'))) / 100;
+  const videosPerHour = 60 / Math.max(1, num('vidMin'));
+  const linePerHour = {}, topicPerHour = {};
+  for (const k of ['inputTokens', 'cacheWriteTokens', 'cacheReadTokens', 'outputTokens']) {
+    linePerHour[k] = v.perLine[k] * lph;
+    topicPerHour[k] = v.perTopic[k] * videosPerHour;
+  }
+  const perHourFull = costOf(linePerHour) + costOf(topicPerHour);
+  const perHour = perHourFull * (1 - shared);
+  const perUser = perHour * num('hours');
+  const [feePct, feeFixed] = $('fee').value.split('+').map(s => Number(s.trim()) || 0);
+  const price = num('price');
+  const fees = price * feePct / 100 + feeFixed;
+  const breakEvenHours = (price - fees) / Math.max(1e-9, perHour);
+  $('kpis').innerHTML = `
+    <div class="kpi"><span>Translation cost per hour of video</span><div class="big">${money(perHour)}</div></div>
+    <div class="kpi"><span>Per subscriber-month (${num('hours')} h)</span><div class="big">${money(perUser)}</div></div>
+    <div class="kpi"><span>Revenue after payment fees</span><div class="big">${money(price - fees)}</div></div>
+    <div class="kpi"><span>Watch hours a subscriber can cost before the plan loses money</span><div class="big">${breakEvenHours.toFixed(1)} h</div></div>`;
+  const infra = $('infra').value.split('/').map(s => Number(s.trim()) || 0);
+  const counts = [10, 100, 1000, 10000];
+  let rows = '<tr><th>Subscribers</th><th>Revenue</th><th>Payment fees</th><th>Translation</th><th>Infrastructure</th><th>Profit / month</th><th>Margin</th></tr>';
+  counts.forEach((n, i) => {
+    const revenue = n * price, f = n * fees, tr = n * perUser, inf = infra[i] ?? infra[infra.length - 1];
+    const profit = revenue - f - tr - inf;
+    rows += `<tr><td>${n.toLocaleString()}</td><td>${money(revenue)}</td><td>${money(f)}</td><td>${money(tr)}</td><td>${money(inf)}</td><td class="${profit >= 0 ? 'pos' : 'neg'}">${money(profit)}</td><td class="${profit >= 0 ? 'pos' : 'neg'}">${revenue ? Math.round((profit / revenue) * 100) : 0}%</td></tr>`;
+  });
+  $('scale').innerHTML = rows;
+  $('scaleNote').textContent = `Every subscriber is assumed to watch ${num('hours')} h/month; translation is per hour watched, so it scales with viewing, not with sign-ups. The plan's monthly budget cap stops a heavy watcher costing more than you set.`;
+  let m = '<tr><th>Configuration</th><th>Lines / request</th><th>Input / line</th><th>Cache write / line</th><th>Cache read / line</th><th>Output / line</th><th>Per hour (this setup)</th></tr>';
+  for (const [key, x] of Object.entries(DATA.variants)) {
+    const lh = {}, th = {};
+    for (const k of ['inputTokens', 'cacheWriteTokens', 'cacheReadTokens', 'outputTokens']) { lh[k] = x.perLine[k] * lph; th[k] = x.perTopic[k] * videosPerHour; }
+    m += `<tr><td>${x.label}</td><td>${x.linesPerRequest.toFixed(2)}</td><td>${x.perLine.inputTokens.toFixed(1)}</td><td>${fmt(x.perLine.cacheWriteTokens)}</td><td>${fmt(x.perLine.cacheReadTokens)}</td><td>${x.perLine.outputTokens.toFixed(1)}</td><td>${money((costOf(lh) + costOf(th)) * (1 - shared))}</td></tr>`;
+  }
+  $('measured').innerHTML = m;
+  $('measuredNote').textContent = `Topic summary (once per video watched): ${fmt(v.perTopic.inputTokens)} input, ${fmt(v.perTopic.cacheWriteTokens)} cache write, ${fmt(v.perTopic.cacheReadTokens)} cache read, ${fmt(v.perTopic.outputTokens)} output tokens. ${DATA.source}`;
+}
+document.querySelectorAll('input, select').forEach(el => el.addEventListener('input', render));
+render();
+</script>
+</body>
+</html>

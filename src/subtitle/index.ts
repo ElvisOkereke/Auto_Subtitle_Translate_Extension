@@ -225,6 +225,8 @@ installTestBridge({
             source: l.source,
             translation: l.translation,
             quality: l.quality,
+            origin: l.origin ?? null,
+            height: l.height ?? null,
             translatedAt: mode.translatedAt.get(l.start) ?? null,
             betterAt: mode.betterAt.get(l.start) ?? null,
           }))

@@ -160,7 +160,9 @@ export class TranslationService {
   private brokenConfig: string | null = null;
 
   constructor(private readonly deps: TranslationServiceDeps) {
-    const { maxLines, windowMs } = deps.batch ?? { maxLines: 8, windowMs: 150 };
+    // Read-ahead lines have ~28 s of slack: collecting them for up to 8 s puts ~3 lines in a request
+    // instead of ~1 (measured: about half the Claude cost per line, e2e/bench/cost-run.ts).
+    const { maxLines, windowMs } = deps.batch ?? { maxLines: 16, windowMs: 8000 };
     this.batcher = new ClaudeBatcher({ maxLines, windowMs, run: (key, lines, priority) => this.runClaudeBatch(key, lines, priority) });
   }
 

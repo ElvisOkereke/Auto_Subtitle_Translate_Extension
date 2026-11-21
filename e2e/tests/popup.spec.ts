@@ -162,10 +162,11 @@ test.describe('Subtitle line translation', () => {
     expect(claude.map(c => c.kind)).toEqual(['topic', 'translate']);
     expect(claude[0].xApiKey).toBe('sk-test');
     expect(claude[1].system).toContain('뽀삐 장인 솔랭'); // video context
-    expect(claude[1].system).toContain('렙차 → level gap'); // glossary from the topic step
+    expect(`${claude[1].system} ${claude[1].text}`).toContain('렙차 → level gap'); // glossary from the topic step (sent next to the lines)
 
     await send('렙차 난다');
-    expect(translationCalls.filter(c => c.provider === 'anthropic').at(-1)!.system).toContain('뽀삐 → Poppy'); // learned from the reply
+    const last = translationCalls.filter(c => c.provider === 'anthropic').at(-1)!;
+    expect(`${last.system} ${last.text}`).toContain('뽀삐 → Poppy'); // learned from the reply
 
     server.setAnthropicFailure(429);
     expect(await send('또 뽀삐')).toMatchObject({ success: true, translatedText: '[EN-US] 또 뽀삐', quality: 'fast', engine: 'deepl' });
